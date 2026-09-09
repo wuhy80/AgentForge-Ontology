@@ -1,0 +1,90 @@
+{
+  "workspace": {"id": "shipyard-a", "name": "ShipyardA", "displayName": "造船厂 A"},
+  "dataSources": [{
+    "id": "factory-demo",
+    "driver": "memory",
+    "description": "仅供本地演示；生产环境应使用外部数据源驱动",
+    "config": {"resources": {
+      "pumps": [
+        {"pump_id": "P001", "pump_name": "Main Cooling Pump", "temperature": 86.2, "motor_id": "M003", "status": "running"},
+        {"pump_id": "P002", "pump_name": "Backup Cooling Pump", "temperature": 55.1, "motor_id": "M004", "status": "stopped"}
+      ],
+      "motors": [
+        {"motor_id": "M003", "motor_name": "Main Motor"},
+        {"motor_id": "M004", "motor_name": "Backup Motor"}
+      ]
+    }}
+  }],
+  "vendors": [{
+    "id": "jiangnan",
+    "name": "Jiangnan",
+    "displayName": "江南造船",
+    "enums": [{
+      "name": "PumpStatus",
+      "displayName": "泵状态",
+      "values": [
+        {"value": "running", "name": "running", "displayName": "运行"},
+        {"value": "stopped", "name": "stopped", "displayName": "停止"},
+        {"value": "fault", "name": "fault", "displayName": "故障"}
+      ]
+    }],
+    "domains": [{
+      "id": "equipment",
+      "name": "Equipment",
+      "displayName": "设备",
+      "objects": [
+        {
+          "id": "motor",
+          "name": "Motor",
+          "displayName": "电机",
+          "description": "为旋转设备提供驱动力的工业电机",
+          "aliases": ["驱动电机", "Motor"],
+          "storageMode": "virtual",
+          "properties": [
+            {"name": "id", "type": "string", "primaryKey": true, "description": "电机业务编码"},
+            {"name": "name", "type": "string", "description": "电机名称"}
+          ],
+          "dataBinding": {
+            "source": "factory-demo", "resource": "motors", "primaryKey": ["id"],
+            "fields": {"id": {"field": "motor_id"}, "name": {"field": "motor_name"}}
+          }
+        },
+        {
+          "id": "pump",
+          "name": "Pump",
+          "displayName": "离心泵",
+          "description": "船舶冷却系统中的离心泵设备",
+          "aliases": ["主冷却水泵", "冷却泵", "Cooling Water Pump"],
+          "tags": ["rotating", "cooling", "critical"],
+          "storageMode": "virtual",
+          "properties": [
+            {"name": "id", "type": "string", "primaryKey": true, "description": "泵业务编码"},
+            {"name": "name", "type": "string", "description": "设备显示名称"},
+            {"name": "temperature", "displayName": "轴承温度", "type": "float", "unit": "°C", "min": -40, "max": 200, "description": "设备驱动端轴承实时温度，超过 80°C 需要关注", "examples": [62.5]},
+            {"name": "motorId", "type": "string", "description": "驱动电机业务编码", "readOnly": true},
+            {"name": "status", "type": "enum", "enum": "PumpStatus", "description": "当前运行状态"}
+          ],
+          "links": [{
+            "name": "drivenBy", "displayName": "由电机驱动", "description": "查询驱动当前泵的电机",
+            "target": {"vendor": "jiangnan", "domain": "equipment", "object": "Motor"},
+            "reverseName": "drives", "cardinality": "many-to-one",
+            "resolver": {"type": "field", "sourceField": "motorId", "targetField": "id"}
+          }],
+          "actions": [{
+            "name": "setSpeed", "displayName": "设置转速", "description": "设置泵目标转速，具有真实业务副作用",
+            "parameters": [{"name": "speed", "type": "float", "description": "目标转速（rpm）", "required": true}],
+            "provider": {"type": "mqtt", "config": {"topic": "/factory/pump/{id}/command"}},
+            "idempotent": true, "timeoutSeconds": 10
+          }],
+          "dataBinding": {
+            "source": "factory-demo", "resource": "pumps", "primaryKey": ["id"],
+            "fields": {
+              "id": {"field": "pump_id"}, "name": {"field": "pump_name"},
+              "temperature": {"field": "temperature"}, "motorId": {"field": "motor_id"}, "status": {"field": "status"}
+            }
+          }
+        }
+      ]
+    }]
+  }]
+}
