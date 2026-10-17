@@ -4,8 +4,8 @@
 
 当前仓库处于需求与架构规划阶段，尚未包含业务服务实现。
 
-- [文档入口](docs/README.md)：需求、设计与背景资料的阅读顺序及维护约定。
-- [项目需求总览](docs/需求文档/项目需求总览.md)：模块独立演进、Pod 横向扩展、性能与阶段验收。
-- [总体架构设计](docs/设计文档/总体架构设计.md)：单仓库、多服务、类型模块边界与部署方案草案。
-- [本体建模与查询需求](docs/需求文档/本体建模与查询需求.md)、[模型发布与迁移需求](docs/需求文档/模型发布与迁移需求.md)、[执行与触发需求](docs/需求文档/执行与触发需求.md)：基础引擎的业务语义与验收条件。
-- [《工业 Agent Ontology Go 框架功能规划》](docs/industrial-agent-ontology-plan.md)：工业应用场景与远期能力参考；与基础需求存在差异的建议需后续调整。
+- [文档入口](docs/README.md)：按模块组织，每份说明包含规则、方案、示例与验收。
+- [项目总览](docs/项目总览.md)与[总体架构](docs/总体架构.md)：目标、阶段、模块边界及服务划分。
+- 模块说明：[Schema](docs/模块/Schema.md)、[Enum](docs/模块/Enum.md)、[Function](docs/模块/Function.md)、[Action](docs/模块/Action.md)、[Link](docs/模块/Link.md)。
+- 公共机制：[存储引擎与数据库适配](docs/存储引擎.md)、[发布与迁移](docs/发布与迁移.md)、[执行与调度](docs/执行与调度.md)、[部署与运维](docs/部署与运维.md)、[性能与容量](docs/性能与容量.md)。
+- [工业 Agent 功能规划](docs/industrial-agent-ontology-plan.md)：工业应用场景与远期能力参考。
