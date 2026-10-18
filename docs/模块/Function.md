@@ -8,7 +8,7 @@ Function 提供可调用的查询、计算或外部能力。建议默认用于�
 
 Metadata 的 function 模块保存一份当前定义、输入输出及实现引用，不设置业务 version。Execution 管理调用与任务，Worker 执行代码。具有业务效果的操作可由 [Action](Action.md) 组织并引用 Function；平台采用 Go 不限制函数实现语言。
 
-组织归属及分类内跨类型名称唯一性见 [组织与隔离](../组织与隔离.md)。name 仅用于展示，定义和输入输出引用仅使用稳定 ID；运行身份、制品读取及数据访问固定在已验证的租户上下文内。
+组织归属及中文名称解析规则见 [组织与隔离](../组织与隔离.md)。用户按中文 name 维护和选择 Function、Schema 和 Enum，内部定义引用使用稳定 ID；输入输出按中文参数名编辑，再映射已声明的运行器参数键。运行身份、制品读取及数据访问固定在已验证的租户上下文内，下文内部清单不要求用户手填 ID。
 
 ## 2. 定义与运行清单
 
@@ -37,11 +37,11 @@ Schema 计算属性的轻量公式使用受限表达式，由 Data 查询/写入
   "name": "计算直流功率",
   "description": "按直流电压与电流计算功率",
   "input": {
-    "voltage": {"dataType": "decimal", "quantityKind": "voltage", "unit": {"system": "UCUM", "code": "V"}},
-    "current": {"dataType": "decimal", "quantityKind": "electricCurrent", "unit": {"system": "UCUM", "code": "A"}}
+    "voltage": {"name": "电压", "dataType": "decimal", "quantityKind": "voltage", "unit": {"system": "UCUM", "code": "V"}},
+    "current": {"name": "电流", "dataType": "decimal", "quantityKind": "electricCurrent", "unit": {"system": "UCUM", "code": "A"}}
   },
   "output": {
-    "power": {"dataType": "decimal", "quantityKind": "power", "unit": {"system": "UCUM", "code": "W"}}
+    "power": {"name": "功率", "dataType": "decimal", "quantityKind": "power", "unit": {"system": "UCUM", "code": "W"}}
   },
   "runtime": {"kind": "script", "language": "python", "version": "3.12", "entrypoint": "power:calculate"},
   "artifactRef": "artifact:sha256:8a6f7c91d3e2504b7f19c662a5d9e808c4b0f3676e2d8a5c990c3f1e67b2a4d0",
@@ -51,6 +51,8 @@ Schema 计算属性的轻量公式使用受限表达式，由 Data 查询/写入
 ```
 
 制品引用在生效时需解析到确定的代码内容及依赖，任务开始时记录实际摘要。更新代码后修改当前 artifactRef，新开始的任务使用新实现，已开始任务不更换制品；摘要用于定位字节内容，不成为 Function 定义版本或旧定义调用入口。示例中的 Python 运行时版本仍需保留，是执行环境信息，不是业务 version。副作用声明需要配合实际权限和隔离措施执行。
+
+用户按“电压”“电流”填写并读取“功率”，示例 voltage/current/power 只表达内部运行器适配键；输入、输出各自在自身范围校验中文参数名唯一，代码入口 power:calculate 保持实际制品约定，不要求改成中文函数名。
 
 ## 3. 多语言实现建议
 
@@ -66,7 +68,7 @@ Schema 计算属性的轻量公式使用受限表达式，由 Data 查询/写入
 
 ## 4. 调用流程与接口边界
 
-建议流程：按 ID 读取当前定义 → 验证调用权限和输入类型/单位 → 提交任务 → 实际开始时解析当前定义及依赖并重新校验 → 保存本次执行内容及制品摘要 → 运行、校验输出并保存结果。
+建议流程：按中文名称选择并绑定 ID → 按 ID 读取当前定义 → 验证调用权限和输入类型/单位 → 提交任务 → 实际开始时解析当前定义及依赖并重新校验 → 保存本次执行内容及制品摘要 → 运行、校验输出并保存结果。已绑定调用沿用原 ID 并检查当前状态，不按旧中文文本重新选取同名定义。
 
 Function 与 Action 都支持同步和异步调用，共用权限、任务及重试语义。同步等待预算不以 100 ms 为统一分界；客户端超时并不自动取消计算。限时等待、结果轮询、通知、取消与错误状态统一见 [执行与调度](../执行与调度.md)，本模块不再维护另一套任务状态机。
 

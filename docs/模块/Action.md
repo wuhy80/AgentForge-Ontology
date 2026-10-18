@@ -10,7 +10,7 @@ Action 表达对目标对象执行的业务操作，例如创建维护工单、�
 
 Metadata 的 action 模块维护定义及引用，Data 管理实例/关系，Execution 管理任务和尝试，Worker 执行代码。Action 不能绕过其他服务的接口直接修改其私有表。
 
-租户、分类、分组及分类内跨类型名称唯一性统一见 [组织与隔离](../组织与隔离.md)。name 只用于展示，目标 Schema 和实现 Function 仅使用稳定 ID 引用，且必须与 Action 属于同一租户。每个 Action 仅有一份当前生效定义，不设置业务 version。
+租户、分类、分组及中文名称解析规则统一见 [组织与隔离](../组织与隔离.md)。用户按中文 name 维护和选择 Action、目标 Schema 及实现 Function，解析后保存稳定 ID 引用，且必须属于同一租户；输入输出按中文参数名编辑并映射已声明的技术协议键，用户无需填写内部 ID。每个 Action 仅有一份当前生效定义，不设置业务 version。
 
 ## 2. 建议定义内容
 
@@ -36,8 +36,8 @@ Metadata 的 action 模块维护定义及引用，Data 管理实例/关系，Exe
   "name": "创建维护工单",
   "description": "为指定设备创建维护工单",
   "target": {"id": "a10a4ea8-a988-48a6-aec3-d70cc5f4e531"},
-  "input": {"reason": {"dataType": "string", "required": true}},
-  "output": {"workOrderId": {"dataType": "string"}},
+  "input": {"reason": {"name": "维护原因", "dataType": "string", "required": true}},
+  "output": {"workOrderId": {"name": "工单标识", "dataType": "string"}},
   "effects": [{"kind": "externalWrite", "system": "eam", "operation": "createWorkOrder"}],
   "permissions": ["maintenance-order:create"],
   "implementation": {"kind": "function", "id": "7e61a790-3a5a-4124-9931-15a46eb70b1f"},
@@ -48,9 +48,11 @@ Metadata 的 action 模块维护定义及引用，Data 管理实例/关系，Exe
 
 引用的 Function 必须实际声明并获准执行外部写入，不能将其伪装成无副作用计算。目标对象标识与幂等键属于一次调用的输入/上下文，具体载体由调用协议统一定义。
 
+上例为内部定义结构：reason/workOrderId 是技术适配键，用户填写“维护原因”、读取“工单标识”；中文参数名在对应输入或输出范围内唯一，持久定义和执行仍使用已绑定身份及明确的协议映射。
+
 ## 3. 执行流程
 
-建议流程：按 ID 读取当前定义及目标 → 校验身份、参数及业务前置条件 → 创建持久执行记录 → 执行开始时重新解析当前依赖并保存必要执行上下文 → 执行并验证效果或保存待核对状态 → 返回结果。
+建议流程：按中文名称选择并绑定 ID → 按 ID 读取当前定义及目标 → 校验身份、参数及业务前置条件 → 创建持久执行记录 → 执行开始时重新解析当前依赖并保存必要执行上下文 → 执行并验证效果或保存待核对状态 → 返回结果。已绑定调用沿用原 ID 并检查当前状态，不按旧中文文本重新选取同名定义。
 
 前置检查和实际写入之间可能有并发变化。需要强一致的条件应由实际数据所有者在事务或条件写入时再次验证，不能把入口检查当成跨服务原子保证。
 
