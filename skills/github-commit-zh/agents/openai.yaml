@@ -1,0 +1,6 @@
+interface:
+  display_name: "GitHub 中文提交"
+  short_description: "根据实际改动生成规范中文提交信息，并按指令提交和推送 GitHub"
+
+policy:
+  allow_implicit_invocation: true
