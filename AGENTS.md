@@ -21,7 +21,7 @@
 
 ## 已确认的设计约束
 
-- 五类定义按租户、分类、分组组织；租户之间完全隔离，分类内跨分组、跨类型的中文业务名称不重名。用户通过中文 Schema、属性、Link 等名称维护定义与编写 DataSet；内部解析、保存和执行使用稳定 ID，改名不改变已有绑定身份。
+- 五类定义按租户、分类、分组组织；租户之间完全隔离，分类内跨分组、跨类型的中文业务名称不重名。用户通过中文 Schema、属性、Link 等名称维护定义与编写 DataSet 或 OntologySQL；内部解析、保存和执行使用稳定 ID，改名不改变已有绑定身份。
 - Schema、Enum、Link、Action、Function 统一只维护一份当前生效定义，最多一份草稿，不引入业务 version 或可选择旧定义的接口。
 - Schema 覆盖 db_2_schema、schema_2_db、索引、预览、计算属性和分表；具体规则统一维护在模块文档中。
 
@@ -29,6 +29,6 @@
 
 - [项目文档](docs/README.md)：模块及公共主题入口与维护方式。
 - [项目总览](docs/项目总览.md)：目标、范围、阶段和验收索引。
-- [数据查询](docs/数据查询/README.md)与 [DataSet](docs/数据查询/DataSet.md)：独立查询目录及 DataSet 主要说明。
+- [数据查询](docs/数据查询/README.md)、[DataSet](docs/数据查询/DataSet.md)与 [OntologySQL](docs/数据查询/OntologySQL.md)：独立查询目录、公共查询语义及文本编译候选说明。
 - [Schema](docs/模块/Schema.md)、[Enum](docs/模块/Enum.md)、[Link](docs/模块/Link.md)、[Action](docs/模块/Action.md)、[Function](docs/模块/Function.md)：五类模块说明。
 - [组织与隔离](docs/组织与隔离.md)、[定义生效与迁移](docs/发布与迁移.md)、[存储引擎](docs/存储引擎.md)：公共设计约束。
