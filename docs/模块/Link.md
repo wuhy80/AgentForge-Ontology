@@ -4,7 +4,9 @@
 
 ## 1. 用途与边界
 
-Link 描述两类实体如何关联，Metadata 的 link 模块管理关系定义和版本；Data 管理实际关系事实、读写约束与路径查询。端点引用 [Schema](Schema.md) 的指定版本，不复制端点的字段规则。
+Link 描述两类实体如何关联，Metadata 的 link 模块管理一份当前关系定义；Data 管理实际关系事实、读写约束与路径查询。端点仅按稳定 ID 引用 [Schema](Schema.md) 的当前定义，不设置业务 version，也不复制端点的字段规则。
+
+组织归属和分类内跨类型名称唯一性见 [组织与隔离](../组织与隔离.md)。Link、两端 Schema 及关系实例必须属于同一租户；允许引用同租户其他分类的 Schema，不能跨租户连边或遍历。
 
 ## 2. 定义结构与业务规则
 
@@ -18,20 +20,24 @@ Link 描述两类实体如何关联，Metadata 的 link 模块管理关系定义
 
 | 内容 | 含义 |
 | --- | --- |
-| id、version、labels | 稳定关系定义和显示信息 |
-| source、target | 两端 Schema 引用及版本 |
-| forwardName、reverseName | 正向与反向访问名称 |
+| id、tenantId、categoryId、groupId | 稳定关系标识及组织归属 |
+| name、labels | 主展示名及多语言显示信息 |
+| source、target | 两端 Schema 的稳定 ID 引用 |
+| forwardName、reverseName | 正向与反向展示名称；程序查询使用 Link ID 与方向，不以名称解析关系 |
 | cardinality | 1:1、1:N 或 N:M，明确各端允许数量 |
 | duplicatePolicy、onDelete | 重复边和端点删除的处理，发布前须明确 |
 
 ```json
 {
-  "id": "work-order-uses-equipment",
-  "version": "1.0.0",
-  "source": {"schemaId": "work-order", "schemaVersion": "1.0.0"},
-  "target": {"schemaId": "equipment", "schemaVersion": "1.0.0"},
-  "forwardName": "usesEquipment",
-  "reverseName": "usedByWorkOrders",
+  "id": "d0a3bbd7-c351-4e78-bbb6-7ec48736c386",
+  "tenantId": "56a79c34-5f02-4836-a809-42a7e3110c21",
+  "categoryId": "49346208-cf9c-486b-9982-782ab3f3ea49",
+  "groupId": "764cc48e-995e-4edc-b148-6cb8f4eba310",
+  "name": "工单使用设备",
+  "source": {"id": "f5e1bc42-9e6b-4e43-8dc3-230b53da2a83"},
+  "target": {"id": "09228a4b-f3e8-4a3b-9581-a95d29bd5d2b"},
+  "forwardName": "使用设备",
+  "reverseName": "被工单使用",
   "cardinality": "N:M",
   "duplicatePolicy": "reject",
   "onDelete": "restrict"
@@ -42,11 +48,13 @@ Link 描述两类实体如何关联，Metadata 的 link 模块管理关系定义
 
 ## 3. 关系事实、接口与执行计划
 
-定义模块提供草稿维护、端点/引用校验、版本读取和兼容性分析；Data 提供关系写入、删除、邻接与路径查询。固定路径协议至少包含起点、每层 Link/方向/过滤、投影、分页及预算，具体 HTTP/DSL 格式待定。
+定义模块提供草稿维护、端点/引用校验、当前定义读取和变更影响分析；Data 提供关系写入、删除、邻接与路径查询。修改端点、收紧基数或删除 Link 前检查现有关系及当前引用方，必要时先迁移、排空相关操作再替换当前定义，不保留旧定义供业务选择。固定路径协议至少包含起点、每层 Link/方向/过滤、投影、分页及预算，具体 HTTP/DSL 格式待定。
 
 建议用一份关系定义和一个权威关系事实表示关联。反向查询从目标端访问同一事实，不默认复制一条需要独立维护的反向关系；可按读访问建立两端索引。关系存储遵循端点、基数、重复边及删除规则，具体约束方式依物理模型确定。
 
-Data 负责将固定版本的 Link 路径、方向和逐层过滤编译成受控执行计划，定义去重、分页和结果形式。优先过滤和投影，使用批量读取或数据库关联，避免逐实体调用形成 N+1 请求。执行计划有跳数、扫描量、分支、结果数和时间预算，超预算返回明确错误。
+Data 在一次查询开始时解析当前 Link、端点 Schema 和物理映射，将路径、方向和逐层过滤编译成受控执行计划，查询内使用一致内容，定义去重、分页和结果形式。优先过滤和投影，使用批量读取或数据库关联，避免逐实体调用形成 N+1 请求。执行计划有跳数、扫描量、分支、结果数和时间预算，超预算返回明确错误；分页期间相关定义变化应使旧游标失效并要求重新查询。
+
+路径使用 Link 稳定 ID，所有关系表及端点查询强制租户条件，不能只在起点过滤租户。反向读取、聚合、分页和缓存也遵循同一边界；展示名变更不影响已保存的路径。
 
 | 主要查询形态 | 优先评估方案 |
 | --- | --- |
