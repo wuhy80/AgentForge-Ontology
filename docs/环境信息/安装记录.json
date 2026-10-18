@@ -1,0 +1,119 @@
+{
+  "recordedAt": "2026-10-18T22:06:21+08:00",
+  "environment": "Windows local development",
+  "dockerContext": "desktop-linux",
+  "kubernetesContext": "docker-desktop",
+  "kubernetesVersion": "1.36.1",
+  "namespace": "agentforge-infra",
+  "node": "desktop-control-plane",
+  "storageClass": "agentforge-local-retain",
+  "dockerDataDisk": "D:\\DockerData\\legacy-data\\ext4.vhdx",
+  "kindNodeDockerVolume": "769e9ef2f3a2d040340ea9f5d120e9dfe84b02d0cdfc9a3f86b698ab8cb95b15",
+  "credentialFile": "D:\\AgentForgeData\\credentials\\infrastructure.json",
+  "portForwardTask": "AgentForge-DatabaseAccess",
+  "portForwardScript": "D:\\AgentForgeData\\access\\Start-LocalAccess.ps1",
+  "dockerStartsAtLogin": false,
+  "mysqlOfflineImageArchive": "D:\\AgentForgeData\\downloads\\mysql-26.7.0-verified.tar",
+  "services": [
+    {
+      "name": "mysql",
+      "version": "26.7.0",
+      "image": "mysql:26.7.0",
+      "endpoint": "127.0.0.1:13306",
+      "internalEndpoint": "mysql.agentforge-infra.svc.cluster.local:3306",
+      "mount": "/var/lib/mysql",
+      "repoDigests": [
+        "mysql@sha256:9bd5e8db9c913e82eefd16b556ca3e4e12ef25ff1b8507b73d04cf754b6b8f47"
+      ],
+      "runningImageID": "docker.io/library/mysql@sha256:9bd5e8db9c913e82eefd16b556ca3e4e12ef25ff1b8507b73d04cf754b6b8f47",
+      "pvc": "mysql-data",
+      "pv": "pvc-0d01e074-c8b8-4103-acda-b0792d62e8df",
+      "requestedCapacity": "20Gi",
+      "nodePath": "/var/local-path-provisioner/pvc-0d01e074-c8b8-4103-acda-b0792d62e8df_agentforge-infra_mysql-data",
+      "reclaimPolicy": "Retain",
+      "verification": {
+        "version": "26.7.0",
+        "charset": "utf8mb4",
+        "collation": "utf8mb4_0900_ai_ci",
+        "read_write": "pass",
+        "invalid_password_rejected": true,
+        "persistedAfterPodRecreation": true,
+        "oldPodUID": "139c6855-5a4e-4f1c-a71c-12f477f8ef14",
+        "newPodUID": "31c8de4a-b57f-4d79-946f-19694055500f",
+        "testDataRemoved": true,
+        "verifiedAt": "2026-10-18T14:05:29.828909+00:00"
+      },
+      "officialMultiPlatformIndexDigest": "sha256:893418c8a7a34c60d2d961cc30ef136095da141478562ed2101ae3f5faba9c3f"
+    },
+    {
+      "name": "redis",
+      "version": "8.10.2",
+      "image": "redis:8.10.2",
+      "endpoint": "127.0.0.1:16379",
+      "internalEndpoint": "redis.agentforge-infra.svc.cluster.local:6379",
+      "mount": "/data",
+      "repoDigests": [
+        "redis@sha256:2c2dff791878316e3b083188be0d578423b24813cdda5de0e80ea4f7b3e6bfd6"
+      ],
+      "runningImageID": "docker.io/library/redis@sha256:2c2dff791878316e3b083188be0d578423b24813cdda5de0e80ea4f7b3e6bfd6",
+      "pvc": "redis-data",
+      "pv": "pvc-34fcce74-ac89-4b2f-b674-188559396499",
+      "requestedCapacity": "2Gi",
+      "nodePath": "/var/local-path-provisioner/pvc-34fcce74-ac89-4b2f-b674-188559396499_agentforge-infra_redis-data",
+      "reclaimPolicy": "Retain",
+      "verification": {
+        "version": "8.10.2",
+        "read_write": "pass",
+        "unauthenticated_rejected": true,
+        "aof_enabled": "1",
+        "persistedAfterPodRecreation": true,
+        "oldPodUID": "dfc54ebd-3d7e-4789-ac29-d40911d58579",
+        "newPodUID": "611372f0-8158-46dd-b8d1-01616e036a22",
+        "testDataRemoved": true,
+        "verifiedAt": "2026-10-18T13:57:39.303581+00:00"
+      }
+    },
+    {
+      "name": "influxdb",
+      "version": "3.12.1 Core",
+      "image": "influxdb:3.12.1-core",
+      "endpoint": "http://127.0.0.1:18181",
+      "internalEndpoint": "http://influxdb.agentforge-infra.svc.cluster.local:8181",
+      "mount": "/var/lib/influxdb3",
+      "repoDigests": [
+        "influxdb@sha256:1c8200f75657c7586678b52570f8c78aedfa2cd42e59c238a733423aab6bd406",
+        "m.daocloud.io/docker.io/library/influxdb@sha256:1c8200f75657c7586678b52570f8c78aedfa2cd42e59c238a733423aab6bd406"
+      ],
+      "runningImageID": "docker.io/library/influxdb@sha256:1c8200f75657c7586678b52570f8c78aedfa2cd42e59c238a733423aab6bd406",
+      "pvc": "influxdb-data",
+      "pv": "pvc-03ba8e90-6480-45e2-956f-172eca82994d",
+      "requestedCapacity": "20Gi",
+      "nodePath": "/var/local-path-provisioner/pvc-03ba8e90-6480-45e2-956f-172eca82994d_agentforge-infra_influxdb-data",
+      "reclaimPolicy": "Retain",
+      "verification": {
+        "health": "pass",
+        "read_write": "pass",
+        "unauthenticated_rejected": true,
+        "probe_table_removed": true,
+        "persistedAfterPodRecreation": true,
+        "oldPodUID": "feed368e-9f0f-400d-850f-bd2dc3b71c6b",
+        "newPodUID": "a91b8a3e-963f-4bba-b140-2310a308be10",
+        "testDataRemoved": true,
+        "verifiedAt": "2026-10-18T13:57:39.303581+00:00"
+      }
+    }
+  ],
+  "verificationScope": "Authenticated read/write through Windows loopback endpoints; reject unauthenticated or invalid-password access; recreate each Pod with the same PVC; read previously written data and remove test artifacts; confirm automatic port-forward recovery. No Windows or Docker Desktop restart performed.",
+  "versionSources": [
+    "https://dev.mysql.com/downloads/mysql/",
+    "https://dev.mysql.com/doc/relnotes/mysql/26.7/en/news-26-7-1.html",
+    "https://github.com/redis/redis/releases/tag/8.10.2",
+    "https://github.com/influxdata/influxdb/releases/tag/v3.12.1"
+  ],
+  "notes": [
+    "MySQL 26.7.1 is an Oracle-only container security revision; this installation uses the latest Docker official GA server image mysql:26.7.0.",
+    "MySQL image was acquired from a mirror using ranged downloads; every compressed layer, config and amd64 manifest passed SHA256 checks against the official image manifest.",
+    "All three PVCs are local to one physical machine; Retain is not a backup.",
+    "WSL memory=16GB/processors=12/swap=4GB configuration awaits a full WSL restart. Existing Ubuntu processes were preserved."
+  ]
+}

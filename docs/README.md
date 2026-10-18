@@ -28,6 +28,7 @@ Schema、Enum、Link、Action、Function 统一只维护当前生效定义，引
 | [定义生效与迁移](发布与迁移.md) | 五类对象的单份当前定义、草稿、生效、平台/模型迁移、任务一致性与恢复 |
 | [执行与调度](执行与调度.md) | 同步/异步、任务记录、租约、通知、事件与周期触发 |
 | [部署与运维](部署与运维.md) | 容器部署、Pod 扩缩容、探针、资源预算与故障验证 |
+| [环境信息](环境信息/README.md) | 本机 Windows / WSL2 / Docker Desktop / Kubernetes 环境，以及数据库实际安装版本、访问与维护信息 |
 | [性能与容量](性能与容量.md) | 候选指标、数据集、测试环境、扩容曲线与验收方法 |
 | [术语表](术语表.md) | 工程术语及示例 |
 | [工业 Agent 功能规划](industrial-agent-ontology-plan.md) | 远期工业场景参考，其选型、指标和排期不构成当前承诺 |
@@ -62,6 +63,8 @@ docs/
   发布与迁移.md
   执行与调度.md
   部署与运维.md
+  环境信息/
+    README.md
   性能与容量.md
   术语表.md
   industrial-agent-ontology-plan.md
