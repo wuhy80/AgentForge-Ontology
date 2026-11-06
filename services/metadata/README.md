@@ -41,7 +41,7 @@ go run ./cmd/server
 | `POST/GET /metadata/categories` | 创建和分页读取分类 |
 | `POST/GET /metadata/groups` | 创建和分页读取分组；读取指定 categoryId |
 | `POST /metadata/definitions` | 创建定义及首份草稿，返回服务端生成的定义/字段 ID |
-| `GET /metadata/definitions` | 分页读取已生效定义，支持 categoryId、kind |
+| `GET /metadata/definitions` | 默认分页读取已生效定义；`view=draft` 发现未发布草稿，支持 categoryId、kind |
 | `GET /metadata/definitions/{id}` | 读取当前定义；只有草稿的对象返回404 |
 | `GET/PUT /metadata/definitions/{id}/draft` | 读取/保存草稿；PUT 必须带强 If-Match |
 | `POST /metadata/definitions/{id}/preview` | 预览草稿，缺少草稿时预览当前；不创建发布操作或占用发布状态 |
@@ -53,6 +53,8 @@ go run ./cmd/server
 `GET current` 和 `GET resolve` 是内部服务凭据唯一可访问的业务路径；必须同时提供 `X-Tenant-ID`。该凭据不能编辑、发布、读取草稿或替代普通用户授权。JSON `etag` 为裸摘要，HTTP `ETag` 和 `If-Match` 使用双引号包围摘要。
 
 组织及定义列表默认100条、最多200条，使用返回的 `nextCursor` 作为下一次 `after`。这与 Data 的查询游标分别处理。
+
+定义目录的 `view` 只接受 `current` 或 `draft`，未提供时保持读取当前态。草稿视图只返回实际有草稿的对象，包括从未生效的定义和生效后重新编辑的草稿；结果 `status` 为 `draft`，内容与 ETag 均来自该草稿。草稿目录同时检查全局及逐对象的 `definition.edit` 授权，当前目录保持 `definition.read` 授权；无权对象不会成为续页标记。目录仅用于当前身份可管理内容的发现，不将拥有当前定义读取权限等同于拥有草稿编辑权限。
 
 ## 测试与当前限制
 

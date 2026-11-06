@@ -30,6 +30,11 @@ go.work.sum
 !.env.example
 .cache/
 bin/
+node_modules/
+dist/
+playwright-report/
+test-results/
+*.tsbuildinfo
 
 # Editor/IDE
 # .idea/

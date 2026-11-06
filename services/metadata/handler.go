@@ -457,14 +457,23 @@ func (h *handler) listDefinitions(w http.ResponseWriter, r *http.Request, p cont
 	// Paging is derived from authorized objects; no hidden object identity is
 	// exposed as a continuation marker. Large sparse grants fail boundedly.
 	const scanBudget = 1000
-	if err := h.authorize(r.Context(), p, "definition.read", "", ""); err != nil {
+	view := r.URL.Query().Get("view")
+	if view != "" && view != "current" && view != "draft" {
+		return problem(400, "invalid_view", "view只能为current或draft")
+	}
+	op, columns, present := "definition.read", "current_json,current_digest,status", "current_json"
+	if view == "draft" {
+		op, columns, present = "definition.edit", "draft_json,draft_digest,'draft'", "draft_json"
+	}
+	if err := h.authorize(r.Context(), p, op, "", ""); err != nil {
 		return err
 	}
 	limit, err := pageLimit(r)
 	if err != nil {
 		return err
 	}
-	query := "SELECT current_json,current_digest,status FROM af_meta_definitions WHERE tenant_id=? AND current_json IS NOT NULL AND id>?"
+	// The column fragments above are fixed service constants, never user input.
+	query := "SELECT " + columns + " FROM af_meta_definitions WHERE tenant_id=? AND " + present + " IS NOT NULL AND id>?"
 	args := []any{p.TenantID, r.URL.Query().Get("after")}
 	for _, filter := range []string{"categoryId", "kind"} {
 		if value := r.URL.Query().Get(filter); value != "" {
@@ -501,7 +510,7 @@ func (h *handler) listDefinitions(w http.ResponseWriter, r *http.Request, p cont
 			rows.Close()
 			return err
 		}
-		if err := h.authorize(r.Context(), p, "definition.read", v.Definition.ID, v.Definition.Kind); err != nil {
+		if err := h.authorize(r.Context(), p, op, v.Definition.ID, v.Definition.Kind); err != nil {
 			var ae *apiError
 			if errors.As(err, &ae) && ae.status == 403 {
 				continue
