@@ -1,6 +1,6 @@
 # 数据查询
 
-本目录集中维护 Ontology 数据查询设计，当前仅维护文档，尚未进入编码阶段。
+本目录集中维护 Ontology 数据查询设计。首批已实现 MySQL 单 Schema 的中文 QuerySpec 查询、行列授权和签名游标，具体边界见 [DataSet](DataSet.md)；OntologySQL 和可视化编辑器仍处于设计阶段。
 
 | 文档 | 维护内容 |
 | --- | --- |

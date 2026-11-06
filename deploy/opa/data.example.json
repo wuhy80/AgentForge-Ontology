@@ -1,0 +1,19 @@
+{
+  "authorization_state": "development-bootstrap-1",
+  "grants": {
+    "demo-tenant": {
+      "developer": {
+        "organization.edit": {"*": {"allow": true}},
+        "organization.read": {"*": {"allow": true}},
+        "definition.edit": {"*": {"allow": true}},
+        "definition.read": {"*": {"allow": true}},
+        "definition.publish": {"*": {"allow": true}},
+        "instance.create": {"*": {"allow": true, "readFields": ["*"], "writeFields": ["*"]}},
+        "instance.read": {"*": {"allow": true, "readFields": ["*"]}},
+        "instance.patch": {"*": {"allow": true, "readFields": ["*"], "writeFields": ["*"]}},
+        "instance.delete": {"*": {"allow": true}},
+        "instance.query": {"*": {"allow": true, "readFields": ["*"]}}
+      }
+    }
+  }
+}
