@@ -4,6 +4,7 @@ import type {
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
   DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SchemaStorageMapping,
   SchemaLink, LinkInstance,
+  QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
 } from './types'
 
 export class ApiError extends Error {
@@ -243,6 +244,23 @@ export class ApiClient {
   }
   query(spec: QuerySpec, signal?: AbortSignal): Promise<QueryResult> {
     return this.request('/api/data/query', { method: 'POST', body: spec, signal })
+  }
+  queryContext(filters: { categoryId?: string; schemaId?: string; search?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<QueryContext> {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(filters)) if (value !== undefined && value !== '') params.set(key, String(value))
+    return this.request(`/api/data/query/context?${params}`, { signal })
+  }
+  analyzeOntologySQL(request: OntologySQLRequest, signal?: AbortSignal): Promise<OntologySQLAnalysis> {
+    return this.request('/api/data/query/ontology-sql/analyze', { method: 'POST', body: request, signal })
+  }
+  completeOntologySQL(request: OntologySQLRequest, signal?: AbortSignal): Promise<OntologySQLCompletions> {
+    return this.request('/api/data/query/ontology-sql/complete', { method: 'POST', body: request, signal })
+  }
+  formatOntologySQL(request: OntologySQLRequest, signal?: AbortSignal): Promise<OntologySQLFormat> {
+    return this.request('/api/data/query/ontology-sql/format', { method: 'POST', body: request, signal })
+  }
+  queryOntologySQL(request: OntologySQLRequest, signal?: AbortSignal): Promise<OntologySQLResult> {
+    return this.request('/api/data/query/ontology-sql', { method: 'POST', body: request, signal })
   }
   listLinkInstances(linkId: string, direction: 'out' | 'in', instanceId: string, cursor?: string, signal?: AbortSignal): Promise<Page<LinkInstance>> {
     const params = new URLSearchParams({ direction, instanceId, limit: '100' })

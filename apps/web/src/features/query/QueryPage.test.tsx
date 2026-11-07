@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApiClient, ApiError } from '../../lib/api';
 import type { DefinitionRecord, Instance, QueryResult } from '../../lib/types';
 import { InstanceDialog } from './InstanceDialog';
-import { QueryPage } from './QueryPage';
+import { VisualQueryPage as QueryPage } from './VisualQueryPage';
 
 const amount = { id: 'amount', name: '金额', dataType: 'decimal' as const, precision: 24, scale: 6, required: true };
 const schema: DefinitionRecord = {

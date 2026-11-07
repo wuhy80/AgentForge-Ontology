@@ -49,6 +49,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux := http.NewServeMux()
 	h.registerSources(mux)
 	h.registerLinks(mux)
+	h.registerOntologySQL(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -64,7 +65,7 @@ func NewHandler(cfg Config) http.Handler {
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"backend": "mysql", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "layouts": []string{"single"}, "operations": []string{"create", "read", "patch", "delete", "query"}, "sourceDrivers": []string{"mysql", "postgresql"}, "mappedOperations": []string{"read", "query"}, "mappedUpdates": "nullable-fields-and-indexes", "maxMappedTables": maxMappedTables, "crossSourceProjection": true, "crossSourceConditions": false, "crossSourceTransactions": false, "dataTypes": []string{"string", "text", "longtext", "uuid", "int64", "decimal", "boolean", "timestamp"}, "maxTextBytes": c.MaxTextBytes, "maxLongTextBytes": c.MaxLongTextBytes, "maxRequestBytes": c.MaxDataRequestBytes, "maxPageSize": 100, "maxSortFields": 1, "links": true, "linkStorageModes": []string{"managed", "junction", "foreign_key"}, "linkDirections": []string{"out", "in"}, "maxLinkHops": 1, "managedLinkOperations": []string{"create", "query", "delete"}, "mappedLinkOperations": []string{"query"}, "crossSourceLinks": false, "ontologySQL": false, "batch": false, "calculatedProperties": false})
+		writeJSON(w, 200, map[string]any{"backend": "mysql", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "layouts": []string{"single"}, "operations": []string{"create", "read", "patch", "delete", "query"}, "sourceDrivers": []string{"mysql", "postgresql"}, "mappedOperations": []string{"read", "query"}, "mappedUpdates": "nullable-fields-and-indexes", "maxMappedTables": maxMappedTables, "crossSourceProjection": true, "crossSourceConditions": false, "crossSourceTransactions": false, "dataTypes": []string{"string", "text", "longtext", "uuid", "int64", "decimal", "boolean", "timestamp"}, "maxTextBytes": c.MaxTextBytes, "maxLongTextBytes": c.MaxLongTextBytes, "maxRequestBytes": c.MaxDataRequestBytes, "maxPageSize": 100, "maxSortFields": 1, "links": true, "linkStorageModes": []string{"managed", "junction", "foreign_key"}, "linkDirections": []string{"out", "in"}, "maxLinkHops": 1, "managedLinkOperations": []string{"create", "query", "delete"}, "mappedLinkOperations": []string{"query"}, "crossSourceLinks": false, "ontologySQL": true, "ontologySQLFeatures": []string{"select", "where", "parameters", "orderBy", "limit", "analyze", "complete", "format"}, "maxOntologySQLBytes": 64 << 10, "maxOntologySQLParameters": 64, "maxOntologySQLCompletions": 50, "batch": false, "calculatedProperties": false})
 	})
 	mux.HandleFunc("POST /internal/publications/prepare", h.prepare)
 	mux.HandleFunc("POST /internal/publications/activate", h.activate)

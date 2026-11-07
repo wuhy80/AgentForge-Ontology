@@ -269,6 +269,7 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 		t.Fatal("NULL semantics incorrect")
 	}
 
+	verifyOntologySQL(t, h, dataSrv.URL, opaURL, tenant, admin, reader, category.ID, schemaID, codeID, nameID, priceID, countID, first, second, readerOps)
 	verifyManagedLinks(t, h, ctx, me, de, metaSrv.URL, dataSrv.URL, opaURL, tenant, admin, reader, other, category.ID, group.ID, schemaID, codeID, nameID, deptID, first, second, third, readerOps)
 
 	t.Log("rename preserves IDs; old cursors invalidate; revocation applies to next access")

@@ -501,46 +501,45 @@ func (h *handler) query(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	current, err := h.resolve(r.Context(), p, req.From)
+	result, err := h.executeQuery(r.Context(), p, req)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	dec, err := h.authorize(r.Context(), p, "instance.query", current.Definition.ID)
+	// Cursor continuations share this endpoint with OntologySQL; logical result
+	// descriptions must not reintroduce physical mappings on subsequent pages.
+	result.Fields = safeQueryProperties(result.Fields)
+	writeJSON(w, 200, result)
+}
+
+// All query frontends enter this path. A bound QuerySpec is a query description,
+// never an authorization token: current definitions and decisions are re-read.
+func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySpec) (c.QueryResult, error) {
+	current, err := h.resolve(ctx, p, req.From)
 	if err != nil {
-		writeError(w, err)
-		return
+		return c.QueryResult{}, err
+	}
+	dec, err := h.authorize(ctx, p, "instance.query", current.Definition.ID)
+	if err != nil {
+		return c.QueryResult{}, err
 	}
 	if req.Via != nil {
-		result, err := h.queryLink(r.Context(), p, current, dec, req)
-		if err != nil {
-			writeError(w, err)
-			return
-		}
-		writeJSON(w, 200, result)
-		return
+		return h.queryLink(ctx, p, current, dec, req)
 	}
 	if current.Definition.Schema != nil && current.Definition.Schema.StorageBinding != nil {
-		result, err := h.queryMapped(r.Context(), p, current, dec, req, "", "instance.query")
-		if err != nil {
-			writeError(w, err)
-			return
-		}
-		writeJSON(w, 200, result)
-		return
+		return h.queryMapped(ctx, p, current, dec, req, "", "instance.query")
 	}
 	compiled, err := compileQuery(current.Definition, current.ETag, p, dec, req, h.cfg.CursorSecret)
 	if err != nil {
-		writeError(w, err)
-		return
+		return c.QueryResult{}, err
 	}
 	result := c.QueryResult{Data: []c.Instance{}, Fields: compiled.Projection}
 	var lastValue json.RawMessage
-	err = h.cfg.Engine.WithTx(r.Context(), func(tx *sql.Tx) error {
-		if err := h.gate(r.Context(), tx, p, current); err != nil {
+	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
+		if err := h.gate(ctx, tx, p, current); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(r.Context(), compiled.SQL, compiled.Args...)
+		rows, err := tx.QueryContext(ctx, compiled.SQL, compiled.Args...)
 		if err != nil {
 			return err
 		}
@@ -582,18 +581,16 @@ func (h *handler) query(w http.ResponseWriter, r *http.Request) {
 		if err = rows.Close(); err != nil {
 			return err
 		}
-		return h.recheck(r.Context(), p, "instance.query", current.Definition.ID, dec)
+		return h.recheck(ctx, p, "instance.query", current.Definition.ID, dec)
 	})
 	if err != nil {
-		writeError(w, err)
-		return
+		return c.QueryResult{}, err
 	}
 	if result.HasMore && len(result.Data) > 0 {
 		result.NextCursor, err = signCursor(h.cfg.CursorSecret, pageCursor{Fingerprint: compiled.Fingerprint, TenantID: p.TenantID, Subject: p.Subject, SchemaID: current.Definition.ID, Digest: current.ETag, Authorization: digest(dec), LastID: result.Data[len(result.Data)-1].ID, LastValue: lastValue, Expires: time.Now().Add(time.Hour).Unix()})
 		if err != nil {
-			writeError(w, err)
-			return
+			return c.QueryResult{}, err
 		}
 	}
-	writeJSON(w, 200, result)
+	return result, nil
 }

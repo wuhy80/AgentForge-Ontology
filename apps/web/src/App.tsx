@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   ArrowRight,
   BookOpen,
@@ -23,12 +23,13 @@ import {
 import { ApiClient, ApiError } from './lib/api'
 import type { DataCapabilities, DefinitionRecord, MetadataCapabilities, Organization, Session as AccountSession } from './lib/types'
 import { ModelsPage } from './features/model/ModelsPage'
-import { QueryPage } from './features/query/QueryPage'
 import { DialogScope } from './components/Dialog'
 import { Dialog } from './components/Dialog'
 import { AdminPage } from './features/admin/AdminPage'
 import { OrganizationsPage } from './features/organizations/OrganizationsPage'
 import { SourcesPage } from './features/sources/SourcesPage'
+
+const QueryPage = lazy(() => import('./features/query/QueryPage').then((module) => ({ default: module.QueryPage })))
 
 type View = 'overview' | 'organizations' | 'sources' | 'models' | 'query' | 'admin'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
@@ -273,6 +274,8 @@ export function App() {
 function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnecting }: { session: Session; onDisconnect: () => Promise<void>; onAccountUpdated: (account: AccountSession) => void; notice: string; disconnecting: boolean }) {
   const [route, setRoute] = useState(() => window.location.hash.slice(1))
   const view = currentView(route)
+  const queryVisited = useRef(view === 'query')
+  if (view === 'query') queryVisited.current = true
   const routeRef = useRef(route)
   routeRef.current = route
   const navigationGuard = useRef<(() => boolean) | undefined>(undefined)
@@ -593,7 +596,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
               </section>
               <section hidden={view !== 'query'}>
                 <DialogScope active={view === 'query'}>
-                  <QueryPage
+                  {queryVisited.current && <Suspense fallback={<p className="muted">正在加载数据查询…</p>}><QueryPage
                     api={session.api}
                     schemas={schemas}
                     categories={categories}
@@ -601,7 +604,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                     initialSchemaId={initialSchemaId}
                     selectionRequest={selectionRequest}
                     onModel={() => navigate('models')}
-                  />
+                  /></Suspense>}
                 </DialogScope>
               </section>
               {view === 'admin' && (session.account.user.administrator

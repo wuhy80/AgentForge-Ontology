@@ -202,6 +202,11 @@ func (f *mappedIntegrationFixture) query(query c.QuerySpec, status int) c.QueryR
 	if status == 200 && json.Unmarshal(response.Body.Bytes(), &result) != nil {
 		f.t.Fatal("invalid mapped query result")
 	}
+	for _, property := range result.Fields {
+		if property.Mapping != nil || len(property.Default) != 0 {
+			f.t.Fatal("mapped query result exposed physical mapping or definition default")
+		}
+	}
 	return result
 }
 

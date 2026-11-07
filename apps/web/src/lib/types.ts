@@ -207,6 +207,24 @@ export interface QuerySpec {
 }
 export interface Instance { id: string; schemaId: string; values: Values; etag: string }
 export interface QueryResult { data: Instance[]; fields: Property[]; nextCursor?: string; hasMore: boolean }
+export interface SQLRange { from: number; to: number; line: number; column: number }
+export interface SQLDiagnostic { code: string; message: string; severity: 'error' | 'warning'; range: SQLRange }
+export interface SQLParameter {
+  name: string; dataType: DataType; nullable: boolean; precision?: number; scale?: number; ranges: SQLRange[]; provided: boolean
+}
+export interface OntologySQLRequest {
+  text: string; parameters?: Record<string, JsonValue>; defaultCategoryId?: string; requestId?: string; cursorOffset?: number
+}
+export interface OntologySQLAnalysis {
+  requestId: string; textHash: string; diagnostics: SQLDiagnostic[]; parameters: SQLParameter[]; fields: Property[]; query?: QuerySpec; ready: boolean
+}
+export interface SQLCompletion { label: string; insertText: string; detail: string; kind: string; range: SQLRange }
+export interface OntologySQLCompletions { requestId: string; textHash: string; items: SQLCompletion[] }
+export interface OntologySQLFormat { requestId: string; textHash: string; text: string; diagnostics: SQLDiagnostic[] }
+export interface OntologySQLResult extends QueryResult { query: QuerySpec; requestId: string; textHash: string }
+export interface QueryContextField extends Property { filterable: boolean; sortable: boolean }
+export interface QueryContextModel { schemaId: string; categoryId: string; category: string; name: string; fields: QueryContextField[] }
+export interface QueryContext { models: QueryContextModel[]; nextCursor?: string }
 export interface MetadataCapabilities {
   definitions: Kind[]
   lifecycle: string[]

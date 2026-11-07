@@ -36,6 +36,9 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `GET /data/schemas/{schemaId}/instances/{entityId}` | 按当前行列授权读取 |
 | `PATCH`、`DELETE /data/schemas/{schemaId}/instances/{entityId}` | 必须携带最近读取结果的 `If-Match` |
 | `POST /data/query` | 中文名称或稳定 ID 绑定、类型化筛选、投影、排序和签名游标 |
+| `GET /data/query/context` | 按当前目录及实例查询权限返回最小模型/字段能力，支持分类、模型、搜索及分页 |
+| `POST /data/query/ontology-sql/analyze`、`complete`、`format` | 单 Schema OntologySQL 检查、参数推断、UTF-16诊断、上下文补全及格式化；不扫描业务数据 |
+| `POST /data/query/ontology-sql` | 编译为稳定ID的QuerySpec并进入同一执行器，返回原查询结果及实际绑定的query供续页 |
 | `POST /internal/publications/preview` | 只读结构预览；正文为 `contracts.PrepareRequest` |
 | `POST /internal/publications/prepare` | 持久关闭受影响 Schema 入口、等待已入场事务排空、执行并核验物理计划 |
 | `POST /internal/publications/activate` | 核验 Metadata 权威当前摘要后恢复访问 |
@@ -62,7 +65,9 @@ Data 在同一事务内提交实例、创建幂等记录和 outbox，并在更�
 
 QuerySpec 目前每页为 1 至 100 条、最多一个业务排序字段并以实例 ID 决胜；表达式有深度、节点和集合预算。支持 AND/OR/NOT、等值及比较、显式空值、有限 IN/NOT IN、字面前缀；NULL 保留 SQL 三值逻辑。decimal 条件和游标参数显式转换为对应精度，防止 MySQL 将字符串比较转为 DOUBLE 后丢失大数精度。属性名称按 Metadata 相同的 NFC 和大小写折叠规则绑定，属性名称不能覆盖另一属性 ID。游标绑定主体、租户、定义摘要、完整查询和授权决策，并在一小时后过期。跨页期间业务数据变动按每次新执行可见状态处理，不提供跨请求历史快照。
 
-分表、计算属性、Enum 属性的跨定义协调、Link 多跳/跨源、批量事务、OntologySQL、聚合及任意联邦条件尚未开放。权限当前支持受控行条件、静态字段集合及可安全合并的角色规则，不能安全合并的组合明确拒绝；不代表完整 ABAC、逐行掩码或 Action/Function 运行授权已经实现。前端已在 [apps/web](../../apps/web/README.md) 接入 CRUD、单 Schema 查询及 Link 单跳导航。服务对无法表达的请求直接拒绝，`capabilities` 不将五类元数据可维护等同于这些运行能力已实现。outbox 和幂等记录目前不自动清理；保留期限、事件投递、全量恢复和生产容量仍待后续实现及验证。
+首批 [OntologySQL 实际协议](../../docs/数据查询/OntologySQL.md#首批实际协议2026-11-07) 支持单Schema只读SELECT、显式投影、类型化参数、布尔/比较/空值/集合/前缀条件、一个排序字段及LIMIT；通过有界lexer/parser和类型绑定进入上述共用执行路径。目录及补全使用调用者的当前定义发现权限，叠加instance.query和字段义务；响应不返回物理映射。文本/参数/游标限制、诊断与错误语义以该主要说明和contracts为准。能力响应的ontologySQL为true不表示任意SQL可用。
+
+分表、计算属性、Enum 属性的跨定义协调、Link 多跳/跨源、批量事务、JOIN/聚合及任意联邦条件尚未开放。权限当前支持受控行条件、静态字段集合及可安全合并的角色规则，不能安全合并的组合明确拒绝；不代表完整 ABAC、逐行掩码或 Action/Function 运行授权已经实现。前端已在 [apps/web](../../apps/web/README.md) 接入 CRUD、单 Schema 查询、OntologySQL及 Link 单跳导航。服务对无法表达的请求直接拒绝，`capabilities` 不将五类元数据可维护等同于这些运行能力已实现。outbox 和幂等记录目前不自动清理；保留期限、事件投递、全量恢复和生产容量仍待后续实现及验证。
 
 ## Link 运行接口
 
@@ -83,6 +88,8 @@ go test ./...
 ```
 
 设置 `MYSQL_TEST_DSN` 后，相同命令还会执行真实 MySQL 集成用例，未设置时明确跳过该用例。集成测试使用随机租户及 Schema，不删除或清空共享平台表；验证预览无写入、发布门禁、条件授权、幂等、唯一冲突、并发凭证、NULL/NOT、事务及 outbox 回滚和改名后的当前映射。单元测试覆盖注入参数、隐藏字段、精度边界、游标篡改及上下文隔离。检查通过不代表已完成三库认证、跨服务原子撤权或性能验收。
+
+OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套、精确数值/微秒、命名参数、UTF-16/CRLF、注释/转义、未支持语法拒绝，以及目录、搜索、补全不暴露隐藏模型/字段/物理映射。2026-11-07真实MySQL＋OPA集成在 `tests/integration` 的既有隔离租户内验证文本与JSON共用结果、行列权限、精确数值及游标续页；映射集成同时验证MySQL/PostgreSQL来源初页和续页的字段描述没有物理映射。当前个人知识库另经公开Cookie会话和CSRF完成442对象只读核对，结果见项目总览；没有新增业务测试对象。
 
 `longtext` 单元回归覆盖多字节边界、4 MiB 正文的数据库值编解码、原 `text` 65535 字节边界、空值/空字符串、8 MiB 请求及尾部空白超限、DDL 映射、索引/排序拒绝和能力声明。2026-11-07 的模块测试通过，未启用数据库环境变量；`TestMySQLLongTextRoundTripAtApplicationLimit` 为待显式运行的真实 MySQL 建列、物理核验及 4 MiB 往返测试。长正文响应容量和性能仍未验收，查询应按需投影正文并选用较小分页。
 

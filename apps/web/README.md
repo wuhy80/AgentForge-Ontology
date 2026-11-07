@@ -41,7 +41,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [Schema 映射](src/features/model/SchemaStorageEditor.tsx) | 两种建模方向、主表稳定身份及逐属性跨源/跨表目录选择；默认平台存储也展示实际生效表列，草稿与生效映射分开标识；反向导入保留已有属性身份 |
 | [Link 映射](src/features/model/LinkStorageEditor.tsx) | 区分纯定义、平台关系表、已有外部关联表和外键；可视化表列选择、关系示意、一次性补绑定 |
 | [数据源配置](src/features/sources/SourcesPage.tsx) | 管理员维护多个 MySQL/PostgreSQL 连接、TLS和租户隔离，测试连接及查看表列；密码只写入 |
-| [数据探索](src/features/query/QueryPage.tsx) | 可视化 QuerySpec 配置、实际执行、查询状态及续页 |
+| [数据探索](src/features/query/QueryPage.tsx) | 默认OntologySQL，CodeMirror懒加载、授权目录、指导/模板、参数、服务端补全/诊断、结果详情/关联及续页；保留可视化完整子集转换 |
 | [实例详情](src/features/query/InstanceDialog.tsx) | 单条创建/读取/修改/确认删除，保持精度、幂等及并发凭证 |
 | [用户与权限](src/features/admin/AdminPage.tsx) | 管理员创建/编辑账号、启停与密码重置、直接角色与用户组、权限草稿/生效/试算及最近200条审计 |
 | [用户组编辑](src/features/admin/UserGroupDialog.tsx) | 中文用户组、角色与成员搜索、启停、ETag冲突保留及当前会话变更提示；独立于模型目录分组 |
