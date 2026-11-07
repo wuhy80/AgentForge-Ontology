@@ -190,10 +190,10 @@ func (h *handler) planRowQuery(ctx context.Context, p c.Principal, q c.QuerySpec
 		definitions = append(definitions, edge.current.Definition.ID+edge.current.ETag)
 		authorization = append(authorization, edge.definitionDecision, edge.decision)
 		for _, table := range append(append([]*mappedTable{}, edge.plan.sourceTables...), edge.plan.targetTables...) {
-			physical = append(physical, table.locator()+table.source.ETag+table.catalog.Signature)
+			physical = append(physical, table.locator()+table.source.ETag+table.catalog.Signature+sourceVersionSignature(table.source))
 		}
 		if edge.plan.junction != nil {
-			physical = append(physical, edge.plan.junction.locator()+edge.plan.junction.catalog.Signature)
+			physical = append(physical, edge.plan.junction.locator()+edge.plan.junction.catalog.Signature+sourceVersionSignature(edge.plan.junction.source))
 		}
 	}
 	plan.definitions, plan.authorization, plan.physical = digest(definitions), digest(authorization), digest(physical)

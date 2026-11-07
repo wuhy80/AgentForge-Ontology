@@ -1,6 +1,6 @@
 # 共享存储模块
 
-当前实现面向 Go 1.22 和 MySQL 8 及更新版本，使用 `database/sql`、GORM v2 和同一个连接池。PostgreSQL、达梦尚未实现，未知驱动明确拒绝。模块负责连接、事务及平台迁移设施，不包含五类定义、实例或任务的业务仓储。
+当前实现面向 Go 1.22，使用 `database/sql`、GORM v2 和同一个连接池。平台用途当前仅认证MySQL 26.7.0，未知产品/版本明确拒绝，不以“8或更新”无限放行。PostgreSQL、达梦平台适配尚未实现；新增公共MySQL/PostgreSQL版本检测供Data外部来源复用，不表示已注册PostgreSQL平台驱动。模块负责连接、事务及平台迁移设施，不包含五类定义、实例或任务的业务仓储。
 
 ```go
 engine, err := storage.Open(ctx, storage.Config{
@@ -12,6 +12,8 @@ defer engine.Close()
 ```
 
 DSN 必须指向已有数据库，禁止 `multiStatements` 和 `interpolateParams`。连接超时默认 5 秒，时间解码采用 UTC；凭据不写入日志。`Open` 不建表、不执行迁移。池的默认上限为 10，默认空闲连接不超过 5，最大连接寿命为 5 分钟。注册表必须在首次打开前完成配置，此后只读。
+
+公共版本API为 `DatabaseVersionOptions()`、`ValidateDatabaseVersionPolicy(driver,policy,expected)` 和 `InspectDatabaseVersion(ctx,QueryRower,driver,policy,expected)`，返回产品、完整版本、系列、适配范围和内部签名；错误为不含底层驱动错误的 `VersionError{Code,Message}`。平台初始化共用检测后再核验独立用途范围；Data对每条外部物理连接包装检测。认证矩阵、确切依赖及范围唯一见[存储引擎](../../docs/存储引擎.md#版本能力登记2026-11-07首批实现)。
 
 `Engine.WithTx(ctx, func(*sql.Tx) error)` 创建 READ COMMITTED 本地事务，回调失败或 panic 时回滚。`Engine.WithSession(ctx, func(*Session) error)` 在同一个事务中混用参数化 SQL 和固定记录的 ORM `Create`，不会额外打开一个事务外连接。提交失败可能表示提交结果未知，应由业务用例按操作 ID 核对，不自动重做。
 

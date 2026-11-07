@@ -59,6 +59,9 @@ func TestMySQLSourceConfigurationLifecycleIsolationAndBoundEndpoint(t *testing.T
 		return w
 	}
 	input := sourceTestInput()
+	// Offline configurations are persisted disabled; real enablement is tested
+	// by the source version suite against an actual database.
+	input.Enabled = false
 	input.Host, input.Database, input.TenantIsolation = "source-fixture.invalid", "fixture_"+strings.ReplaceAll(c.NewID(), "-", ""), "dedicated"
 	w := request(tenant, "POST", "/data/sources", input, "", true)
 	if w.Code != 201 || strings.Contains(w.Body.String(), *input.Password) || strings.Contains(w.Body.String(), `"password":`) {
@@ -129,7 +132,7 @@ func TestMySQLSourceConfigurationLifecycleIsolationAndBoundEndpoint(t *testing.T
 	// The endpoint guard must prevent both concurrent tenant registrations from
 	// claiming the same dedicated physical database before either commit.
 	raceInput := input
-	raceInput.Name, raceInput.Database, raceInput.Enabled = "并发专属源", input.Database+"_race", true
+	raceInput.Name, raceInput.Database, raceInput.Enabled = "并发专属源", input.Database+"_race", false
 	codes := make(chan int, 2)
 	for _, scope := range []string{tenant, other} {
 		go func(scope string) { codes <- request(scope, "POST", "/data/sources", raceInput, "", true).Code }(scope)
@@ -158,7 +161,7 @@ func TestMySQLSourceConfigurationLifecycleIsolationAndBoundEndpoint(t *testing.T
 func TestSourceCatalogRealDrivers(t *testing.T) {
 	for _, backend := range []struct{ driver, sqlDriver, env string }{{"mysql", "mysql", "MYSQL_TEST_DSN"}, {"postgresql", "pgx", "POSTGRES_SOURCE_TEST_DSN"}} {
 		t.Run(backend.driver, func(t *testing.T) {
-			dsn := os.Getenv(backend.env)
+			dsn := sourceIntegrationDSN(backend.driver, backend.env)
 			if dsn == "" {
 				t.Skip(backend.env + " is not set; real source discovery not run")
 			}
@@ -263,7 +266,7 @@ func TestSourceHTTPConnectionAndCatalogRealDrivers(t *testing.T) {
 	}
 	for _, backend := range []struct{ driver, sqlDriver, env string }{{"mysql", "mysql", "MYSQL_TEST_DSN"}, {"postgresql", "pgx", "POSTGRES_SOURCE_TEST_DSN"}} {
 		t.Run(backend.driver, func(t *testing.T) {
-			dsn := os.Getenv(backend.env)
+			dsn := sourceIntegrationDSN(backend.driver, backend.env)
 			if dsn == "" {
 				t.Skip(backend.env + " is not set; live source HTTP test not run")
 			}

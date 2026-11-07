@@ -157,7 +157,8 @@ func readSourceTable(ctx context.Context, db *sql.DB, source c.DataSource, names
 	out.Signature = digest(struct {
 		Columns []c.SourceColumn
 		Indexes []c.SourceIndex
-	}{out.Columns, out.Indexes})
+		Version string
+	}{out.Columns, out.Indexes, sourceVersionSignature(source)})
 	return out, nil
 }
 

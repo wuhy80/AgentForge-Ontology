@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	mysqlsql "github.com/go-sql-driver/mysql"
@@ -42,15 +40,14 @@ func connectMySQL(ctx context.Context, cfg Config) (*sql.DB, gorm.Dialector, Cap
 	if err := db.PingContext(ctx); err != nil {
 		return fail(fmt.Errorf("connect MySQL: %w", err))
 	}
-	var version string
-	if err := db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version); err != nil {
-		return fail(fmt.Errorf("read MySQL version: %w", err))
+	version, err := InspectDatabaseVersion(ctx, db, "mysql", "auto", "")
+	if err != nil {
+		return fail(err)
 	}
-	major, err := strconv.Atoi(strings.SplitN(version, ".", 2)[0])
-	if err != nil || major < 8 || strings.Contains(strings.ToLower(version), "mariadb") {
-		return fail(errors.New("this adapter requires MySQL 8 or newer; other products need separate certification"))
+	if err := validatePlatformDatabaseVersion(version); err != nil {
+		return fail(err)
 	}
-	capabilities := Capabilities{Driver: "mysql", ServerVersion: version, LocalTransactions: true, ParameterizedSQL: true, TransactionalDDL: false}
+	capabilities := Capabilities{Driver: "mysql", ServerVersion: version.ServerVersion, LocalTransactions: true, ParameterizedSQL: true, TransactionalDDL: false}
 	dialect := mysqlorm.New(mysqlorm.Config{Conn: db, SkipInitializeWithVersion: true})
 	return db, dialect, capabilities, nil
 }

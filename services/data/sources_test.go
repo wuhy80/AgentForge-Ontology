@@ -57,6 +57,9 @@ func TestSourceValidationRejectsDSNInjectionAndUnsupportedDrivers(t *testing.T) 
 		"port":                func(in *c.DataSourceInput) { in.Port = -1 },
 		"TLS":                 func(in *c.DataSourceInput) { in.TLSMode = "prefer" },
 		"isolation":           func(in *c.DataSourceInput) { in.TenantIsolation = "none" },
+		"version policy":      func(in *c.DataSourceInput) { in.VersionPolicy = "force" },
+		"auto with expected":  func(in *c.DataSourceInput) { in.ExpectedVersionLine = "26.7" },
+		"unknown version":     func(in *c.DataSourceInput) { in.VersionPolicy, in.ExpectedVersionLine = "pinned", "999" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			input := sourceTestInput()

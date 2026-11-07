@@ -19,6 +19,15 @@
 .sources-fields .sources-wide { grid-column: 1 / -1; }
 .sources-wide small { line-height: 1.7; }
 .sources-editor-actions { border-top: 1px solid #e7ece5; padding-top: 18px; margin-top: 22px; }
+.source-compatibility { margin-top: 20px; padding: 15px; border: 1px solid #e2e9e1; border-radius: 8px; min-width: 0; }
+.source-compatibility-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.source-compatibility h3 { font-size: 13px; margin: 0; }
+.source-compatibility p { font-size: 12px; line-height: 1.7; margin: 10px 0 0; overflow-wrap: anywhere; }
+.source-compatibility dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0 0; font-size: 12px; }
+.source-compatibility dt { color: #7b897d; margin-bottom: 5px; }
+.source-compatibility dd { margin: 0; overflow-wrap: anywhere; }
+.source-compatibility-wide { grid-column: 1 / -1; }
+.source-compatibility-reason { color: #a54535; }
 .sources-tables { border-top: 1px solid #e7ece5; margin-top: 22px; padding-top: 16px; }
 .sources-tables h3 { font-size: 13px; overflow-wrap: anywhere; }
 .sources-table-buttons { display: flex; flex-wrap: wrap; gap: 7px; }

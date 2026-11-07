@@ -73,10 +73,10 @@ func linkBoundDecision(target, origin, link c.Decision, plan *linkPlan, current 
 	bound := target
 	physical := []string{}
 	for _, table := range append(append([]*mappedTable(nil), plan.sourceTables...), plan.targetTables...) {
-		physical = append(physical, table.locator()+table.source.ETag+table.catalog.Signature)
+		physical = append(physical, table.locator()+table.source.ETag+table.catalog.Signature+sourceVersionSignature(table.source))
 	}
 	if plan.junction != nil {
-		physical = append(physical, plan.junction.locator()+plan.junction.catalog.Signature)
+		physical = append(physical, plan.junction.locator()+plan.junction.catalog.Signature+sourceVersionSignature(plan.junction.source))
 	}
 	bound.State = digest(struct {
 		Target, Origin, Link                   c.Decision

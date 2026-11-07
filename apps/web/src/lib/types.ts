@@ -49,6 +49,25 @@ export interface Schema {
 
 export type DataSourceDriver = 'mysql' | 'postgresql'
 export type SourceTLSMode = 'disable' | 'require' | 'verify-full'
+export type SourceVersionPolicy = 'auto' | 'pinned'
+export interface SourceVersionOption {
+  driver: DataSourceDriver
+  versionLine: string
+  label: string
+  status: 'supported' | 'pending'
+}
+export interface SourceCompatibility {
+  connected: boolean
+  compatibilityStatus: 'supported' | 'unsupported' | 'mismatch' | 'failed' | 'pending'
+  detectedProduct?: string
+  serverVersion?: string
+  versionLine?: string
+  capabilityProfile?: string
+  capabilities: string[]
+  checkedAt: string
+  code?: string
+  message?: string
+}
 export interface DataSource {
   id: string
   tenantId: string
@@ -63,6 +82,9 @@ export interface DataSource {
   username?: string
   tlsMode?: SourceTLSMode
   passwordSet?: boolean
+  versionPolicy?: SourceVersionPolicy
+  expectedVersionLine?: string
+  compatibility?: SourceCompatibility
 }
 export interface DataSourceInput {
   name: string
@@ -75,6 +97,8 @@ export interface DataSourceInput {
   tlsMode: SourceTLSMode
   enabled: boolean
   tenantIsolation: 'column' | 'dedicated'
+  versionPolicy?: SourceVersionPolicy
+  expectedVersionLine?: string
 }
 export interface SourceTableInfo { namespace: string; name: string; type: string }
 export interface SourceColumn {
@@ -91,7 +115,7 @@ export interface SourceColumn {
 }
 export interface SourceIndex { name: string; unique: boolean; primary: boolean; columns: string[]; predicate?: string }
 export interface SourceTable { namespace: string; name: string; columns: SourceColumn[]; indexes: SourceIndex[]; signature: string }
-export interface SourceTestResult { success: boolean; serverVersion: string }
+export interface SourceTestResult { success: boolean; serverVersion: string; compatibility: SourceCompatibility }
 export interface StorageMappingTable {
   dataSourceId?: string
   dataSourceName: string

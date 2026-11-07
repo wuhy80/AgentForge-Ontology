@@ -225,7 +225,7 @@ func (f *mappedIntegrationFixture) definition(primary, secondary, mode string) c
 func TestMappedSourceIntegration(t *testing.T) {
 	for _, backend := range []struct{ driver, env string }{{"mysql", "MYSQL_TEST_DSN"}, {"postgresql", "POSTGRES_SOURCE_TEST_DSN"}} {
 		t.Run("mysql_to_"+backend.driver, func(t *testing.T) {
-			f := newMappedIntegrationFixture(t, backend.driver, os.Getenv(backend.env))
+			f := newMappedIntegrationFixture(t, backend.driver, sourceIntegrationDSN(backend.driver, backend.env))
 			suffix := strings.ReplaceAll(c.NewID(), "-", "")[:12]
 			primary, secondary := "mapped_primary_"+suffix, "mapped_secondary_"+suffix
 			f.createTable(0, primary, "tenant VARCHAR(128) COLLATE utf8mb4_0900_ai_ci NOT NULL,id BIGINT NOT NULL,code VARCHAR(255) NOT NULL,department VARCHAR(255) NOT NULL,PRIMARY KEY(tenant,id)")
@@ -322,7 +322,7 @@ func TestMappedSourceIntegration(t *testing.T) {
 func TestMappedForwardPublicationAndInterruptedMultiTableResume(t *testing.T) {
 	for _, backend := range []struct{ driver, env string }{{"mysql", "MYSQL_TEST_DSN"}, {"postgresql", "POSTGRES_SOURCE_TEST_DSN"}} {
 		t.Run("mysql_to_"+backend.driver, func(t *testing.T) {
-			f := newMappedIntegrationFixture(t, backend.driver, os.Getenv(backend.env))
+			f := newMappedIntegrationFixture(t, backend.driver, sourceIntegrationDSN(backend.driver, backend.env))
 			suffix := strings.ReplaceAll(c.NewID(), "-", "")[:12]
 			primary, secondary := "mapped_managed_"+suffix, "mapped_prices_"+suffix
 			f.dropOnCleanup(0, primary)

@@ -1,6 +1,7 @@
 package data
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -10,19 +11,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
-	mysql "github.com/go-sql-driver/mysql"
-	_ "github.com/jackc/pgx/v5/stdlib"
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
+	"github.com/wuhy80/AgentForge-Ontology/libs/storage"
 )
 
 func (h *handler) registerSources(mux *http.ServeMux) {
@@ -35,6 +33,7 @@ func (h *handler) registerSources(mux *http.ServeMux) {
 		}
 	}
 	mux.HandleFunc("GET /data/sources", wrap(h.listSources))
+	mux.HandleFunc("GET /data/source-versions", wrap(h.sourceVersions))
 	mux.HandleFunc("POST /data/sources", wrap(h.saveSource))
 	mux.HandleFunc("GET /data/sources/{id}", wrap(h.getSourceHTTP))
 	mux.HandleFunc("PUT /data/sources/{id}", wrap(h.saveSource))
@@ -81,6 +80,13 @@ func sourceConfig(input c.DataSourceInput) (c.DataSource, error) {
 	}
 	if s.Driver != "mysql" && s.Driver != "postgresql" {
 		return s, problem(422, "unsupported_driver", "当前数据源支持 MySQL 与 PostgreSQL")
+	}
+	s.VersionPolicy, s.ExpectedVersionLine = strings.TrimSpace(input.VersionPolicy), strings.TrimSpace(input.ExpectedVersionLine)
+	if s.VersionPolicy == "" {
+		s.VersionPolicy = "auto"
+	}
+	if err := storage.ValidateDatabaseVersionPolicy(s.Driver, s.VersionPolicy, s.ExpectedVersionLine); err != nil {
+		return s, sourceVersionError(err)
 	}
 	if s.Port == 0 {
 		if s.Driver == "mysql" {
@@ -190,11 +196,19 @@ func (h *handler) loadSource(ctx context.Context, tenant, id string) (c.DataSour
 		return s, "", problem(503, "source_unavailable", "数据源配置不可读取")
 	}
 	s.ETag = etag
+	if s.VersionPolicy == "" {
+		s.VersionPolicy = "auto"
+	}
 	return s, encrypted, nil
 }
 
 func selectableSource(s c.DataSource) c.DataSource {
 	s.Host, s.Username, s.TLSMode, s.Port, s.PasswordSet = "", "", "", 0, false
+	if s.Compatibility != nil {
+		observation := *s.Compatibility
+		observation.ServerVersion, observation.DetectedProduct, observation.Message = "", "", ""
+		s.Compatibility = &observation
+	}
 	return s
 }
 
@@ -226,6 +240,9 @@ func (h *handler) listSources(w http.ResponseWriter, r *http.Request) error {
 			return problem(503, "source_unavailable", "数据源目录不可读取")
 		}
 		s.ETag = etag
+		if s.VersionPolicy == "" {
+			s.VersionPolicy = "auto"
+		}
 		if selection {
 			if !s.Enabled {
 				continue
@@ -271,6 +288,9 @@ func (h *handler) saveSource(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	if _, err = h.sourceCipher(); err != nil {
+		return err
+	}
 	id := r.PathValue("id")
 	creating := id == ""
 	secret := ""
@@ -298,6 +318,27 @@ func (h *handler) saveSource(w http.ResponseWriter, r *http.Request) error {
 		secret = *input.Password
 	}
 	s.ID, s.TenantID, s.PasswordSet = id, p.TenantID, secret != ""
+	// Refuse a bound relocation before testing another endpoint. The transaction
+	// repeats this check under the existing source/tenant guards.
+	if !creating && (endpointKey(old) != endpointKey(s) || old.Database != s.Database || old.TenantIsolation != s.TenantIsolation) {
+		var bound int
+		if err = h.cfg.Engine.DB().QueryRowContext(r.Context(), sourceReferenceCountSQL, p.TenantID, id, id, id).Scan(&bound); err != nil {
+			return err
+		}
+		if bound > 0 {
+			return problem(409, "source_in_use", "已绑定模型的数据源不能改变目标数据库或租户隔离方式，请新建数据源并显式迁移")
+		}
+	}
+	if s.Enabled {
+		db, observed, checkErr := connectSource(r.Context(), s, secret)
+		if db != nil {
+			_ = db.Close()
+		}
+		if checkErr != nil {
+			return checkErr
+		}
+		s.Compatibility = observed
+	}
 	s.ETag = digest(c.NewID())
 	encrypted, err = h.encryptSourceSecret(p.TenantID, id, secret)
 	if err != nil {
@@ -353,7 +394,7 @@ func (h *handler) saveSource(w http.ResponseWriter, r *http.Request) error {
 		// that two differently cased names identify the same actual database.
 		if endpointKey(old) != key || old.Database != s.Database || old.TenantIsolation != s.TenantIsolation {
 			var bound int
-			if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM af_data_gates WHERE tenant_id=? AND (JSON_UNQUOTE(JSON_EXTRACT(definition,'$.schema.storageBinding.dataSourceId'))=? OR JSON_SEARCH(definition,'one',?,NULL,'$.schema.properties[*].mapping.dataSourceId') IS NOT NULL OR JSON_UNQUOTE(JSON_EXTRACT(definition,'$.link.storageBinding.dataSourceId'))=?)", p.TenantID, id, id, id).Scan(&bound); err != nil {
+			if err := tx.QueryRowContext(r.Context(), sourceReferenceCountSQL, p.TenantID, id, id, id).Scan(&bound); err != nil {
 				return err
 			}
 			if bound > 0 {
@@ -385,44 +426,6 @@ func (h *handler) saveSource(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func openSourceConnection(ctx context.Context, s c.DataSource, password string) (*sql.DB, error) {
-	var driver, dsn string
-	if s.Driver == "mysql" {
-		cfg := mysql.NewConfig()
-		cfg.User, cfg.Passwd, cfg.Net, cfg.Addr, cfg.DBName = s.Username, password, "tcp", net.JoinHostPort(s.Host, strconv.Itoa(s.Port)), s.Database
-		cfg.ParseTime, cfg.Loc, cfg.Timeout, cfg.ReadTimeout, cfg.WriteTimeout = true, time.UTC, 5*time.Second, 10*time.Second, 10*time.Second
-		switch s.TLSMode {
-		case "require":
-			cfg.TLSConfig = "skip-verify"
-		case "verify-full":
-			cfg.TLSConfig = "true"
-		}
-		driver, dsn = "mysql", cfg.FormatDSN()
-	} else if s.Driver == "postgresql" {
-		u := url.URL{Scheme: "postgres", User: url.UserPassword(s.Username, password), Host: net.JoinHostPort(s.Host, strconv.Itoa(s.Port)), Path: "/" + s.Database}
-		q := url.Values{"sslmode": {s.TLSMode}, "connect_timeout": {"5"}, "timezone": {"UTC"}, "application_name": {"ontology-data"}}
-		u.RawQuery = q.Encode()
-		driver, dsn = "pgx", u.String()
-	} else {
-		return nil, problem(422, "unsupported_driver", "不支持的数据源类型")
-	}
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		return nil, problem(422, "invalid_source", "数据源连接配置不合法")
-	}
-	db.SetMaxOpenConns(3)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(time.Minute)
-	db.SetConnMaxIdleTime(15 * time.Second)
-	probe, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if err = db.PingContext(probe); err != nil {
-		db.Close()
-		return nil, problem(422, "source_connection_failed", "无法连接数据源，请核对地址、凭据、TLS和数据库权限")
-	}
-	return db, nil
-}
-
 func (h *handler) openSource(ctx context.Context, tenant, id string) (*sql.DB, c.DataSource, error) {
 	s, encrypted, err := h.loadSource(ctx, tenant, id)
 	if err != nil {
@@ -435,7 +438,8 @@ func (h *handler) openSource(ctx context.Context, tenant, id string) (*sql.DB, c
 	if err != nil {
 		return nil, s, err
 	}
-	db, err := openSourceConnection(ctx, s, secret)
+	db, observed, err := connectSource(ctx, s, secret)
+	s.Compatibility = observed
 	return db, s, err
 }
 
@@ -444,32 +448,75 @@ func (h *handler) testSource(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	var db *sql.DB
-	if id := r.PathValue("id"); id != "" {
-		db, _, err = h.openSource(r.Context(), p.TenantID, id)
-	} else {
-		var input c.DataSourceInput
-		if err = decode(w, r, &input); err != nil {
+	var s c.DataSource
+	var secret string
+	var saved *c.DataSource
+	var input *c.DataSourceInput
+	// null and an empty body retain the existing saved-connection operation.
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		return problem(400, "invalid_json", "连接测试请求体无效或超过预算")
+	}
+	if len(bytes.TrimSpace(raw)) > 0 && string(bytes.TrimSpace(raw)) != "null" {
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		input = &c.DataSourceInput{}
+		if err = decode(w, r, input); err != nil {
 			return err
 		}
-		s, invalid := sourceConfig(input)
-		if invalid != nil {
-			return invalid
+	}
+	if id := r.PathValue("id"); id != "" {
+		var encrypted string
+		s, encrypted, err = h.loadSource(r.Context(), p.TenantID, id)
+		if err != nil {
+			return err
 		}
-		secret := ""
+		old := s
+		saved = &old
+		if input == nil && !s.Enabled {
+			return problem(409, "source_disabled", "数据源已停用")
+		}
+		if input != nil {
+			if r.Header.Get("If-Match") == "" {
+				return problem(428, "precondition_required", "测试编辑配置必须携带If-Match")
+			}
+			if r.Header.Get("If-Match") != `"`+s.ETag+`"` {
+				return problem(412, "precondition_failed", "数据源已改变，请重新读取后核对")
+			}
+		}
+		secret, err = h.decryptSourceSecret(p.TenantID, id, encrypted)
+		if err != nil {
+			return err
+		}
+	} else {
+		if input == nil {
+			return problem(400, "invalid_json", "请提供待测试的连接配置")
+		}
+	}
+	if input != nil {
+		s, err = sourceConfig(*input)
+		if err != nil {
+			return err
+		}
 		if input.Password != nil {
 			secret = *input.Password
 		}
-		db, err = openSourceConnection(r.Context(), s, secret)
 	}
-	if err != nil {
-		return err
+	db, observed, checkErr := connectSource(r.Context(), s, secret)
+	if db != nil {
+		_ = db.Close()
 	}
-	defer db.Close()
-	var version string
-	if err = db.QueryRowContext(r.Context(), "SELECT VERSION()").Scan(&version); err != nil {
-		return problem(422, "source_connection_failed", "数据源已连接但无法读取数据库版本")
+	if saved != nil && input == nil {
+		body, _ := json.Marshal(observed)
+		result, persistErr := h.cfg.Engine.DB().ExecContext(r.Context(), "UPDATE af_data_sources SET config_json=JSON_SET(config_json,'$.compatibility',CAST(? AS JSON)) WHERE tenant_id=? AND id=? AND etag=?", string(body), p.TenantID, saved.ID, saved.ETag)
+		if persistErr != nil {
+			return persistErr
+		}
+		if affected, e := result.RowsAffected(); e != nil {
+			return e
+		} else if affected != 1 {
+			return problem(412, "precondition_failed", "测试期间数据源已改变，请重新测试")
+		}
 	}
-	writeJSON(w, 200, c.DataSourceTestResult{Success: true, ServerVersion: version})
+	writeJSON(w, 200, c.DataSourceTestResult{Success: checkErr == nil, ServerVersion: observed.ServerVersion, Compatibility: *observed})
 	return nil
 }

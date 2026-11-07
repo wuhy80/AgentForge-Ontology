@@ -233,7 +233,7 @@ func compileMappedQueryPredicate(d c.Definition, tables []*mappedTable, etag str
 	bound.Page.Cursor = ""
 	sources := []string{}
 	for _, table := range tables {
-		sources = append(sources, table.locator()+table.source.ETag+table.catalog.Signature)
+		sources = append(sources, table.locator()+table.source.ETag+table.catalog.Signature+sourceVersionSignature(table.source))
 	}
 	result.Fingerprint = digest(struct {
 		Query   c.QuerySpec

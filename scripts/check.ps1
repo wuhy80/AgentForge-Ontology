@@ -1,7 +1,7 @@
 param([switch]$Integration, [switch]$SourceIntegration)
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path -Parent $PSScriptRoot
-$names=@('GOCACHE','GOWORK','MYSQL_TEST_DSN','POSTGRES_SOURCE_TEST_DSN','METADATA_TEST_DSN','IDENTITY_TEST_DSN','IDENTITY_TEST_OPA_URL','ONTOLOGY_TEST_METADATA_DSN','ONTOLOGY_TEST_DATA_DSN','ONTOLOGY_TEST_OPA_URL','STORAGE_RELOCATION_TEST_DSN')
+$names=@('GOCACHE','GOWORK','MYSQL_TEST_DSN','MYSQL_SOURCE_TEST_DSN','POSTGRES_SOURCE_TEST_DSN','METADATA_TEST_DSN','IDENTITY_TEST_DSN','IDENTITY_TEST_OPA_URL','ONTOLOGY_TEST_METADATA_DSN','ONTOLOGY_TEST_DATA_DSN','ONTOLOGY_TEST_OPA_URL','STORAGE_RELOCATION_TEST_DSN')
 $prior=@{}
 foreach($name in $names){$prior[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 try {
@@ -9,6 +9,7 @@ try {
     $env:GOCACHE=Join-Path $repoRoot '.cache/go-build'
     $env:GOWORK='off'
     if($Integration){
+        $env:MYSQL_SOURCE_TEST_DSN=$null
         $file=Join-Path $repoRoot '.cache/dev/secrets.json'
         if(-not(Test-Path -LiteralPath $file)){throw 'Run scripts/start-dev.ps1 -DependenciesOnly first.'}
         $secrets=Get-Content -LiteralPath $file -Raw -Encoding UTF8|ConvertFrom-Json

@@ -48,7 +48,7 @@ func allRowPages(t *testing.T, f *mappedIntegrationFixture, q c.QuerySpec) []c.Q
 func TestRowQueryMappedMultiLinkIntegration(t *testing.T) {
 	for _, backend := range []struct{ driver, env string }{{"mysql", "MYSQL_TEST_DSN"}, {"postgresql", "POSTGRES_SOURCE_TEST_DSN"}} {
 		t.Run(backend.driver, func(t *testing.T) {
-			f := newMappedIntegrationFixture(t, backend.driver, os.Getenv(backend.env))
+			f := newMappedIntegrationFixture(t, backend.driver, sourceIntegrationDSN(backend.driver, backend.env))
 			index := 1
 			suffix := strings.ReplaceAll(c.NewID(), "-", "")[:12]
 			aName, bName, cName, eName := "row_a_"+suffix, "row_b_"+suffix, "row_c_"+suffix, "row_e_"+suffix
@@ -257,7 +257,7 @@ func TestRowQueryManagedSelfLinkIntegration(t *testing.T) {
 func TestRowQueryStringKeysUseExactComparisonsIntegration(t *testing.T) {
 	for _, backend := range []struct{ driver, env string }{{"mysql", "MYSQL_TEST_DSN"}, {"postgresql", "POSTGRES_SOURCE_TEST_DSN"}} {
 		t.Run(backend.driver, func(t *testing.T) {
-			f := newMappedIntegrationFixture(t, backend.driver, os.Getenv(backend.env))
+			f := newMappedIntegrationFixture(t, backend.driver, sourceIntegrationDSN(backend.driver, backend.env))
 			index, suffix := 1, strings.ReplaceAll(c.NewID(), "-", "")[:12]
 			name, edgeName := "row_keys_"+suffix, "row_key_edges_"+suffix
 			keyType := "VARCHAR(64)"
@@ -296,7 +296,7 @@ func TestRowQueryStringKeysUseExactComparisonsIntegration(t *testing.T) {
 func TestRowQueryExplicitForwardSourcesIntegration(t *testing.T) {
 	for _, backend := range []struct{ driver, env string }{{"mysql", "MYSQL_TEST_DSN"}, {"postgresql", "POSTGRES_SOURCE_TEST_DSN"}} {
 		t.Run(backend.driver, func(t *testing.T) {
-			f := newMappedIntegrationFixture(t, backend.driver, os.Getenv(backend.env))
+			f := newMappedIntegrationFixture(t, backend.driver, sourceIntegrationDSN(backend.driver, backend.env))
 			index, suffix := 1, strings.ReplaceAll(c.NewID(), "-", "")[:12]
 			makeSchema := func(prefix string) c.Definition {
 				namespace, _ := sourceNamespace(f.sources[index], "")

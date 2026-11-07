@@ -2,7 +2,7 @@ import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
-  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SchemaStorageMapping,
+  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SchemaStorageMapping, SourceVersionOption,
   SchemaLink, LinkInstance,
   QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
   QueryPathsRequest, QueryPathsResult, QueryFieldInsertionRequest, QueryFieldInsertionResult,
@@ -203,6 +203,9 @@ export class ApiClient {
   async listDataSources(signal?: AbortSignal, selectable = false): Promise<DataSource[]> {
     return (await this.request<Page<DataSource>>(`/api/data/sources${selectable ? '?view=select' : ''}`, { signal })).data
   }
+  async listSourceVersions(signal?: AbortSignal): Promise<SourceVersionOption[]> {
+    return (await this.request<Page<SourceVersionOption>>('/api/data/source-versions', { signal })).data
+  }
   getSchemaStorageMapping(schemaId: string, signal?: AbortSignal): Promise<SchemaStorageMapping> {
     return this.request(`/api/data/schemas/${encodeURIComponent(schemaId)}/storage-mapping`, { signal })
   }
@@ -212,8 +215,8 @@ export class ApiClient {
   updateDataSource(id: string, input: DataSourceInput, etag: string): Promise<DataSource> {
     return this.request(`/api/data/sources/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag })
   }
-  testDataSource(id: string): Promise<SourceTestResult> {
-    return this.request(`/api/data/sources/${encodeURIComponent(id)}/test`, { method: 'POST' })
+  testDataSource(id: string, input?: DataSourceInput, etag?: string): Promise<SourceTestResult> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}/test`, { method: 'POST', body: input, etag })
   }
   testDataSourceInput(input: DataSourceInput): Promise<SourceTestResult> {
     return this.request('/api/data/sources/test', { method: 'POST', body: input })

@@ -3,32 +3,37 @@ package contracts
 // DataSource credentials belong to Data. Passwords are write-only and encrypted
 // at rest; definitions refer only to stable source IDs and physical mappings.
 type DataSource struct {
-	ID              string `json:"id"`
-	TenantID        string `json:"tenantId"`
-	Name            string `json:"name"`
-	Driver          string `json:"driver"`
-	Host            string `json:"host,omitempty"`
-	Port            int    `json:"port,omitempty"`
-	Database        string `json:"database"`
-	Username        string `json:"username,omitempty"`
-	TLSMode         string `json:"tlsMode,omitempty"`
-	TenantIsolation string `json:"tenantIsolation"`
-	Enabled         bool   `json:"enabled"`
-	PasswordSet     bool   `json:"passwordSet"`
-	ETag            string `json:"etag"`
+	ID                  string               `json:"id"`
+	TenantID            string               `json:"tenantId"`
+	Name                string               `json:"name"`
+	Driver              string               `json:"driver"`
+	VersionPolicy       string               `json:"versionPolicy,omitempty"`
+	ExpectedVersionLine string               `json:"expectedVersionLine,omitempty"`
+	Host                string               `json:"host,omitempty"`
+	Port                int                  `json:"port,omitempty"`
+	Database            string               `json:"database"`
+	Username            string               `json:"username,omitempty"`
+	TLSMode             string               `json:"tlsMode,omitempty"`
+	TenantIsolation     string               `json:"tenantIsolation"`
+	Enabled             bool                 `json:"enabled"`
+	PasswordSet         bool                 `json:"passwordSet"`
+	ETag                string               `json:"etag"`
+	Compatibility       *SourceCompatibility `json:"compatibility,omitempty"`
 }
 
 type DataSourceInput struct {
-	Name            string  `json:"name"`
-	Driver          string  `json:"driver"`
-	Host            string  `json:"host"`
-	Port            int     `json:"port"`
-	Database        string  `json:"database"`
-	Username        string  `json:"username"`
-	Password        *string `json:"password,omitempty"`
-	TLSMode         string  `json:"tlsMode"`
-	TenantIsolation string  `json:"tenantIsolation"`
-	Enabled         bool    `json:"enabled"`
+	Name                string  `json:"name"`
+	Driver              string  `json:"driver"`
+	VersionPolicy       string  `json:"versionPolicy,omitempty"`
+	ExpectedVersionLine string  `json:"expectedVersionLine,omitempty"`
+	Host                string  `json:"host"`
+	Port                int     `json:"port"`
+	Database            string  `json:"database"`
+	Username            string  `json:"username"`
+	Password            *string `json:"password,omitempty"`
+	TLSMode             string  `json:"tlsMode"`
+	TenantIsolation     string  `json:"tenantIsolation"`
+	Enabled             bool    `json:"enabled"`
 }
 
 type TableInfo struct {
@@ -67,8 +72,27 @@ type SourceTable struct {
 }
 
 type DataSourceTestResult struct {
-	Success       bool   `json:"success"`
-	ServerVersion string `json:"serverVersion"`
+	Success       bool                `json:"success"`
+	ServerVersion string              `json:"serverVersion"`
+	Compatibility SourceCompatibility `json:"compatibility"`
+}
+
+// SourceCompatibility is a server observation, never a client assertion. Saved
+// observations belong to the source configuration ETag and do not change it.
+type SourceCompatibility struct {
+	Connected           bool     `json:"connected"`
+	CompatibilityStatus string   `json:"compatibilityStatus"`
+	DetectedProduct     string   `json:"detectedProduct,omitempty"`
+	ServerVersion       string   `json:"serverVersion,omitempty"`
+	VersionLine         string   `json:"versionLine,omitempty"`
+	CapabilityProfile   string   `json:"capabilityProfile,omitempty"`
+	Capabilities        []string `json:"capabilities"`
+	CheckedAt           string   `json:"checkedAt"`
+	Code                string   `json:"code,omitempty"`
+	Message             string   `json:"message,omitempty"`
+	// Signature is intentionally not exposed in the source management API. It
+	// is attached to the live connection and participates in physical plans.
+	Signature string `json:"-"`
 }
 
 // SchemaStorageMapping describes the current effective definition's physical

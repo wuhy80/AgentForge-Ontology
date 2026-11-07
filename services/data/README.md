@@ -29,7 +29,8 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `GET /healthz`、`GET /readyz` | 进程及数据库连接探针 |
 | `GET /data/capabilities` | 返回当前实际开放能力及限制 |
 | `GET/POST /data/sources`、`GET/PUT /data/sources/{id}` | 管理员维护租户数据源；PUT 必须强 If-Match；`view=select` 提供模型作者可选摘要 |
-| `POST /data/sources/test`、`POST /data/sources/{id}/test` | 管理员测试未保存参数或已保存的加密凭据 |
+| `GET /data/source-versions` | 管理员或模型作者读取服务端版本系列和supported/pending状态 |
+| `POST /data/sources/test`、`POST /data/sources/{id}/test` | 管理员测试连接与兼容状态；已有源可提交完整表单及If-Match并复用省略密码，空体/null沿用已保存配置测试 |
 | `GET /data/sources/{id}/tables`、`GET /data/sources/{id}/tables/{table}` | 只读表、列及索引目录；可选 namespace 参数 |
 | `GET /data/schemas/{schemaId}/storage-mapping` | 按对象 `definition.edit` 授权读取当前生效的主表及逐属性物理映射，含实际目录的列类型、存在状态；不返回凭据或业务行 |
 | `POST /data/schemas/{schemaId}/instances` | 显式创建；必须提交幂等键 |
@@ -51,6 +52,8 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 ## 显式来源映射
 
 数据源由当前权威会话中的租户管理员维护；模型作者读取可选源及表结构使用现有 `definition.edit` 授权，源目录权限不替代实例行列授权。物理表名、列名来自已校验绑定与目录，密码不进入模型正文。数据源的共享租户列与专属数据库规则见[数据源配置](../../docs/数据源.md)。
+
+版本配置实际协议为 `versionPolicy=auto|pinned` 与 `expectedVersionLine`，响应另有服务端 `compatibility`；测试返回 `success/serverVersion/compatibility`，连接或兼容失败为200且success=false，权限/格式/ETag错误仍返回相应HTTP错误。启用状态保存会实际检查，失败不替换原配置；停用状态允许离线保存。检查保存在原config_json中，无新增平台迁移。外部每条物理连接先核验产品、版本和关键配置，结构、查询和Link游标绑定能力签名；完整规则及认证范围唯一见[版本管理](../../docs/数据源.md#数据库版本选择与校验2026-11-07已确认并实现)与[存储引擎](../../docs/存储引擎.md#版本能力登记2026-11-07首批实现)。
 
 当前一个 Schema 最多映射8张来源表。主表提供稳定标识，关联来源按同类型唯一键匹配，每个主对象每来源最多一行，没有关联行的属性返回 `null`。跨来源属性可以投影；筛选、排序及权限行条件仅支持主表属性，涉及其他来源的条件明确拒绝。查询逐源读取，不承诺跨数据库的一致快照或事务。显式来源的实例创建、修改和删除当前拒绝，避免把默认存储的幂等/outbox事务保证套用到多个数据库。
 
@@ -101,5 +104,7 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 `longtext` 单元回归覆盖多字节边界、4 MiB 正文的数据库值编解码、原 `text` 65535 字节边界、空值/空字符串、8 MiB 请求及尾部空白超限、DDL 映射、索引/排序拒绝和能力声明。2026-11-07 的模块测试通过，未启用数据库环境变量；`TestMySQLLongTextRoundTripAtApplicationLimit` 为待显式运行的真实 MySQL 建列、物理核验及 4 MiB 往返测试。长正文响应容量和性能仍未验收，查询应按需投影正文并选用较小分页。
 
 2026-11-07新增数据源配置、AES-GCM身份绑定、授权拒绝及物理标识边界测试。已使用真实MySQL随机租户/随机表验证配置加密、HTTP连接与表列发现、主键和唯一/复合索引、跨租户隔离与专属目标并发冲突、ETag并发返回200/412、引用保护及停用拒绝；没有修改现有知识库定义或实例。`TestSourceCatalogRealDrivers` 与 `TestSourceHTTPConnectionAndCatalogRealDrivers` 可另外通过 `POSTGRES_SOURCE_TEST_DSN` 连接外部PostgreSQL验证，未设置时明确跳过。外部来源映射的结构执行和跨源读取结果仍须按实际运行的独立用例记录，不由连接测试代替。
+
+同日新增 [版本HTTP生命周期](sources_version_integration_test.go)、[物理连接回归](source_versions_test.go)和[来源主表能力认证](source_version_matrix_test.go)。来源/映射/Link测试可用 `MYSQL_SOURCE_TEST_DSN` 指定独立外部MySQL，未设时回退 `MYSQL_TEST_DSN`，平台控制库仍由后者指定；PostgreSQL继续用 `POSTGRES_SOURCE_TEST_DSN`。本批实际版本及模块/真实集成/浏览器结果统一见[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)，待适配版本不因测试入口存在而视为已认证。
 
 同日离线迁移的真实 MySQL 定向测试已通过，覆盖完整字段及空字符串/NULL/长正文/精确数值保留、源表不变、整批准备与激活、DDL 中断恢复，以及目标接管、数据漂移、托管 Link 依赖、来源变化、缩减清单和部分准备批次的拒绝。迁移 CLI 另验证同一 MySQL 实例上的 Metadata/Data 维护锁互不自阻塞；这些隔离用例不代表跨实例持续隔离、生产恢复或性能验收。

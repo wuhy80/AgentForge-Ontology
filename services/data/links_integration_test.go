@@ -14,7 +14,7 @@ import (
 func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 	for _, backend := range []struct{ driver, env string }{{"mysql", "MYSQL_TEST_DSN"}, {"postgresql", "POSTGRES_SOURCE_TEST_DSN"}} {
 		t.Run(backend.driver, func(t *testing.T) {
-			f := newMappedIntegrationFixture(t, backend.driver, os.Getenv(backend.env))
+			f := newMappedIntegrationFixture(t, backend.driver, sourceIntegrationDSN(backend.driver, backend.env))
 			index := 1
 			suffix := strings.ReplaceAll(c.NewID(), "-", "")[:12]
 			sourceName, targetName, edgeName := "link_source_"+suffix, "link_target_"+suffix, "link_edge_"+suffix

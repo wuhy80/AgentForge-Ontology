@@ -67,6 +67,21 @@ describe('ApiClient transport and complete directories', () => {
 })
 
 describe('ApiClient writes and errors', () => {
+  it('读取后端版本选项，测试当前编辑来源携带If-Match并省略保留密码', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(page([{ driver: 'mysql', versionLine: '26.7', status: 'supported', label: 'MySQL 26.7' }]))
+      .mockResolvedValueOnce(json({ success: true, serverVersion: '26.7.0', compatibility: { compatibilityStatus: 'supported' } }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient()
+    api.setCSRFToken('session-csrf')
+    await expect(api.listSourceVersions()).resolves.toEqual([{ driver: 'mysql', versionLine: '26.7', status: 'supported', label: 'MySQL 26.7' }])
+    await api.testDataSource('source / 一', { name: '业务库', driver: 'mysql', host: 'edited-host', port: 3306, database: 'business', username: 'reader', tlsMode: 'require', tenantIsolation: 'column', enabled: true, versionPolicy: 'pinned', expectedVersionLine: '26.7' }, 'source-etag')
+    expect(fetcher.mock.calls[0][0]).toBe('/api/data/source-versions')
+    expect(fetcher.mock.calls[1][0]).toBe('/api/data/sources/source%20%2F%20%E4%B8%80/test')
+    expect(fetcher.mock.calls[1][1].headers).toMatchObject({ 'X-CSRF-Token': 'session-csrf', 'If-Match': '"source-etag"' })
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ host: 'edited-host', versionPolicy: 'pinned', expectedVersionLine: '26.7' })
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).not.toHaveProperty('password')
+  })
+
   it('查询正反关系目录并按稳定ID读写关系事实，写入携带CSRF与强ETag', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(json({ data: [] }))
       .mockResolvedValueOnce(json({ data: [], hasMore: false }))

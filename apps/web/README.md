@@ -41,7 +41,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [数据预览](src/features/model/ModelDataPreview.tsx) | 直接读取当前生效对象的小页实例，选择字段和记录，底部按 Link 正反方向预览关联数据；不提供业务写入入口 |
 | [Schema 映射](src/features/model/SchemaStorageEditor.tsx) | 两种建模方向、主表稳定身份及逐属性跨源/跨表目录选择；默认平台存储也展示实际生效表列，草稿与生效映射分开标识；反向导入保留已有属性身份 |
 | [Link 映射](src/features/model/LinkStorageEditor.tsx) | 区分纯定义、平台关系表、已有外部关联表和外键；可视化表列选择、关系示意、一次性补绑定 |
-| [数据源配置](src/features/sources/SourcesPage.tsx) | 管理员维护多个 MySQL/PostgreSQL 连接、TLS和租户隔离，测试连接及查看表列；密码只写入 |
+| [数据源配置](src/features/sources/SourcesPage.tsx) | 管理员维护MySQL/PostgreSQL连接、自动识别或指定版本、真实兼容状态、TLS及租户隔离；测试当前编辑配置并复用服务端保留密码，查看表列；密码只写入 |
 | [数据探索](src/features/query/QueryPage.tsx) | 默认OntologySQL，顶部指导、左侧模型/右侧字段、双击与键盘插入、CodeMirror懒加载、参数、服务端补全/诊断、结果详情/关联及续页；保留可视化完整子集转换 |
 | [实例详情](src/features/query/InstanceDialog.tsx) | 单条创建/读取/修改/确认删除，保持精度、幂等及并发凭证 |
 | [用户与权限](src/features/admin/AdminPage.tsx) | 管理员创建/编辑账号、启停与密码重置、直接角色与用户组、权限草稿/生效/试算及最近200条审计 |
