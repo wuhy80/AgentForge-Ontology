@@ -579,6 +579,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                     categories={categories}
                     categoryId={categoryId}
                     entries={entries}
+                    currentEntries={current}
                     draftDirectoryDenied={draftDirectoryDenied}
                     onRefresh={refresh}
                     onQuery={query}

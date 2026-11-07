@@ -222,6 +222,13 @@ func validateReferences(ctx context.Context, tx *sql.Tx, d contracts.Definition)
 		}
 		refs[id] = ref
 	}
+	if d.Action != nil {
+		for _, id := range d.Action.TargetSchemaIDs {
+			if refs[id].ID != id || refs[id].TenantID != d.TenantID || refs[id].Kind != contracts.KindSchema {
+				return problem(422, "invalid_action_target", "动作关联对象必须引用同租户已生效的Schema稳定标识")
+			}
+		}
+	}
 	checkProps := func(ps []contracts.Property) error {
 		for _, p := range ps {
 			if p.EnumID != "" {

@@ -88,6 +88,7 @@ export function validateDefinition(definition: Definition): string | undefined {
     }
   }
   if (definition.link && (!definition.link.sourceSchemaId || !definition.link.targetSchemaId)) return '请选择关系两端的已生效对象模型。'
+  if (definition.action?.targetSchemaIds && (definition.action.targetSchemaIds.length > 32 || new Set(definition.action.targetSchemaIds).size !== definition.action.targetSchemaIds.length || definition.action.targetSchemaIds.some((id) => !id.trim() || id.trim() !== id))) return '关联对象最多选择 32 个，且不能重复或为空。'
   for (const callable of [definition.action, definition.function]) {
     if (!callable) continue
     const error = validateProperties(callable.input ?? [], '输入参数') ?? validateProperties(callable.output ?? [], '输出参数')

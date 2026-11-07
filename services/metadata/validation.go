@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -163,6 +164,21 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if c == nil {
 			return invalidBody()
 		}
+		if d.Kind == contracts.KindFunction && len(c.TargetSchemaIDs) != 0 {
+			return problem(422, "unsupported_action_target", "关联对象仅支持Action定义，Function不接受targetSchemaIds")
+		}
+		if len(c.TargetSchemaIDs) > 32 {
+			return problem(422, "action_target_budget", "每个动作最多关联32个对象模型")
+		}
+		targets := map[string]bool{}
+		for _, id := range c.TargetSchemaIDs {
+			if id == "" || len(id) > 128 || !utf8.ValidString(id) || strings.TrimSpace(id) != id || strings.IndexFunc(id, unicode.IsControl) >= 0 || targets[strings.ToLower(id)] {
+				return problem(400, "invalid_action_target", "关联对象标识不能为空、重复、超长或包含首尾空白及控制字符")
+			}
+			targets[strings.ToLower(id)] = true
+		}
+		// Targets are a set; equivalent selections must retain the same digest.
+		sort.Strings(c.TargetSchemaIDs)
 		if err := validateProperties(c.Input, assignIDs); err != nil {
 			return err
 		}
@@ -270,6 +286,9 @@ func dependencyIDs(d contracts.Definition) []string {
 		if c != nil {
 			addProps(c.Input)
 			addProps(c.Output)
+			for _, id := range c.TargetSchemaIDs {
+				seen[id] = true
+			}
 			if c.FunctionID != "" {
 				seen[c.FunctionID] = true
 			}
@@ -289,6 +308,12 @@ func compatibleUpdate(old, next contracts.Definition) error {
 		return problem(422, "unsupported_change", "首批不支持改变类型或组织归属")
 	}
 	a, b := withoutDisplayMetadata(old), withoutDisplayMetadata(next)
+	// Action targets are discoverable metadata. They may be updated through the
+	// same draft/publication flow, which rechecks every live dependency. Callable
+	// signatures, implementation and side effects still require runtime support.
+	if a.Kind == contracts.KindAction && a.Action != nil && b.Action != nil {
+		a.Action.TargetSchemaIDs, b.Action.TargetSchemaIDs = nil, nil
+	}
 	if !reflect.DeepEqual(a, b) {
 		if compatibleMappedAddition(a, b) {
 			return nil

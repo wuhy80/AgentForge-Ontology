@@ -115,6 +115,28 @@
 .model-mapping-grid label { min-width: 0; }
 .model-mapping-warning { margin: 8px 0 0; color: #a27b3f; font-size: 11px; }
 .model-editor-meta { display: flex; align-items: center; gap: 8px; }
+.model-editor-tabs { display: flex; gap: 5px; min-width: 0; max-width: 100%; overflow-x: auto; border-bottom: 1px solid #e3eae1; }
+.model-editor-tabs > button { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 11px 15px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #78877c; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.model-editor-tabs > button:hover { background: #f5f8f3; color: #345e43; }
+.model-editor-tabs > button[aria-selected="true"] { border-bottom-color: #46835d; color: #286345; font-weight: 600; }
+.model-editor-tabs > button > span { padding: 1px 5px; border-radius: 4px; background: #eef3eb; color: #748b72; font-size: 10px; }
+.model-editor-tabs > button:focus-visible { outline: 2px solid #74a584; outline-offset: -3px; border-radius: 5px 5px 0 0; }
+.model-editor-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; min-width: 0; }
+.model-editor-panel > * { min-width: 0; }
+.model-editor-panel[hidden] { display: none; }
+.model-editor-panel:focus-visible { outline: 2px solid #b6cdb7; outline-offset: 5px; border-radius: 4px; }
+.model-related-table table { min-width: 620px; }
+.model-related-table th, .model-related-table td { padding: 9px 11px; vertical-align: middle; }
+.model-related-table td { overflow-wrap: anywhere; max-width: 260px; }
+.model-related-table td small { display: block; color: #839086; font-size: 11px; margin-top: 4px; }
+.model-related-link { display: inline-flex; align-items: center; gap: 4px; color: #356c4a; text-decoration: none; font-weight: 550; }
+.model-related-link:hover { text-decoration: underline; }
+.model-related-link svg { flex-shrink: 0; }
+.model-action-targets { min-width: 0; }
+.model-target-search { max-width: 360px; margin-bottom: 12px; }
+.model-target-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 9px 16px; max-height: 260px; overflow-y: auto; }
+.model-target-options .model-checkbox { white-space: normal; line-height: 1.6; overflow-wrap: anywhere; }
+.model-target-options input { flex-shrink: 0; }
 .model-unsaved { color: #ac8b47; font-size: 11px; margin-left: auto; }
 .model-fieldset { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 30px; min-width: 0; }
 .model-fieldset > section, .model-fieldset > div { min-width: 0; }

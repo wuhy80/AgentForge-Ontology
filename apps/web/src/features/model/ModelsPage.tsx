@@ -17,11 +17,12 @@ function ModelStatus({ entry }: { entry: DefinitionRecord }) {
   return <span className={`model-status ${draft ? 'model-status-draft' : 'model-status-active'}`}>{draft ? <CircleDashed size={12} /> : <Check size={12} />}{draft ? entry.hasCurrent ? '待发布变更' : '草稿' : '已生效'}</span>
 }
 
-export function ModelsPage({ api, categoryId, categories, entries, onRefresh, onQuery, onOrganizations, onSources, route, onNavigate, onNavigationGuard, draftDirectoryDenied = false, active = true }: {
+export function ModelsPage({ api, categoryId, categories, entries, currentEntries, onRefresh, onQuery, onOrganizations, onSources, route, onNavigate, onNavigationGuard, draftDirectoryDenied = false, active = true }: {
   api: ApiClient
   categoryId: string
   categories: Organization[]
   entries: DefinitionRecord[]
+  currentEntries?: DefinitionRecord[]
   onRefresh: () => Promise<void>
   onQuery: (schemaId: string) => void
   onOrganizations: () => void
@@ -32,7 +33,7 @@ export function ModelsPage({ api, categoryId, categories, entries, onRefresh, on
   draftDirectoryDenied?: boolean
   active?: boolean
 }) {
-  const [kind, setKind] = useState<Kind | 'all'>('all')
+  const [kind, setKind] = useState<Kind | 'all'>('schema')
   const [search, setSearch] = useState('')
   const [layout, setLayout] = useState<'grid' | 'list'>('list')
   const [groupDirectory, setGroupDirectory] = useState<{ api: ApiClient; categoryId: string; items: Organization[]; error: string; loading: boolean }>()
@@ -69,7 +70,7 @@ export function ModelsPage({ api, categoryId, categories, entries, onRefresh, on
 
   useEffect(() => {
     openingSequence.current++
-    setOpening(''); setRefreshing(false); setError(''); setSearch(''); setKind('all'); closeEditor(false)
+    setOpening(''); setRefreshing(false); setError(''); setSearch(''); setKind('schema'); closeEditor(false)
   }, [categoryId])
 
   useEffect(() => () => { openingSequence.current++; editorSequence.current++ }, [])
@@ -233,7 +234,7 @@ export function ModelsPage({ api, categoryId, categories, entries, onRefresh, on
     })
   }
 
-  if (editor && editor.categoryId === categoryId) return <ModelEditor key={`${categoryId}:${editor.token}`} api={api} active={active} categoryId={categoryId} categories={categories} entries={models} initialKind={editor.kind} initialRecord={editor.record} pending={editor.record ? pending[editor.record.definition.id] : undefined} onClose={() => closeEditor()} onOrganizations={onOrganizations} onSources={onSources} onNavigationGuard={onNavigationGuard} onSaved={(record) => saved(record, editor.token)} onPending={(value) => {
+  if (editor && editor.categoryId === categoryId) return <ModelEditor key={`${categoryId}:${editor.token}`} api={api} active={active} categoryId={categoryId} categories={categories} entries={models} currentEntries={currentEntries} initialKind={editor.kind} initialRecord={editor.record} pending={editor.record ? pending[editor.record.definition.id] : undefined} onClose={() => closeEditor()} onOrganizations={onOrganizations} onSources={onSources} onNavigationGuard={onNavigationGuard} onSaved={(record) => saved(record, editor.token)} onPending={(value) => {
     const directory = directoryRef.current
     // Late publication results may retain their original recovery identity only
     // while that exact draft remains authorized in the current directory.

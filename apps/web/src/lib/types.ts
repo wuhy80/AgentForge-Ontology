@@ -105,6 +105,7 @@ export interface Link {
 export interface Callable {
   input?: Property[]
   output?: Property[]
+  targetSchemaIds?: string[]
   functionId?: string
   artifactRef?: string
   sideEffects: 'none' | 'dataWrite' | 'externalWrite'

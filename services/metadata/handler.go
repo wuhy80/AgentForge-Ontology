@@ -363,6 +363,9 @@ func (h *handler) createDefinition(w http.ResponseWriter, r *http.Request, p con
 		if err := validateOrg(r.Context(), tx, d); err != nil {
 			return err
 		}
+		if err := validateActionTargetReferences(r.Context(), tx, d); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(r.Context(), "INSERT INTO af_meta_definitions (id,tenant_id,category_id,group_id,kind,name,name_key,draft_json,draft_digest,status) VALUES (?,?,?,?,?,?,?,?,?,'draft')", d.ID, d.TenantID, d.CategoryID, d.GroupID, d.Kind, d.Name, []byte(key), string(raw), digest)
 		return err
 	})
@@ -444,6 +447,9 @@ func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, p contracts.
 			return problem(422, "unsupported_change", "首批不支持定义改变类型或组织归属")
 		}
 		if err := validateOrg(r.Context(), tx, d); err != nil {
+			return err
+		}
+		if err := validateActionTargetReferences(r.Context(), tx, d); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(r.Context(), "UPDATE af_meta_definitions SET draft_json=?,draft_digest=? WHERE tenant_id=? AND id=?", string(raw), digest, p.TenantID, id)

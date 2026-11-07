@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState, type KeyboardEvent } from 'react'
 import { AlertCircle, ArrowLeft, ArrowRight, Check, FileCode2, LoaderCircle, Plus, RefreshCw, Save, Send, Trash2 } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { Callable, Definition, DefinitionRecord, Index, Kind, Link, Organization, Preview, Publication } from '../../lib/types'
 import { PropertyEditor } from './PropertyEditor'
 import { SchemaStorageEditor } from './SchemaStorageEditor'
+import { RelatedDefinitions } from './RelatedDefinitions'
+import { ActionTargetsEditor } from './ActionTargetsEditor'
 import { activeEntries, cloneDefinition, kindDescriptions, kindLabels, MAX_SCHEMA_INDEXES, MAX_SCHEMA_PROPERTIES, newDefinition, validateDefinition } from './model-helpers'
 
 export interface PendingPublication {
@@ -11,11 +13,21 @@ export interface PendingPublication {
   publication: Publication
 }
 
-export function ModelEditor({ api, categoryId, categories, entries, initialRecord, initialKind, pending, onClose, onOrganizations, onSources, onSaved, onPending, onPublished, onNavigationGuard, active = true }: {
+const schemaTabs = [
+  { id: 'basics', label: '基础信息' },
+  { id: 'properties', label: '属性配置' },
+  { id: 'indexes', label: '索引信息' },
+  { id: 'links', label: 'Link 信息' },
+  { id: 'actions', label: '动作信息' },
+] as const
+type EditorTab = typeof schemaTabs[number]['id']
+
+export function ModelEditor({ api, categoryId, categories, entries, currentEntries, initialRecord, initialKind, pending, onClose, onOrganizations, onSources, onSaved, onPending, onPublished, onNavigationGuard, active = true }: {
   api: ApiClient
   categoryId: string
   categories: Organization[]
   entries: DefinitionRecord[]
+  currentEntries?: DefinitionRecord[]
   initialRecord?: DefinitionRecord
   initialKind: Kind
   pending?: PendingPublication
@@ -42,16 +54,32 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
   const [confirmReload, setConfirmReload] = useState(false)
   const [publication, setPublication] = useState(pending?.publication)
   const [preview, setPreview] = useState<Preview>()
+  const [tab, setTab] = useState<EditorTab>('basics')
+  const tabId = useId()
   const dirty = JSON.stringify(definition) !== JSON.stringify(record?.definition ?? initialDefinition)
   const locked = !!(record?.hasCurrent || record?.status === 'active')
   const uncertain = !!publication && !['succeeded', 'rejected'].includes(publication.status)
   const disabled = !!busy || uncertain
   const category = categories.find((item) => item.id === categoryId)
   const bindingReady = !!category && definition.categoryId === categoryId && (!!record || !groupsLoading && groups.some((group) => group.id === definition.groupId))
-  const currentSchemas = activeEntries(entries, 'schema')
-  const currentEnums = activeEntries(entries, 'enum')
-  const currentFunctions = activeEntries(entries, 'function')
+  const authorizedEntries = entries.filter((entry) => !definition.tenantId || entry.definition.tenantId === definition.tenantId)
+  const currentSchemas = activeEntries(authorizedEntries, 'schema')
+  const currentEnums = activeEntries(authorizedEntries, 'enum')
+  const currentFunctions = activeEntries(authorizedEntries, 'function')
   const allowAppend = locked && !!definition.schema?.storageBinding && definition.schema.mode === 'schema_2_db'
+
+  function panelProps(id: EditorTab) {
+    return definition.schema ? { role: 'tabpanel', id: `${tabId}-panel-${id}`, 'aria-labelledby': `${tabId}-tab-${id}`, hidden: tab !== id, tabIndex: 0 } : {}
+  }
+  function navigateTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const next = event.key === 'ArrowRight' ? (index + 1) % schemaTabs.length
+      : event.key === 'ArrowLeft' ? (index + schemaTabs.length - 1) % schemaTabs.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? schemaTabs.length - 1 : -1
+    if (next < 0) return
+    event.preventDefault()
+    setTab(schemaTabs[next].id)
+    document.getElementById(`${tabId}-tab-${schemaTabs[next].id}`)?.focus()
+  }
 
   useEffect(() => {
     if (!active) return
@@ -99,7 +127,14 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
   async function save() {
     if (!bindingReady) { setError('请先选择当前分类下的分组；如目录尚未建立，请前往「分类与分组」。'); return }
     const invalid = validateDefinition(definition)
-    if (invalid) { setError(invalid); return }
+    if (invalid) {
+      setError(invalid)
+      if (definition.schema) {
+        const basicError = invalid === '请填写业务名称。' || /分类|分组|建模方向|主数据源|主表|数据库为准/.test(invalid)
+        setTab(/索引/.test(invalid) ? 'indexes' : basicError ? 'basics' : 'properties')
+      }
+      return
+    }
     setBusy('save'); setError(''); setMessage('')
     try {
       const saved = record ? await api.saveDraft(record.definition.id, definition, record.etag) : await api.createDefinition(definition)
@@ -163,27 +198,33 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
     <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" onClick={requestClose} disabled={!!busy}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑定义' : `新建${kindLabels[definition.kind]}`}</h1><p className="muted">{kindDescriptions[definition.kind]}</p></div></div>
     <div className="model-editor">
       <div className="model-editor-meta"><span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}</div>
-      {locked && <div className="notice model-lock-notice">{allowAppend ? '此定义已生效。现有结构与来源绑定保持锁定，可新增允许空值的属性，预览并发布后安全增加目标列。' : '此定义已生效。可修改名称、描述和显示标签；数据结构与绑定保持锁定。'}</div>}
+      {locked && <div className="notice model-lock-notice">{allowAppend ? '此定义已生效。现有结构与来源绑定保持锁定，可新增允许空值的属性，预览并发布后安全增加目标列。' : definition.action ? '此动作已生效。可修改展示信息和关联对象；参数、实现和副作用保持锁定。' : '此定义已生效。可修改名称、描述和显示标签；数据结构与绑定保持锁定。'}</div>}
       {uncertain && <div className="notice notice-error" role="status"><strong>发布结果待确认</strong><p>编辑已暂停。使用同一份已保存内容继续恢复；返回列表后可从模型页的待恢复记录重新进入。</p><span className="muted">阶段：{publication?.status === 'activation_pending' ? '已提交，等待激活' : publication?.status === 'prepare_failed' ? '准备未完成' : '等待确认'}</span></div>}
       {error && <div className="notice notice-error" role="alert"><AlertCircle size={16} /><span>{error}</span></div>}
       {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
       {conflict && <div className="notice model-conflict"><p>服务器内容已改变，本地编辑仍然保留。载入最新内容会放弃当前未保存的修改。</p><button type="button" className="button subtle" disabled={!!busy} onClick={() => setConfirmReload(true)}><RefreshCw size={15} />载入最新内容</button></div>}
       {confirmReload && <div className="notice notice-error"><p>确定放弃本地编辑并载入服务器最新内容？</p><div className="model-inline-actions"><button type="button" className="button primary" onClick={() => void reload()}>确认载入</button><button type="button" className="button subtle" onClick={() => setConfirmReload(false)}>保留本地编辑</button></div></div>}
       {confirmClose && <div className="notice notice-error" role="alert"><p>还有未保存的修改。返回列表后这些修改将丢失。</p><div className="model-inline-actions"><button type="button" className="button subtle" onClick={() => setConfirmClose(false)}>继续编辑</button><button type="button" className="button" onClick={onClose}>放弃修改并返回</button></div></div>}
+      {definition.schema && <div className="model-editor-tabs" role="tablist" aria-label="模型配置">{schemaTabs.map((item, index) => <button type="button" role="tab" key={item.id} id={`${tabId}-tab-${item.id}`} aria-controls={`${tabId}-panel-${item.id}`} aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} onClick={() => setTab(item.id)} onKeyDown={(event) => navigateTabs(event, index)}>{item.label}{(item.id === 'properties' || item.id === 'indexes') && <span aria-hidden="true">{item.id === 'properties' ? definition.schema!.properties.length : definition.schema!.indexes?.length ?? 0}</span>}</button>)}</div>}
       <fieldset disabled={disabled} className="model-fieldset">
+        <section className="model-editor-panel" {...panelProps('basics')}>
         <div className="form-grid model-basics">
           <label>业务名称<input className="field" autoFocus value={definition.name} maxLength={128} onChange={(event) => update({ name: event.target.value })} placeholder="例如：生产设备" /></label>
-          <label>类型<select className="field" disabled={!!record} value={definition.kind} onChange={(event) => setDefinition(newDefinition(event.target.value as Kind, categoryId, definition.groupId))}>{Object.entries(kindLabels).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select></label>
+          <label>类型<select className="field" disabled={!!record} value={definition.kind} onChange={(event) => { setDefinition(newDefinition(event.target.value as Kind, categoryId, definition.groupId)); setTab('basics') }}>{Object.entries(kindLabels).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select></label>
           <label>分类<input className="field" readOnly value={category?.name ?? '未选择分类'} /></label>
           <label>分组<select className="field" disabled={!!record || groupsLoading || !category} value={definition.groupId} onChange={(event) => update({ groupId: event.target.value })}><option value="">{groupsLoading ? '正在读取分组…' : '选择分组'}</option>{record && definition.groupId && !groups.some((group) => group.id === definition.groupId) && <option value={definition.groupId}>当前分组</option>}{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
           <label className="model-span-full">描述<textarea className="field" rows={2} value={definition.description ?? ''} onChange={(event) => update({ description: event.target.value })} placeholder="说明这一业务定义的用途与边界" /></label>
         </div>
         {groupError && <div className="notice notice-error">{groupError}</div>}
         {!record && (!category || !groupsLoading && !groupError && !groups.length) && <div className="notice"><p>{category ? '当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。' : '请先在顶部选择当前分类，或前往「分类与分组」创建分类和分组。'}</p><button type="button" className="button subtle" onClick={onOrganizations}>前往分类与分组<ArrowRight size={15} /></button></div>}
+        {definition.schema && <SchemaStorageEditor section="storage" api={api} schema={definition.schema} locked={locked} active={active} onSources={onSources} onChange={(schema) => update({ schema })} />}
+        </section>
         {definition.schema && <>
-          <SchemaStorageEditor api={api} schema={definition.schema} locked={locked} active={active} onSources={onSources} onChange={(schema) => update({ schema })} />
+          <section className="model-editor-panel" {...panelProps('properties')}>
           <PropertyEditor title="对象属性" properties={definition.schema.properties} locked={locked} allowAppend={allowAppend} enums={currentEnums} allowEnumBinding={false} maxProperties={MAX_SCHEMA_PROPERTIES} onChange={(properties) => update({ schema: { ...definition.schema!, properties, indexes: (definition.schema!.indexes ?? []).filter((index) => index.fieldIds.every((id) => properties.some((property) => property.id === id))) } })} />
-          <section><div className="model-section-heading"><div><h3>索引</h3><p className="muted">最多 {MAX_SCHEMA_INDEXES} 个普通或唯一索引，每个索引最多组合两个属性。长文本和超长文本不支持索引。</p></div>{!locked && <button type="button" className="button subtle" disabled={!definition.schema.properties.some((property) => property.id && property.dataType !== 'text' && property.dataType !== 'longtext') || (definition.schema.indexes?.length ?? 0) >= MAX_SCHEMA_INDEXES} onClick={() => update({ schema: { ...definition.schema!, indexes: [...definition.schema!.indexes ?? [], { id: '', name: '', unique: false, fieldIds: [] }] } })}><Plus size={15} />添加索引</button>}</div>
+          <SchemaStorageEditor section="mappings" api={api} schema={definition.schema} locked={locked} active={active} onChange={(schema) => update({ schema })} />
+          </section>
+          <section className="model-editor-panel" {...panelProps('indexes')}><div className="model-section-heading"><div><h3>索引</h3><p className="muted">最多 {MAX_SCHEMA_INDEXES} 个普通或唯一索引，每个索引最多组合两个属性。长文本和超长文本不支持索引。</p></div>{!locked && <button type="button" className="button subtle" disabled={!definition.schema.properties.some((property) => property.id && property.dataType !== 'text' && property.dataType !== 'longtext') || (definition.schema.indexes?.length ?? 0) >= MAX_SCHEMA_INDEXES} onClick={() => update({ schema: { ...definition.schema!, indexes: [...definition.schema!.indexes ?? [], { id: '', name: '', unique: false, fieldIds: [] }] } })}><Plus size={15} />添加索引</button>}</div>
             {definition.schema.properties.some((property) => !property.id) && <div className="notice model-index-hint">新增属性需先保存草稿，再在此选择属性建立索引。</div>}
             {(definition.schema.indexes ?? []).length === 0 && <div className="model-inline-empty">尚未设置索引。</div>}
             {(definition.schema.indexes ?? []).map((index, position) => <div className="model-index-row" key={index.id || `new-index-${position}`}>
@@ -194,6 +235,8 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
               {!locked && <button type="button" className="button subtle model-icon-button" aria-label={`删除索引${position + 1}`} onClick={() => update({ schema: { ...definition.schema!, indexes: definition.schema!.indexes!.filter((_, offset) => offset !== position) } })}><Trash2 size={16} /></button>}
             </div>)}
           </section>
+          <section className="model-editor-panel" {...panelProps('links')}><RelatedDefinitions kind="link" definition={definition} entries={authorizedEntries} currentEntries={currentEntries} categories={categories} /></section>
+          <section className="model-editor-panel" {...panelProps('actions')}><RelatedDefinitions kind="action" definition={definition} entries={authorizedEntries} currentEntries={currentEntries} categories={categories} /></section>
         </>}
         {definition.enum && <section><div className="model-section-heading"><div><h3>枚举业务值</h3><p className="muted">业务编码保持稳定，显示标签用于业务界面。</p></div>{!locked && <button type="button" className="button subtle" onClick={() => update({ enum: { values: [...definition.enum!.values, { code: '', label: '', deprecated: false }] } })}><Plus size={15} />添加值</button>}</div><div className="table-wrap"><table><thead><tr><th>业务编码</th><th>显示标签</th><th>状态</th>{!locked && <th>操作</th>}</tr></thead><tbody>{definition.enum.values.map((value, position) => <tr key={position}><td><input className="field" disabled={locked} value={value.code} aria-label={`枚举值${position + 1}编码`} onChange={(event) => update({ enum: { values: definition.enum!.values.map((entry, offset) => offset === position ? { ...entry, code: event.target.value } : entry) } })} placeholder="例如：RUNNING" /></td><td><input className="field" value={value.label} aria-label={`枚举值${position + 1}标签`} onChange={(event) => update({ enum: { values: definition.enum!.values.map((entry, offset) => offset === position ? { ...entry, label: event.target.value } : entry) } })} placeholder="例如：运行中" /></td><td><label className="model-checkbox"><input type="checkbox" disabled={locked} checked={!!value.deprecated} onChange={(event) => update({ enum: { values: definition.enum!.values.map((entry, offset) => offset === position ? { ...entry, deprecated: event.target.checked } : entry) } })} />停用值</label></td>{!locked && <td><button type="button" className="button subtle model-icon-button" aria-label={`删除枚举值${position + 1}`} onClick={() => update({ enum: { values: definition.enum!.values.filter((_, offset) => offset !== position) } })}><Trash2 size={16} /></button></td>}</tr>)}</tbody></table></div></section>}
         {definition.link && <section><div className="model-section-heading"><div><h3>关系两端</h3><p className="muted">仅选择已经生效的对象模型，支持同一模型之间的关系。</p></div></div><div className="form-grid">
@@ -207,7 +250,7 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
         {(definition.action || definition.function) && (() => {
           const key = definition.action ? 'action' : 'function'
           const callable = definition[key]!
-          return <><section><div className="model-section-heading"><div><h3>实现声明</h3><p className="muted">当前支持元数据登记与发现，暂未开放执行。</p></div></div><div className="form-grid"><label>产物引用<input className="field" disabled={locked} value={callable.artifactRef ?? ''} onChange={(event) => update({ [key]: { ...callable, artifactRef: event.target.value || undefined } })} placeholder="例如：registry.example.com/business/handler" /></label><label>副作用<select className="field" disabled={locked} value={callable.sideEffects} onChange={(event) => update({ [key]: { ...callable, sideEffects: event.target.value as Callable['sideEffects'] } })}><option value="none">无副作用</option><option value="dataWrite">写入业务数据</option><option value="externalWrite">修改外部系统</option></select></label>{definition.action && <label className="model-span-full">实现函数<select className="field" disabled={locked} value={callable.functionId ?? ''} onChange={(event) => update({ action: { ...callable, functionId: event.target.value || undefined } })}><option value="">暂不绑定函数</option>{callable.functionId && !currentFunctions.some((entry) => entry.definition.id === callable.functionId) && <option value={callable.functionId}>当前实现函数（无目录权限）</option>}{currentFunctions.map(({ definition: fn }) => <option key={fn.id} value={fn.id}>{fn.name}</option>)}</select></label>}</div></section><PropertyEditor title="输入参数" properties={callable.input ?? []} enums={currentEnums} locked={locked} onChange={(input) => update({ [key]: { ...callable, input } })} /><PropertyEditor title="输出参数" properties={callable.output ?? []} enums={currentEnums} locked={locked} onChange={(output) => update({ [key]: { ...callable, output } })} /></>
+          return <>{definition.action && <ActionTargetsEditor selected={callable.targetSchemaIds ?? []} schemas={currentSchemas} categories={categories} onChange={(targetSchemaIds) => update({ action: { ...callable, targetSchemaIds: targetSchemaIds.length ? targetSchemaIds : undefined } })} />}<section><div className="model-section-heading"><div><h3>实现声明</h3><p className="muted">当前支持元数据登记与发现，暂未开放执行。</p></div></div><div className="form-grid"><label>产物引用<input className="field" disabled={locked} value={callable.artifactRef ?? ''} onChange={(event) => update({ [key]: { ...callable, artifactRef: event.target.value || undefined } })} placeholder="例如：registry.example.com/business/handler" /></label><label>副作用<select className="field" disabled={locked} value={callable.sideEffects} onChange={(event) => update({ [key]: { ...callable, sideEffects: event.target.value as Callable['sideEffects'] } })}><option value="none">无副作用</option><option value="dataWrite">写入业务数据</option><option value="externalWrite">修改外部系统</option></select></label>{definition.action && <label className="model-span-full">实现函数<select className="field" disabled={locked} value={callable.functionId ?? ''} onChange={(event) => update({ action: { ...callable, functionId: event.target.value || undefined } })}><option value="">暂不绑定函数</option>{callable.functionId && !currentFunctions.some((entry) => entry.definition.id === callable.functionId) && <option value={callable.functionId}>当前实现函数（无目录权限）</option>}{currentFunctions.map(({ definition: fn }) => <option key={fn.id} value={fn.id}>{fn.name}</option>)}</select></label>}</div></section><PropertyEditor title="输入参数" properties={callable.input ?? []} enums={currentEnums} locked={locked} onChange={(input) => update({ [key]: { ...callable, input } })} /><PropertyEditor title="输出参数" properties={callable.output ?? []} enums={currentEnums} locked={locked} onChange={(output) => update({ [key]: { ...callable, output } })} /></>
         })()}
       </fieldset>
       {preview && <section className="model-preview"><div className="model-section-heading"><div><h3><FileCode2 size={17} />存储计划预览</h3><p className="muted">预览不会执行 SQL，也不会占用发布状态。</p></div></div>{preview.statements?.length ? <pre>{preview.statements.join('\n\n')}</pre> : <p className="model-inline-empty">此变更没有需要执行的存储语句。</p>}</section>}

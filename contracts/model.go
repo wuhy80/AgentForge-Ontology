@@ -107,11 +107,14 @@ type Link struct {
 // Callable definitions are discoverable metadata in the first increment;
 // invocation is advertised separately in capabilities.
 type Callable struct {
-	Input       []Property `json:"input,omitempty"`
-	Output      []Property `json:"output,omitempty"`
-	FunctionID  string     `json:"functionId,omitempty"`
-	ArtifactRef string     `json:"artifactRef,omitempty"`
-	SideEffects string     `json:"sideEffects"`
+	Input  []Property `json:"input,omitempty"`
+	Output []Property `json:"output,omitempty"`
+	// TargetSchemaIDs associates Action metadata with existing schemas. It does
+	// not grant invocation or instance access and is unsupported on Function.
+	TargetSchemaIDs []string `json:"targetSchemaIds,omitempty"`
+	FunctionID      string   `json:"functionId,omitempty"`
+	ArtifactRef     string   `json:"artifactRef,omitempty"`
+	SideEffects     string   `json:"sideEffects"`
 }
 
 type Organization struct {

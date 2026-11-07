@@ -46,6 +46,7 @@ test('真实服务：分类、可重新发现的草稿、发布、精确查询�
   await dialog.getByLabel('业务名称', { exact: true }).fill('精密设备')
   await dialog.getByRole('combobox', { name: '分组', exact: true }).selectOption({ label: '基础模型' })
   await dialog.getByLabel('描述', { exact: true }).fill('中文建模与精确数值查询的浏览器验收模型')
+  await dialog.getByRole('tab', { name: '属性配置', exact: true }).click()
   await dialog.getByLabel('对象属性第1项名称').fill('设备名称')
   for (const [index, name, type] of [[2, '累计计数', 'int64'], [3, '测量值', 'decimal'], [4, '备注', 'string']] as const) {
     await dialog.getByRole('button', { name: '添加属性', exact: true }).click()
@@ -63,6 +64,7 @@ test('真实服务：分类、可重新发现的草稿、发布、精确查询�
   await expect(page.getByRole('combobox', { name: '当前分类', exact: true }).locator('option:checked')).toHaveText(category)
   await page.getByRole('button', { name: '精密设备', exact: true }).click()
   dialog = page.getByRole('region', { name: '模型编辑', exact: true })
+  await dialog.getByRole('tab', { name: '索引信息', exact: true }).click()
   await dialog.getByRole('button', { name: '添加索引', exact: true }).click()
   await dialog.getByLabel('索引1名称').fill('按设备名称')
   await dialog.getByLabel('索引1第一个属性').selectOption({ label: '设备名称' })

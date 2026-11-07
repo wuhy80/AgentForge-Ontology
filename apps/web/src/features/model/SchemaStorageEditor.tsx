@@ -14,13 +14,14 @@ function SourceOptions({ sources, selected }: { sources: DataSource[]; selected:
   return <><option value="">选择数据源</option>{selected && !sources.some((source) => source.id === selected) && <option value={selected}>当前绑定数据源（目录不可见）</option>}{sources.map((source) => <option key={source.id} value={source.id} disabled={!source.enabled}>{source.name} · {source.driver === 'postgresql' ? 'PostgreSQL' : 'MySQL'}{!source.enabled ? '（已停用）' : ''}</option>)}</>
 }
 
-export function SchemaStorageEditor({ api, schema, onChange, locked, active, onSources }: {
+export function SchemaStorageEditor({ api, schema, onChange, locked, active, onSources, section = 'all' }: {
   api: ApiClient
   schema: Schema
   onChange: (schema: Schema) => void
   locked: boolean
   active: boolean
   onSources?: () => void
+  section?: 'all' | 'storage' | 'mappings'
 }) {
   const [sources, setSources] = useState<DataSource[]>([])
   const [tables, setTables] = useState<SourceTableInfo[]>([])
@@ -49,13 +50,13 @@ export function SchemaStorageEditor({ api, schema, onChange, locked, active, onS
 
   useEffect(() => {
     setTables([])
-    if (!active || !binding?.dataSourceId) return
+    if (!active || section === 'mappings' || !binding?.dataSourceId) return
     const controller = new AbortController()
     api.listSourceTables(binding.dataSourceId, binding.namespace, controller.signal).then((items) => {
       if (!controller.signal.aborted) setTables(items)
     }).catch(() => { /* Manual target table entry stays available for forward modeling. */ })
     return () => controller.abort()
-  }, [api, active, binding?.dataSourceId, binding?.namespace])
+  }, [api, active, section, binding?.dataSourceId, binding?.namespace])
 
   function updateBinding(patch: Partial<StorageBinding>) {
     if (!binding) return
@@ -98,7 +99,8 @@ export function SchemaStorageEditor({ api, schema, onChange, locked, active, onS
     finally { setInspecting(false) }
   }
 
-  return <section className="model-storage-section" aria-label="存储与映射">
+  return <section className="model-storage-section" aria-label={section === 'mappings' ? '属性数据源与列映射' : '存储与映射'}>
+    {section !== 'mappings' && <>
     <div className="model-section-heading"><div><h3><Database size={17} />存储方向与主表</h3><p className="muted">主表标识业务对象；每个属性可绑定同表、其他表或其他数据源的列。</p></div>{onSources && <button type="button" className="button subtle" onClick={onSources}>数据源配置<ArrowRight size={14} /></button>}</div>
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     {notice && <div className="notice notice-success" role="status">{notice}</div>}
@@ -114,7 +116,9 @@ export function SchemaStorageEditor({ api, schema, onChange, locked, active, onS
     </div>
     <p className="muted model-storage-explanation">{!binding ? '平台自动维护表和属性列；选择已配置的数据源后，可显式设置表列映射。' : schema.mode === 'schema_2_db' ? '以模型为准：保存草稿不修改数据库，预览后显式发布，创建或安全增加目标表列；已有未纳管表不会被直接覆盖。' : '以数据库为准：读取并校验已有表结构，不创建、修改或删除源表。源列名称需人工补充中文业务名称。'}</p>
     {binding && schema.mode === 'db_2_schema' && !locked && <button type="button" className="button" disabled={inspecting || !binding.table} onClick={() => void importColumns()}>{inspecting ? <LoaderCircle size={15} className="model-spin" /> : <RefreshCw size={15} />}从主表读取属性</button>}
-    {binding && <>
+    </>}
+    {section === 'mappings' && error && <div className="notice notice-error" role="alert">{error}</div>}
+    {section !== 'storage' && binding && <>
       <div className="model-section-heading model-mapping-heading"><div><h3>属性数据源与列映射</h3><p className="muted">其他来源通过唯一关联键匹配主表对象主键，每个对象最多匹配一行。跨来源属性须允许空值；一对多使用关系或子对象。</p></div></div>
       <div className="model-property-mappings">{schema.properties.map((property, index) => <PropertyMappingEditor key={property.id || `mapping-${index}`} api={api} index={index} property={property} binding={binding} sources={sources} locked={locked && !!property.id} onChange={(mapping) => onChange({ ...schema, properties: schema.properties.map((item, offset) => offset === index ? { ...item, mapping } : item) })} />)}</div>
       <p className="muted model-storage-explanation">当前跨来源属性支持投影读取，筛选与排序使用主表属性。绑定对象暂不提供实例写入；多来源结构同步可恢复，不承诺跨库原子提交。</p>
