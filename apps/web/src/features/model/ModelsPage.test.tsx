@@ -35,6 +35,16 @@ async function edit() {
 async function selectTab(editor: HTMLElement, name: string) {
   await userEvent.click(within(editor).getByRole('tab', { name }))
 }
+async function editProperty(editor: HTMLElement, index = 1) {
+  await userEvent.click(within(editor).getByRole('button', { name: `编辑对象属性第${index}项` }))
+  return screen.findByRole('dialog', { name: '编辑属性' })
+}
+async function renameProperty(editor: HTMLElement, name: string, index = 1) {
+  const dialog = await editProperty(editor, index)
+  await userEvent.clear(within(dialog).getByLabelText(`对象属性第${index}项名称`))
+  await userEvent.type(within(dialog).getByLabelText(`对象属性第${index}项名称`), name)
+  await userEvent.click(within(dialog).getByRole('button', { name: '应用修改' }))
+}
 
 describe('模型工作流', () => {
   it('模型地址直接读取独立编辑页，返回列表更新路由', async () => {
@@ -62,19 +72,57 @@ describe('模型工作流', () => {
     mount(api, [initial])
     const editor = await edit()
     await selectTab(editor, '属性配置')
-    await within(within(editor).getByLabelText('属性1数据源')).findByRole('option', { name: '资产库 · PostgreSQL' })
-    fireEvent.change(within(editor).getByLabelText('属性1数据源'), { target: { value: 'source-b' } })
-    fireEvent.change(within(editor).getByLabelText('属性1命名空间'), { target: { value: 'public' } })
-    fireEvent.change(within(editor).getByLabelText('属性1来源表'), { target: { value: 'asset_details' } })
-    fireEvent.change(within(editor).getByLabelText('属性1映射列'), { target: { value: 'asset_name' } })
-    fireEvent.change(within(editor).getByLabelText('属性1关联键列'), { target: { value: 'equipment_id' } })
-    fireEvent.change(within(editor).getByLabelText('属性1租户列'), { target: { value: 'tenant_id' } })
+    const propertyDialog = await editProperty(editor)
+    await within(within(propertyDialog).getByLabelText('属性1数据源')).findByRole('option', { name: '资产库 · PostgreSQL' })
+    fireEvent.change(within(propertyDialog).getByLabelText('属性1数据源'), { target: { value: 'source-b' } })
+    fireEvent.change(within(propertyDialog).getByLabelText('属性1命名空间'), { target: { value: 'public' } })
+    fireEvent.change(within(propertyDialog).getByLabelText('属性1来源表'), { target: { value: 'asset_details' } })
+    fireEvent.change(within(propertyDialog).getByLabelText('属性1映射列'), { target: { value: 'asset_name' } })
+    fireEvent.change(within(propertyDialog).getByLabelText('属性1关联键列'), { target: { value: 'equipment_id' } })
+    fireEvent.change(within(propertyDialog).getByLabelText('属性1租户列'), { target: { value: 'tenant_id' } })
+    await userEvent.click(within(propertyDialog).getByRole('button', { name: '应用修改' }))
     await userEvent.click(within(editor).getByRole('button', { name: '保存草稿' }))
     await within(editor).findByText('跨来源属性“设备名称”必须允许空值。')
     expect(api.saveDraft).not.toHaveBeenCalled()
-    await userEvent.click(within(editor).getByRole('checkbox', { name: '允许空值' }))
+    const nullableDialog = await editProperty(editor)
+    await userEvent.click(within(nullableDialog).getByRole('checkbox', { name: '允许空值' }))
+    await userEvent.click(within(nullableDialog).getByRole('button', { name: '应用修改' }))
     await userEvent.click(within(editor).getByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('equipment', expect.objectContaining({ schema: expect.objectContaining({ properties: [expect.objectContaining({ id: 'name', nullable: true, mapping: { dataSourceId: 'source-b', namespace: 'public', table: 'asset_details', column: 'asset_name', keyColumn: 'equipment_id', tenantColumn: 'tenant_id' } })] }) }), 'saved-1'))
+  })
+
+  it('取消属性弹窗同时丢弃业务名称和列映射编辑', async () => {
+    const initial = record()
+    initial.definition.schema!.storageBinding = { dataSourceId: 'source-a', table: 'equipment', idColumn: 'id' }
+    initial.definition.schema!.properties[0].mapping = { dataSourceId: 'source-a', column: 'equipment_name' }
+    const api = client(initial)
+    api.listDataSources.mockResolvedValue([
+      { id: 'source-a', tenantId: 'tenant', name: '设备库', driver: 'mysql', database: 'equipment', enabled: true, etag: 'a', tenantIsolation: 'dedicated' },
+    ])
+    api.saveDraft.mockImplementation(async (_id, definition) => ({ ...initial, definition, etag: 'saved-2' }))
+    mount(api, [initial])
+    const editor = await edit()
+    await selectTab(editor, '属性配置')
+    const dialog = await editProperty(editor)
+    await userEvent.clear(within(dialog).getByLabelText('对象属性第1项名称'))
+    await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '取消后的属性')
+    fireEvent.change(within(dialog).getByLabelText('属性1映射列'), { target: { value: 'cancelled_column' } })
+    await userEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    const reopened = await editProperty(editor)
+    expect((within(reopened).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备名称')
+    expect((within(reopened).getByLabelText('属性1映射列') as HTMLInputElement).value).toBe('equipment_name')
+    await userEvent.click(within(reopened).getByRole('button', { name: '取消' }))
+    expect((within(editor).getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true)
+    await selectTab(editor, '基础信息')
+    await userEvent.clear(within(editor).getByLabelText('业务名称'))
+    await userEvent.type(within(editor).getByLabelText('业务名称'), '设备配置')
+    await userEvent.click(within(editor).getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('equipment', expect.objectContaining({
+      schema: expect.objectContaining({ properties: [expect.objectContaining({
+        id: 'name', name: '设备名称', mapping: { dataSourceId: 'source-a', column: 'equipment_name' },
+      })] }),
+    }), 'saved-1'))
   })
 
   it('反向读取源列保留已有属性ID和中文名，迟到的目录结果不覆盖新绑定', async () => {
@@ -94,7 +142,7 @@ describe('模型工作流', () => {
     await userEvent.click(within(editor).getByRole('button', { name: '从主表读取属性' }))
     await within(editor).findByText(/已载入 1 个主表属性/)
     await selectTab(editor, '属性配置')
-    expect((within(editor).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备名称')
+    expect(within(editor).getByText('设备名称')).toBeTruthy()
     await userEvent.click(within(editor).getByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('equipment', expect.objectContaining({ schema: expect.objectContaining({ properties: [expect.objectContaining({ id: 'name', name: '设备名称', mapping: expect.objectContaining({ column: 'equipment_name' }) })] }) }), 'saved-1'))
     let finish!: (value: unknown) => void
@@ -104,14 +152,14 @@ describe('模型工作流', () => {
     await userEvent.selectOptions(within(editor).getByLabelText('主表选择'), JSON.stringify(['business', 'changed_table']))
     await act(async () => finish({ namespace: 'business', name: 'equipment', columns: [], indexes: [], signature: 'late' }))
     expect((within(editor).getByLabelText('主表名称') as HTMLInputElement).value).toBe('changed_table')
-    expect((within(editor).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备名称')
+    expect(within(editor).getByText('设备名称')).toBeTruthy()
     api.inspectSourceTable.mockResolvedValueOnce({ namespace: 'business', name: 'changed_table', signature: 'generated', indexes: [], columns: [
       { name: 'id', databaseType: 'bigint', dataType: 'int64', nullable: false, primaryKey: true, generated: true, position: 1 },
       { name: 'derived_name', databaseType: 'varchar(255)', dataType: 'string', nullable: false, primaryKey: false, generated: true, position: 2 },
     ] })
     await userEvent.click(within(editor).getByRole('button', { name: '从主表读取属性' }))
     await within(editor).findByText(/derived_name（生成列暂未支持）/)
-    expect((within(editor).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备名称')
+    expect(within(editor).getByText('设备名称')).toBeTruthy()
   })
 
   it('已生效的正向绑定允许增加可空属性，已有属性和映射保持锁定', async () => {
@@ -122,12 +170,15 @@ describe('模型工作流', () => {
     mount(api, [initial])
     const editor = await edit()
     await selectTab(editor, '属性配置')
-    expect((within(editor).getByLabelText('对象属性第1项类型') as HTMLSelectElement).disabled).toBe(true)
-    expect((within(editor).getByLabelText('属性1数据源') as HTMLSelectElement).disabled).toBe(true)
+    const existingDialog = await editProperty(editor)
+    expect((within(existingDialog).getByLabelText('对象属性第1项类型') as HTMLSelectElement).disabled).toBe(true)
+    expect((within(existingDialog).getByLabelText('属性1数据源') as HTMLSelectElement).disabled).toBe(true)
+    await userEvent.click(within(existingDialog).getByRole('button', { name: '取消' }))
     await userEvent.click(within(editor).getByRole('button', { name: '添加属性' }))
-    expect((within(editor).getByLabelText('对象属性第2项类型') as HTMLSelectElement).disabled).toBe(false)
-    expect((within(editor).getAllByRole('checkbox', { name: '允许空值' })[1] as HTMLInputElement).checked).toBe(true)
-    expect((within(editor).getAllByRole('checkbox', { name: '允许空值' })[1] as HTMLInputElement).disabled).toBe(true)
+    const newDialog = await screen.findByRole('dialog', { name: '添加属性' })
+    expect((within(newDialog).getByLabelText('对象属性第2项类型') as HTMLSelectElement).disabled).toBe(false)
+    expect((within(newDialog).getByRole('checkbox', { name: '允许空值' }) as HTMLInputElement).checked).toBe(true)
+    expect((within(newDialog).getByRole('checkbox', { name: '允许空值' }) as HTMLInputElement).disabled).toBe(true)
     expect(within(editor).queryByRole('button', { name: '删除对象属性第1项' })).toBeNull()
   })
 
@@ -150,7 +201,7 @@ describe('模型工作流', () => {
     fireEvent.change(within(dialog).getByLabelText('分组'), { target: { value: secondGroup.id } })
     await userEvent.type(within(dialog).getByLabelText('业务名称'), '质检项目')
     await selectTab(dialog, '属性配置')
-    await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '项目名称')
+    await renameProperty(dialog, '项目名称')
     const created = record()
     Object.assign(created.definition, { categoryId: 'quality', groupId: secondGroup.id, name: '质检项目' })
     created.definition.schema!.properties[0].name = '项目名称'
@@ -208,7 +259,7 @@ describe('模型工作流', () => {
     await within(dialog).findByText('当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。')
     await userEvent.type(within(dialog).getByLabelText('业务名称'), '待完成的设备模型')
     await selectTab(dialog, '属性配置')
-    await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '设备编码')
+    await renameProperty(dialog, '设备编码')
     await selectTab(dialog, '基础信息')
     await userEvent.click(within(dialog).getByRole('button', { name: '前往分类与分组' }))
     expect(onOrganizations).toHaveBeenCalledTimes(1)
@@ -221,7 +272,9 @@ describe('模型工作流', () => {
     await within(dialog).findByRole('option', { name: '基础资料' })
     expect(api.listGroups).toHaveBeenCalledTimes(2)
     expect((within(dialog).getByLabelText('业务名称') as HTMLInputElement).value).toBe('待完成的设备模型')
-    expect((within(dialog).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备编码')
+    await selectTab(dialog, '属性配置')
+    expect(within(within(dialog).getByRole('table', { name: '对象属性列表' })).getByText('设备编码')).toBeTruthy()
+    await selectTab(dialog, '基础信息')
     fireEvent.change(within(dialog).getByLabelText('分组'), { target: { value: 'group' } })
     expect((within(dialog).getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(false)
   })
@@ -345,7 +398,9 @@ describe('模型工作流', () => {
     mount(api, [initial])
     const dialog = await edit()
     await selectTab(dialog, '属性配置')
-    expect((within(dialog).getByLabelText('对象属性第1项类型') as HTMLSelectElement).disabled).toBe(true)
+    const propertyDialog = await editProperty(dialog)
+    expect((within(propertyDialog).getByLabelText('对象属性第1项类型') as HTMLSelectElement).disabled).toBe(true)
+    await userEvent.click(within(propertyDialog).getByRole('button', { name: '取消' }))
     await selectTab(dialog, '基础信息')
     const name = within(dialog).getByLabelText('业务名称')
     await userEvent.clear(name); await userEvent.type(name, '本地设备名称')
@@ -364,7 +419,7 @@ describe('模型工作流', () => {
     await waitFor(() => expect(within(dialog).getByRole('option', { name: '基础资料' })).toBeTruthy())
     fireEvent.change(within(dialog).getByLabelText('分组'), { target: { value: 'group' } })
     await selectTab(dialog, '属性配置')
-    await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '车间编码')
+    await renameProperty(dialog, '车间编码')
     await selectTab(dialog, '索引信息')
     expect((within(dialog).getByRole('button', { name: '添加索引' }) as HTMLButtonElement).disabled).toBe(true)
     const created = record(); created.definition.name = '车间'; created.definition.schema!.properties[0].name = '车间编码'

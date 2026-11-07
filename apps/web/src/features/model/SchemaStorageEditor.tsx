@@ -15,7 +15,7 @@ function SourceOptions({ sources, selected }: { sources: DataSource[]; selected:
 }
 
 // Share in-flight discovery between properties bound to the same source/table.
-function createCatalog(api: ApiClient) {
+export function createCatalog(api: ApiClient) {
   const tables = new Map<string, Promise<SourceTableInfo[]>>()
   const columns = new Map<string, Promise<SourceTable>>()
   return {
@@ -197,7 +197,7 @@ function EffectiveStorageMapping({ api, schema, currentId, currentETag, draft, a
   </section>
 }
 
-function PropertyMappingEditor({ catalog, active, forward, index, property, binding, sources, locked, onChange }: {
+export function PropertyMappingEditor({ catalog, active, forward, index, property, binding, sources, locked, onChange }: {
   catalog: Catalog
   active: boolean
   forward: boolean

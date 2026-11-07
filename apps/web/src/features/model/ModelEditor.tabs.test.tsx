@@ -51,26 +51,34 @@ async function selectTab(name: string) {
   await userEvent.click(screen.getByRole('tab', { name }))
   return screen.getByRole('tabpanel', { name })
 }
+async function editProperty(index = 1) {
+  await userEvent.click(screen.getByRole('button', { name: `编辑对象属性第${index}项` }))
+  return screen.findByRole('dialog', { name: '编辑属性' })
+}
 
 describe('对象编辑页签', () => {
   it('从其他页签保存时切到存在无效属性或索引的配置页，并保留本地内容', async () => {
     const { api, props } = fixture()
     render(<ModelEditor {...props} />)
     await selectTab('属性配置')
-    await userEvent.clear(screen.getByLabelText('对象属性第1项名称'))
+    const invalidDialog = await editProperty()
+    await userEvent.clear(within(invalidDialog).getByLabelText('对象属性第1项名称'))
+    await userEvent.click(within(invalidDialog).getByRole('button', { name: '应用修改' }))
     await selectTab('动作信息')
     await userEvent.click(screen.getByRole('button', { name: '保存草稿' }))
     expect(screen.getByRole('tab', { name: '属性配置', selected: true })).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toContain('请填写属性的业务名称')
-    await userEvent.type(screen.getByLabelText('对象属性第1项名称'), '设备中文名称')
+    const dialog = await editProperty()
+    await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '设备中文名称')
+    await userEvent.click(within(dialog).getByRole('button', { name: '应用修改' }))
     await selectTab('索引信息')
     await userEvent.clear(screen.getByLabelText('索引1名称'))
     await selectTab('Link 信息')
     await userEvent.click(screen.getByRole('button', { name: '保存草稿' }))
     expect(screen.getByRole('tab', { name: '索引信息', selected: true })).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toContain('请填写索引名称')
-    await selectTab('属性配置')
-    expect((screen.getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备中文名称')
+    const propertiesPanel = await selectTab('属性配置')
+    expect(within(within(propertiesPanel).getByRole('table', { name: '对象属性列表' })).getByText('设备中文名称')).toBeTruthy()
     expect(api.saveDraft).not.toHaveBeenCalled()
   })
 
@@ -103,15 +111,17 @@ describe('对象编辑页签', () => {
     await userEvent.clear(screen.getByLabelText('业务名称'))
     await userEvent.type(screen.getByLabelText('业务名称'), '设备台账')
     await selectTab('属性配置')
-    await userEvent.clear(screen.getByLabelText('对象属性第1项名称'))
-    await userEvent.type(screen.getByLabelText('对象属性第1项名称'), '设备中文名称')
+    const dialog = await editProperty()
+    await userEvent.clear(within(dialog).getByLabelText('对象属性第1项名称'))
+    await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '设备中文名称')
+    await userEvent.click(within(dialog).getByRole('button', { name: '应用修改' }))
     await selectTab('索引信息')
     await userEvent.clear(screen.getByLabelText('索引1名称'))
     await userEvent.type(screen.getByLabelText('索引1名称'), '中文名称索引')
     await selectTab('基础信息')
     expect((screen.getByLabelText('业务名称') as HTMLInputElement).value).toBe('设备台账')
-    await selectTab('属性配置')
-    expect((screen.getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备中文名称')
+    const propertiesPanel = await selectTab('属性配置')
+    expect(within(within(propertiesPanel).getByRole('table', { name: '对象属性列表' })).getByText('设备中文名称')).toBeTruthy()
     await selectTab('Link 信息')
     await userEvent.click(screen.getByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('equipment', expect.objectContaining({
@@ -121,6 +131,45 @@ describe('对象编辑页签', () => {
       }),
     }), 'etag-equipment'))
     expect(screen.getByRole('tab', { name: 'Link 信息', selected: true })).toBeTruthy()
+  })
+
+  it('属性以行展示，取消编辑和新增不改变草稿，确认后才添加属性', async () => {
+    const { api, props } = fixture()
+    render(<ModelEditor {...props} />)
+    const panel = await selectTab('属性配置')
+    const propertiesTable = within(panel).getByRole('table', { name: '对象属性列表' })
+    expect(within(propertiesTable).getByText('设备名称')).toBeTruthy()
+    expect(within(panel).queryByLabelText('对象属性第1项名称')).toBeNull()
+    expect(within(panel).queryByLabelText('属性1数据源')).toBeNull()
+
+    const editDialog = await editProperty()
+    await userEvent.clear(within(editDialog).getByLabelText('对象属性第1项名称'))
+    await userEvent.type(within(editDialog).getByLabelText('对象属性第1项名称'), '取消后的名称')
+    await userEvent.click(within(editDialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(within(propertiesTable).getByText('设备名称')).toBeTruthy()
+    expect(within(propertiesTable).queryByText('取消后的名称')).toBeNull()
+
+    await userEvent.click(within(panel).getByRole('button', { name: '添加属性' }))
+    const cancelledAdd = await screen.findByRole('dialog', { name: '添加属性' })
+    await userEvent.type(within(cancelledAdd).getByLabelText('对象属性第2项名称'), '取消新增属性')
+    await userEvent.click(within(cancelledAdd).getByRole('button', { name: '取消' }))
+    expect(within(panel).queryByRole('button', { name: '编辑对象属性第2项' })).toBeNull()
+
+    await userEvent.click(within(panel).getByRole('button', { name: '添加属性' }))
+    const addDialog = await screen.findByRole('dialog', { name: '添加属性' })
+    await userEvent.type(within(addDialog).getByLabelText('对象属性第2项名称'), '设备编码')
+    await userEvent.click(within(addDialog).getByRole('button', { name: '添加属性' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(within(propertiesTable).getByText('设备编码')).toBeTruthy()
+    expect(api.saveDraft).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('equipment', expect.objectContaining({
+      schema: expect.objectContaining({ properties: [
+        expect.objectContaining({ id: 'name-field', name: '设备名称' }),
+        expect.objectContaining({ name: '设备编码' }),
+      ] }),
+    }), 'etag-equipment'))
   })
 
   it('只在进入数据预览时读取当前定义与数据，返回基础信息保留未保存编辑', async () => {

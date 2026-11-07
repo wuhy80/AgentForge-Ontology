@@ -37,6 +37,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [分类与分组](src/features/organizations/OrganizationsPage.tsx) | 独立维护分类及当前分类下的分组，列出目录、创建分类和分组；组织移动、重命名与删除尚未开放 |
 | [模型管理](src/features/model/ModelsPage.tsx) | 分组紧凑列表及独立模型编辑地址，支持刷新、返回、未保存离开保护；五类定义、草稿、预览与生效恢复 |
 | [对象编辑](src/features/model/ModelEditor.tsx) | 基础信息、属性配置、索引信息、Link 信息、动作信息及数据预览；关联定义可跳转，跨页签保留修改 |
+| [对象属性](src/features/model/SchemaPropertiesEditor.tsx) | 紧凑属性列表及每行编辑对话框，集中维护单属性和表列映射；应用到页面草稿、取消回滚，实际字段类型和存在状态在同一弹窗内按需核对 |
 | [数据预览](src/features/model/ModelDataPreview.tsx) | 直接读取当前生效对象的小页实例，选择字段和记录，底部按 Link 正反方向预览关联数据；不提供业务写入入口 |
 | [Schema 映射](src/features/model/SchemaStorageEditor.tsx) | 两种建模方向、主表稳定身份及逐属性跨源/跨表目录选择；默认平台存储也展示实际生效表列，草稿与生效映射分开标识；反向导入保留已有属性身份 |
 | [Link 映射](src/features/model/LinkStorageEditor.tsx) | 区分纯定义、平台关系表、已有外部关联表和外键；可视化表列选择、关系示意、一次性补绑定 |

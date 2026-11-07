@@ -121,6 +121,31 @@
 .model-effective-mapping-table th, .model-effective-mapping-table td { padding: 7px 10px; font-size: 11px; vertical-align: middle; }
 .model-effective-mapping-table td { max-width: 280px; overflow-wrap: anywhere; }
 .model-effective-mapping-table td code { font-size: 10px; }
+.model-property-summary table { min-width: 820px; }
+.model-property-summary th, .model-property-summary td { padding: 5px 10px; font-size: 12px; vertical-align: middle; white-space: nowrap; }
+.model-property-summary td { max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
+.model-property-summary td strong { font-weight: 500; color: #365440; }
+.model-property-summary td code { font-size: 11px; }
+.model-property-row-actions { display: flex; align-items: center; gap: 4px; }
+.model-property-row-actions .button { min-height: 26px; padding: 3px 5px; font-size: 11px; line-height: 18px; }
+.model-property-storage-status { min-width: 0; margin-top: 12px; padding-top: 10px; border-top: 1px solid #e4eae1; }
+.model-property-storage-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: #52735a; }
+.model-property-storage-heading .button { padding: 3px 6px; font-size: 11px; }
+.model-property-storage-location { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 10px 0; }
+.model-property-storage-location > div { min-width: 0; }
+.model-property-storage-location dt { margin-bottom: 4px; font-size: 11px; color: #78877c; }
+.model-property-storage-location dd { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.model-property-storage-result { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; }
+.model-property-storage-result .model-mapping-warning { margin: 0; }
+.model-property-dialog-fields { display: grid; gap: 22px; min-width: 0; border: 0; padding: 0; margin: 0; }
+.model-property-dialog-fields > section { min-width: 0; }
+.model-property-dialog-fields h3 { margin: 0 0 12px; font-size: 14px; color: #365440; }
+.model-property-dialog-fields p { font-size: 12px; line-height: 1.7; }
+.model-property-dialog-options { margin-top: 14px; }
+.model-property-dialog .model-mapping-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 600px) {
+  .model-property-dialog .model-mapping-grid { grid-template-columns: minmax(0, 1fr); }
+}
 .model-editor-meta { display: flex; align-items: center; gap: 8px; }
 .model-editor-tabs { display: flex; gap: 5px; min-width: 0; max-width: 100%; overflow-x: auto; border-bottom: 1px solid #e3eae1; }
 .model-editor-tabs > button { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 11px 15px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #78877c; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
