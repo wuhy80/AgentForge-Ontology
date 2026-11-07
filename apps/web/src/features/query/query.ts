@@ -26,7 +26,7 @@ export const operators = [
 
 export function availableOperators(property?: Property) {
   return operators.filter(({ value }) => {
-    if (value === 'startsWith') return property?.dataType === 'string' || property?.dataType === 'text';
+    if (value === 'startsWith') return property?.dataType === 'string' || property?.dataType === 'text' || property?.dataType === 'longtext';
     return property?.dataType !== 'boolean' || !['gt', 'gte', 'lt', 'lte'].includes(value);
   });
 }
@@ -39,6 +39,9 @@ export function parseFieldValue(property: Property, text: string): JsonValue {
       return text;
     case 'text':
       if (new TextEncoder().encode(text).length > 65535) fail('内容超过 65535 字节');
+      return text;
+    case 'longtext':
+      if (new TextEncoder().encode(text).length > 4 * 1024 * 1024) fail('内容超过 4 MiB（UTF-8 字节）');
       return text;
     case 'uuid':
       if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(text)) fail('请输入完整 UUID');
@@ -115,7 +118,7 @@ export function compileQuery(schemaId: string, properties: Property[], editor: Q
   if (!/^\d+$/.test(editor.limit) || Number(editor.limit) < 1 || Number(editor.limit) > 100) throw new Error('每页条数应为 1 至 100 的整数');
   const where = compileFilter(editor.filter, properties);
   const sort = properties.find((property) => property.id === editor.sort);
-  if (editor.sort && (!sort || sort.dataType === 'text')) throw new Error('当前字段不支持排序');
+  if (editor.sort && (!sort || sort.dataType === 'text' || sort.dataType === 'longtext')) throw new Error('当前字段不支持排序');
   return {
     from: { schemaId }, select: [...editor.select], ...(where ? { where } : {}),
     ...(sort ? { orderBy: [{ field: sort.id, direction: editor.direction }] } : {}),

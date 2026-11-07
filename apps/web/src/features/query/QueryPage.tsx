@@ -214,7 +214,7 @@ function QueryWorkspace({ api, schema, createIntents }: { api: ApiClient; schema
           </label>)}</div>
         </section><section><div className="query-step-title"><span>03</span><h3>排序与分页</h3></div>
           <div className="query-sort-settings"><div className="field"><label htmlFor="query-sort">排序字段</label><select id="query-sort" value={editor.sort} onChange={(event) => change({ sort: event.target.value })}>
-            <option value="">实例 ID（默认）</option>{properties.filter((property) => property.dataType !== 'text').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
+            <option value="">实例 ID（默认）</option>{properties.filter((property) => property.dataType !== 'text' && property.dataType !== 'longtext').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
           </select></div><div className="form-grid"><div className="field"><label htmlFor="query-direction">排序方向</label><select id="query-direction" value={editor.direction} disabled={!editor.sort} onChange={(event) => change({ direction: event.target.value as 'asc' | 'desc' })}><option value="asc">升序</option><option value="desc">降序</option></select></div>
             <div className="field"><label htmlFor="query-limit">每页条数</label><input id="query-limit" type="number" min="1" max="100" step="1" value={editor.limit} onChange={(event) => change({ limit: event.target.value })} /></div></div>
             <p className="muted query-sort-hint"><ArrowDownWideNarrow size={14} />结果由服务端排序和分页，每页最多 100 条。</p>

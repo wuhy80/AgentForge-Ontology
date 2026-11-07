@@ -24,7 +24,8 @@ export function ValueInput({ property, value, onChange, disabled, id }: {
       <option value="">请选择</option><option value="true">是（true）</option><option value="false">否（false）</option>
     </select>;
   }
-  if (property.dataType === 'text') return <textarea id={id} rows={3} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} />;
+  if (property.dataType === 'text' || property.dataType === 'longtext') return <textarea id={id} rows={property.dataType === 'longtext' ? 8 : 3} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}
+    placeholder={property.dataType === 'longtext' ? '支持多行正文，最多 4 MiB（UTF-8 字节）' : undefined} />;
   return <input id={id} type="text" value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}
     autoComplete="off" spellCheck={false} inputMode={property.dataType === 'decimal' || property.dataType === 'int64' ? 'text' : undefined}
     placeholder={property.dataType === 'timestamp' ? '2026-11-06T14:30:00.123456+08:00' : property.dataType === 'uuid' ? 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' : undefined} />;

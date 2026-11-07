@@ -18,7 +18,7 @@ function ConditionInput({ condition, properties, onChange, onRemove }: { conditi
     <select aria-label="行条件运算符" value={condition.op} onChange={(event) => onChange({ ...condition, op: event.target.value })}>{availableOperators(property).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
     {noValue ? <span className="muted">无需比较值</span> : set ? <textarea aria-label="行条件集合，每行一个值" value={condition.raw} rows={2} onChange={(event) => onChange({ ...condition, raw: event.target.value })} placeholder="每行一个值" />
       : property?.dataType === 'boolean' ? <select aria-label="行条件比较值" value={condition.raw} onChange={(event) => onChange({ ...condition, raw: event.target.value })}><option value="true">是</option><option value="false">否</option></select>
-        : property?.dataType === 'text' ? <textarea aria-label="行条件比较值" value={condition.raw} rows={2} onChange={(event) => onChange({ ...condition, raw: event.target.value })} />
+        : property?.dataType === 'text' || property?.dataType === 'longtext' ? <textarea aria-label="行条件比较值" value={condition.raw} rows={2} onChange={(event) => onChange({ ...condition, raw: event.target.value })} />
         : <input aria-label="行条件比较值" type="text" value={condition.raw} onChange={(event) => onChange({ ...condition, raw: event.target.value })} placeholder={property?.dataType === 'timestamp' ? '带时区的 RFC 3339 时间' : '比较值'} />}
     <button type="button" className="icon-button" aria-label="移除行条件" onClick={onRemove}><X size={15} /></button>
   </div>

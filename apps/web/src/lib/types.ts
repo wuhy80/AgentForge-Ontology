@@ -3,7 +3,7 @@
 export type JsonValue = null | boolean | string | number | JsonValue[] | { [key: string]: JsonValue }
 export type Values = Record<string, JsonValue>
 export type Kind = 'schema' | 'enum' | 'link' | 'action' | 'function'
-export type DataType = 'string' | 'text' | 'uuid' | 'int64' | 'decimal' | 'boolean' | 'timestamp'
+export type DataType = 'string' | 'text' | 'longtext' | 'uuid' | 'int64' | 'decimal' | 'boolean' | 'timestamp'
 
 export interface Property {
   id: string
@@ -111,6 +111,10 @@ export interface DataCapabilities {
   schemaModes: string[]
   layouts: string[]
   operations: string[]
+  dataTypes?: DataType[]
+  maxTextBytes?: number
+  maxLongTextBytes?: number
+  maxRequestBytes?: number
   maxPageSize: number
   maxSortFields: number
   links: boolean

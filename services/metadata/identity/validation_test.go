@@ -3,6 +3,7 @@ package identity
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/wuhy80/AgentForge-Ontology/contracts"
@@ -57,5 +58,27 @@ func TestLoginBudgetHasBoundedMemoryAndTypedErrors(t *testing.T) {
 	store.resetLoginBudget("subject")
 	if err := store.loginBudget("subject"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLongTextPolicyConditionsPreserveTypeAndByteBudget(t *testing.T) {
+	field := contracts.Property{ID: "body", Name: "正文", DataType: "longtext"}
+	value := strings.Repeat("知", contracts.MaxLongTextBytes/3) + "a"
+	encoded, _ := json.Marshal(value)
+	if err := validateValue(field, encoded); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ = json.Marshal(value + "a")
+	if validateValue(field, encoded) == nil {
+		t.Fatal("oversized policy value accepted")
+	}
+	expression := &contracts.Expression{Op: "startsWith", Field: field.ID, Value: json.RawMessage(`"正文\n"`)}
+	if err := validateCondition(expression, map[string]contracts.Property{field.ID: field}); err != nil {
+		t.Fatal(err)
+	}
+	field.DataType = "text"
+	encoded, _ = json.Marshal(strings.Repeat("x", contracts.MaxTextBytes+1))
+	if validateValue(field, encoded) == nil {
+		t.Fatal("existing text policy budget was widened")
 	}
 }

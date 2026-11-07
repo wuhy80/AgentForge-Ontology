@@ -91,7 +91,7 @@ func validateSchema(d c.Definition) error {
 		case "uuid":
 			rowBytes += 36 // UUID values are canonical ASCII, not utf8mb4 CHAR.
 			inlineBytes += 40
-		case "text":
+		case "text", "longtext":
 			rowBytes += 12
 			inlineBytes += 42
 		default:
@@ -119,7 +119,7 @@ func validateSchema(d c.Definition) error {
 		seen := map[string]bool{}
 		for _, id := range idx.FieldIDs {
 			p, ok := findProperty(s, id)
-			if !ok || seen[id] || p.DataType == "text" {
+			if !ok || seen[id] || p.DataType == "text" || p.DataType == "longtext" {
 				return problem(422, "invalid_index", "索引字段不存在、重复或不支持索引")
 			}
 			seen[id] = true
@@ -147,6 +147,8 @@ func sqlType(p c.Property) (string, error) {
 		return "varchar(255)", nil
 	case "text":
 		return "text", nil
+	case "longtext":
+		return "longtext", nil
 	case "uuid":
 		return "char(36)", nil
 	case "int64":
@@ -223,7 +225,7 @@ func typedValue(p c.Property, raw json.RawMessage) (any, error) {
 	bad := func() (any, error) { return nil, problem(422, "invalid_value", p.Name+" 类型或范围不合法") }
 	var text string
 	switch p.DataType {
-	case "string", "text", "uuid", "timestamp", "decimal", "int64":
+	case "string", "text", "longtext", "uuid", "timestamp", "decimal", "int64":
 		if json.Unmarshal(raw, &text) != nil {
 			return bad()
 		}
@@ -243,7 +245,12 @@ func typedValue(p c.Property, raw json.RawMessage) (any, error) {
 		}
 		return text, nil
 	case "text":
-		if len(text) > 65535 {
+		if len(text) > c.MaxTextBytes {
+			return bad()
+		}
+		return text, nil
+	case "longtext":
+		if len(text) > c.MaxLongTextBytes {
 			return bad()
 		}
 		return text, nil

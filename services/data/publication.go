@@ -253,7 +253,7 @@ func verifyTable(ctx context.Context, db *sql.DB, d c.Definition) error {
 	for _, p := range d.Schema.Properties {
 		t, _ := sqlType(p)
 		collation := ""
-		if p.DataType == "string" || p.DataType == "text" {
+		if p.DataType == "string" || p.DataType == "text" || p.DataType == "longtext" {
 			collation = "utf8mb4_0900_bin"
 		}
 		if p.DataType == "uuid" {

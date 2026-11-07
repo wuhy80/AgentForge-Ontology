@@ -61,7 +61,7 @@ func NewHandler(cfg Config) http.Handler {
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"backend": "mysql", "schemaModes": []string{"schema_2_db"}, "layouts": []string{"single"}, "operations": []string{"create", "read", "patch", "delete", "query"}, "maxPageSize": 100, "maxSortFields": 1, "links": false, "ontologySQL": false, "batch": false, "calculatedProperties": false})
+		writeJSON(w, 200, map[string]any{"backend": "mysql", "schemaModes": []string{"schema_2_db"}, "layouts": []string{"single"}, "operations": []string{"create", "read", "patch", "delete", "query"}, "dataTypes": []string{"string", "text", "longtext", "uuid", "int64", "decimal", "boolean", "timestamp"}, "maxTextBytes": c.MaxTextBytes, "maxLongTextBytes": c.MaxLongTextBytes, "maxRequestBytes": c.MaxDataRequestBytes, "maxPageSize": 100, "maxSortFields": 1, "links": false, "ontologySQL": false, "batch": false, "calculatedProperties": false})
 	})
 	mux.HandleFunc("POST /internal/publications/prepare", h.prepare)
 	mux.HandleFunc("POST /internal/publications/activate", h.activate)
@@ -104,14 +104,22 @@ func writeError(w http.ResponseWriter, err error) {
 	writeJSON(w, 500, c.Error{Code: "storage_error", Message: "操作失败；请核对状态后重试"})
 }
 func decode(w http.ResponseWriter, r *http.Request, v any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	r.Body = http.MaxBytesReader(w, r.Body, c.MaxDataRequestBytes)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
-	if d.Decode(v) != nil {
+	if err := d.Decode(v); err != nil {
+		var oversized *http.MaxBytesError
+		if errors.As(err, &oversized) {
+			return problem(413, "request_too_large", "Data 请求体不能超过 8 MiB")
+		}
 		return problem(400, "invalid_json", "请求须为合法且无未知字段的 JSON")
 	}
 	var extra any
-	if d.Decode(&extra) != io.EOF {
+	if err := d.Decode(&extra); err != io.EOF {
+		var oversized *http.MaxBytesError
+		if errors.As(err, &oversized) {
+			return problem(413, "request_too_large", "Data 请求体不能超过 8 MiB")
+		}
 		return problem(400, "invalid_json", "请求只能包含一个 JSON 值")
 	}
 	return nil

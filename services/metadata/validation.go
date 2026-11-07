@@ -66,9 +66,9 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if len(s.Properties) == 0 || len(s.Properties) > 128 {
 			return problem(400, "invalid_fields", "属性数必须为1到128")
 		}
-		fields := map[string]bool{}
+		fields := map[string]contracts.Property{}
 		for _, p := range s.Properties {
-			fields[p.ID] = true
+			fields[p.ID] = p
 		}
 		names := map[string]bool{}
 		ids := map[string]bool{}
@@ -89,8 +89,12 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 			names[key] = true
 			seen := map[string]bool{}
 			for _, id := range idx.FieldIDs {
-				if !fields[id] || seen[id] {
+				field, ok := fields[id]
+				if !ok || seen[id] {
 					return problem(400, "invalid_index", "索引引用未知或重复属性")
+				}
+				if field.DataType == "text" || field.DataType == "longtext" {
+					return problem(422, "invalid_index", "text / longtext 属性不支持索引")
 				}
 				seen[id] = true
 			}
@@ -192,7 +196,7 @@ func validateProperties(ps []contracts.Property, assignIDs bool) error {
 		ids[p.ID] = true
 		idKeys[idKey] = true
 		switch p.DataType {
-		case "string", "text", "int64", "decimal", "boolean", "timestamp", "uuid":
+		case "string", "text", "longtext", "int64", "decimal", "boolean", "timestamp", "uuid":
 		default:
 			return problem(422, "unsupported_type", fmt.Sprintf("暂不支持属性类型%s", p.DataType))
 		}
@@ -211,6 +215,16 @@ func validateProperties(ps []contracts.Property, assignIDs bool) error {
 			}
 			if bytes.Equal(bytes.TrimSpace(p.Default), []byte("null")) && !p.Nullable {
 				return problem(400, "invalid_default", "不可空属性不能使用null默认值")
+			}
+			if (p.DataType == "text" || p.DataType == "longtext") && !bytes.Equal(bytes.TrimSpace(p.Default), []byte("null")) {
+				var value string
+				limit := contracts.MaxTextBytes
+				if p.DataType == "longtext" {
+					limit = contracts.MaxLongTextBytes
+				}
+				if json.Unmarshal(p.Default, &value) != nil || len(value) > limit {
+					return problem(400, "invalid_default", "文本默认值的类型或 UTF-8 字节数超限")
+				}
 			}
 			if p.ReadOnly {
 				return problem(422, "unsupported_capability", "首批不支持只读属性默认生成器")

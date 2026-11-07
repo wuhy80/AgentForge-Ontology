@@ -35,6 +35,8 @@ dist/
 playwright-report/
 test-results/
 *.tsbuildinfo
+__pycache__/
+*.pyc
 
 # Editor/IDE
 # .idea/

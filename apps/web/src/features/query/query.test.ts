@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Property } from '../../lib/types';
-import { buildWriteValues, compileQuery, initialDrafts, newCondition, newGroup, parseFieldValue, valueText, writeIntentSignature } from './query';
+import { availableOperators, buildWriteValues, compileQuery, initialDrafts, newCondition, newGroup, parseFieldValue, valueText, writeIntentSignature } from './query';
 
 const amount: Property = { id: 'amount', name: '金额', dataType: 'decimal', precision: 24, scale: 6, nullable: true };
 const integer: Property = { id: 'integer', name: '数量', dataType: 'int64', nullable: true };
@@ -51,6 +51,25 @@ describe('visual query compilation', () => {
 });
 
 describe('instance form serialization', () => {
+  it('preserves long bodies and validates decoded UTF-8 byte limits independently from text', () => {
+    const property: Property = { id: 'body', name: '正文', dataType: 'longtext', nullable: true };
+    const body = '知识库正文\n'.repeat(10000);
+    expect(parseFieldValue(property, body)).toBe(body);
+    expect(() => parseFieldValue({ ...property, dataType: 'text' }, body)).toThrow('65535');
+    const limit = 4 * 1024 * 1024;
+    const atLimit = '知'.repeat(Math.floor(limit / 3)) + 'a';
+    expect(parseFieldValue(property, atLimit)).toBe(atLimit);
+    expect(() => parseFieldValue(property, `${atLimit}a`)).toThrow('4 MiB');
+    const original = { body };
+    const drafts = initialDrafts([property], original);
+    expect(drafts.body.text).toBe(body);
+    drafts.body = { mode: 'value', text: `${body}结尾` };
+    expect(buildWriteValues([property], drafts, original)).toEqual({ body: `${body}结尾` });
+    expect(availableOperators(property).map((operator) => operator.value)).toContain('startsWith');
+    const editor = { filter: newGroup(), select: ['body'], sort: 'body', direction: 'asc' as const, limit: '1' };
+    expect(() => compileQuery('s', [property], editor)).toThrow('不支持排序');
+  });
+
   it('identifies the same write intent independently of property display order', () => {
     expect(writeIntentSignature({ amount: '9007199254740993.000001', title: '' })).toBe(writeIntentSignature({ title: '', amount: '9007199254740993.000001' }));
     expect(writeIntentSignature({ title: null })).not.toBe(writeIntentSignature({ title: '' }));

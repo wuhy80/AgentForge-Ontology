@@ -281,7 +281,7 @@ func validateCondition(expression *contracts.Expression, fields map[string]contr
 	if expression.Op == "isNull" || expression.Op == "isNotNull" {
 		return nil
 	}
-	if expression.Op == "startsWith" && field.DataType != "string" && field.DataType != "text" {
+	if expression.Op == "startsWith" && field.DataType != "string" && field.DataType != "text" && field.DataType != "longtext" {
 		return problem(422, "invalid_policy_type", "前缀条件仅适用于文本")
 	}
 	if field.DataType == "boolean" && expression.Op != "eq" && expression.Op != "ne" && expression.Op != "in" && expression.Op != "notIn" {
@@ -328,7 +328,11 @@ func validateValue(field contracts.Property, raw json.RawMessage) error {
 			return bad()
 		}
 	case "text":
-		if len(value) > 65535 {
+		if len(value) > contracts.MaxTextBytes {
+			return bad()
+		}
+	case "longtext":
+		if len(value) > contracts.MaxLongTextBytes {
 			return bad()
 		}
 	case "uuid":

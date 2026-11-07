@@ -34,6 +34,37 @@ func TestNamesAreNormalizedIndependentlyOfDatabaseCollation(t *testing.T) {
 	}
 }
 
+func TestLongTextDefinitionDefaultsAndIndexes(t *testing.T) {
+	for _, tc := range []struct {
+		typeName string
+		limit    int
+	}{{"text", contracts.MaxTextBytes}, {"longtext", contracts.MaxLongTextBytes}} {
+		t.Run(tc.typeName, func(t *testing.T) {
+			d := validSchema()
+			p := &d.Schema.Properties[0]
+			p.DataType = tc.typeName
+			body := strings.Repeat("知", tc.limit/3) + strings.Repeat("a", tc.limit%3)
+			p.Default, _ = json.Marshal(body)
+			if err := canonicalDefinition(&d, false); err != nil {
+				t.Fatalf("valid text default rejected: %v", err)
+			}
+			p.Default, _ = json.Marshal(body + "a")
+			if err := canonicalDefinition(&d, false); err == nil {
+				t.Fatal("oversized text default accepted")
+			}
+			p.Default = json.RawMessage(`42`)
+			if err := canonicalDefinition(&d, false); err == nil {
+				t.Fatal("non-string text default accepted")
+			}
+			p.Default = nil
+			d.Schema.Indexes = []contracts.Index{{ID: "index-1", Name: "正文索引", FieldIDs: []string{p.ID}}}
+			if err := canonicalDefinition(&d, false); err == nil {
+				t.Fatal("unsupported text index accepted")
+			}
+		})
+	}
+}
+
 func TestDefinitionRejectsUnsupportedOrConflictingSemantics(t *testing.T) {
 	cases := map[string]func(*contracts.Definition){
 		"unknown kind":    func(d *contracts.Definition) { d.Kind = "table" },

@@ -41,8 +41,10 @@ type Schema struct {
 }
 
 type Property struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// DataType supports string, text, longtext, uuid, int64, decimal, boolean,
+	// and timestamp. Text byte budgets are defined in limits.go.
 	DataType  string          `json:"dataType"`
 	Required  bool            `json:"required,omitempty"`
 	Nullable  bool            `json:"nullable,omitempty"`

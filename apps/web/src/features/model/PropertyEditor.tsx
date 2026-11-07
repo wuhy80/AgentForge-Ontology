@@ -2,7 +2,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import type { DataType, DefinitionRecord, Property } from '../../lib/types'
 
 export const typeLabels: Record<string, string> = {
-  string: '短文本', text: '长文本', int64: '整数', decimal: '精确小数',
+  string: '短文本', text: '长文本', longtext: '超长文本（4 MiB）', int64: '整数', decimal: '精确小数',
   boolean: '布尔值', timestamp: '日期时间', uuid: '唯一标识',
 }
 
@@ -41,6 +41,7 @@ export function PropertyEditor({ title, properties, onChange, locked, enums, all
           <label className="model-checkbox"><input type="checkbox" disabled={locked} checked={!!property.required} onChange={(event) => update(index, { required: event.target.checked })} />必须提供</label>
           <label className="model-checkbox"><input type="checkbox" disabled={locked} checked={!!property.nullable} onChange={(event) => update(index, { nullable: event.target.checked })} />允许空值</label>
           {property.readOnly && <span className="badge">只读</span>}
+          {property.dataType === 'longtext' && <span className="muted">最多 4 MiB（UTF-8 字节），不支持索引或排序</span>}
           {property.dataType === 'decimal' && <div className="model-decimal-config">
             <label>总位数<input className="field" type="number" aria-label={`${title}第${index + 1}项总位数`} disabled={locked} min={1} max={38} value={property.precision ?? 18} onChange={(event) => update(index, { precision: Number(event.target.value) })} /></label>
             <label>小数位<input className="field" type="number" aria-label={`${title}第${index + 1}项小数位`} disabled={locked} min={0} max={property.precision ?? 18} value={property.scale ?? 0} onChange={(event) => update(index, { scale: Number(event.target.value) })} /></label>

@@ -16,6 +16,10 @@ go run ./cmd/server
 
 MySQL 需要支持 `utf8mb4_0900_bin` 排序规则及 16KiB 页的 InnoDB；当前集成验证使用 MySQL 26.7.0。实体表显式使用 `ROW_FORMAT=DYNAMIC`，UUID 列使用 ASCII，租户键使用二进制类型，物理列由稳定 field ID 派生，业务名称不进入 SQL 标识符。建模预检限制最多 100 个属性、32 个索引，保守核算 60000 字节逻辑行及 7000 字节页内预算，不支持的页大小在关闭 gate 前拒绝。表内值保留真实类型，`int64`、`decimal` 在 JSON 中使用字符串，时间使用带时区的 RFC 3339 字符串并精确到微秒；超出范围或精度会拒绝。
 
+当前字段类型为 `string`、`text`、`longtext`、`uuid`、`int64`、`decimal`、`boolean`、`timestamp`。`string` 最多 255 个字符；`text` 保持最多 65535 个 UTF-8 字节；独立的 `longtext` 映射 MySQL `LONGTEXT`，单字段最多 4 MiB（4194304 个解码后的 UTF-8 字节）。两种文本均保留换行、空字符串及显式允许的 `null`，超限拒绝，不截断或自动转换。`text`、`longtext` 不支持索引和排序；可投影及使用类型化比较、集合、空值和字面前缀筛选，不提供全文搜索。已有 `text` 改为 `longtext` 属于结构变更，当前不提供自动扩列迁移。
+
+Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON 转义及其他字段，超限返回 HTTP 413 / `request_too_large`。单字段预算与整份请求预算同时生效；多字段或大量转义可能先触发请求预算。`GET /data/capabilities` 返回 `dataTypes`、`maxTextBytes`、`maxLongTextBytes` 和 `maxRequestBytes`。Metadata 定义及身份管理请求仍使用各自的 1 MiB 请求预算，不能把长正文作为大默认值或大行条件绕过管理接口预算。
+
 ## 已实现接口
 
 | 接口 | 行为 |
@@ -51,3 +55,5 @@ go test ./...
 ```
 
 设置 `MYSQL_TEST_DSN` 后，相同命令还会执行真实 MySQL 集成用例，未设置时明确跳过该用例。集成测试使用随机租户及 Schema，不删除或清空共享平台表；验证预览无写入、发布门禁、条件授权、幂等、唯一冲突、并发凭证、NULL/NOT、事务及 outbox 回滚和改名后的当前映射。单元测试覆盖注入参数、隐藏字段、精度边界、游标篡改及上下文隔离。检查通过不代表已完成三库认证、跨服务原子撤权或性能验收。
+
+`longtext` 单元回归覆盖多字节边界、4 MiB 正文的数据库值编解码、原 `text` 65535 字节边界、空值/空字符串、8 MiB 请求及尾部空白超限、DDL 映射、索引/排序拒绝和能力声明。2026-11-07 的模块测试通过，未启用数据库环境变量；`TestMySQLLongTextRoundTripAtApplicationLimit` 为待显式运行的真实 MySQL 建列、物理核验及 4 MiB 往返测试。长正文响应容量和性能仍未验收，查询应按需投影正文并选用较小分页。

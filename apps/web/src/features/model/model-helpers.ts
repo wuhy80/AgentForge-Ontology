@@ -54,6 +54,7 @@ export function validateDefinition(definition: Definition): string | undefined {
       if (names.has(name)) return '索引名称不能重复。'
       names.add(name)
       if (index.fieldIds.length < 1 || index.fieldIds.length > 2 || new Set(index.fieldIds).size !== index.fieldIds.length || index.fieldIds.some((id) => !definition.schema!.properties.some((property) => property.id && property.id === id))) return '每个索引请选择 1–2 个不同的已保存属性。'
+      if (index.fieldIds.some((id) => definition.schema!.properties.some((property) => property.id === id && (property.dataType === 'text' || property.dataType === 'longtext')))) return '长文本和超长文本属性不支持索引。'
     }
   }
   if (definition.enum) {

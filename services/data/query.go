@@ -117,7 +117,7 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 		return "", nil, err
 	}
 	if e.Op == "startsWith" {
-		if p.DataType != "string" && p.DataType != "text" {
+		if p.DataType != "string" && p.DataType != "text" && p.DataType != "longtext" {
 			return bad()
 		}
 		s := v.(string)
@@ -251,8 +251,8 @@ func compileQuery(d c.Definition, etag string, p c.Principal, dec c.Decision, q 
 		if !fieldAllowed(dec.ReadFields, f.ID) {
 			return result, problem(403, "forbidden_field", "无权使用该属性排序")
 		}
-		if f.DataType == "text" {
-			return result, problem(422, "unsupported", "首批不支持 text 排序")
+		if f.DataType == "text" || f.DataType == "longtext" {
+			return result, problem(422, "unsupported", "首批不支持 text / longtext 排序")
 		}
 		direction := strings.ToLower(q.OrderBy[0].Direction)
 		if direction != "asc" && direction != "desc" {

@@ -99,11 +99,13 @@ Schema 必须声明 `mode`，取值为 `db_2_schema` 或 `schema_2_db`。二者�
 
 Schema 需要覆盖常见数据库类型，并描述主键、业务唯一键、可空性、必填、默认值、校验条件和索引。类型必须区分整数范围、数值精度、时间语义，以及 `false`、`null` 和字段缺失。适配器明确标注原生支持、转换支持或不支持，不能静默截断、丢失精度或改变语义。
 
+当前 MySQL 已实现类型协议为 `string`、`text`、`longtext`、`uuid`、`int64`、`decimal`、`boolean`、`timestamp`。`string` 最多 255 个字符；`text` 保持 65535 个解码后的 UTF-8 字节上限；独立 `longtext` 映射 MySQL `LONGTEXT`，单字段最多 4 MiB（4194304 个解码后的 UTF-8 字节），适用于知识库正文等多行内容。超限明确拒绝，不截断或把 `text` 静默扩展。Data JSON 请求体最多 8 MiB（含转义及所有字段），Metadata 管理请求仍为 1 MiB；实际预算由 [Data 服务](../../services/data/README.md) 及 `contracts/limits.go` 声明。`text`、`longtext` 当前均禁止索引和排序，支持投影及基础类型化筛选，不提供全文搜索。已有类型改变仍需尚未实现的结构迁移，当前不能将已生效 `text` 自动改为 `longtext`。下表其余逻辑类型仍为完整设计候选。
+
 建议先定义数据库无关的逻辑类型，再由适配器映射为物理类型。
 
 | 类型组 | 建议逻辑类型 | 设计要点 |
 | --- | --- | --- |
-| 文本 | string、text | 长度、字符集和排序规则 |
+| 文本 | string、text、longtext | 长度、字符集和排序规则；当前 MySQL 的 longtext 采用独立 4 MiB 应用预算 |
 | 整数 | int16、int32、int64 | 范围及有无符号能力差异 |
 | 数值 | float32、float64、decimal | 精确值使用 decimal，定义精度与小数位 |
 | 布尔 | boolean | 区分 false、null 和字段缺失 |

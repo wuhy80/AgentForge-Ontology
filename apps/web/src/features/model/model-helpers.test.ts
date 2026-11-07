@@ -10,6 +10,16 @@ function schema(properties = 1, indexes = 0) {
 }
 
 describe('可发布的对象模型范围', () => {
+  it('允许独立超长文本属性并拒绝文本索引', () => {
+    for (const dataType of ['text', 'longtext'] as const) {
+      const definition = schema(1);
+      definition.schema!.properties[0].dataType = dataType;
+      expect(validateDefinition(definition)).toBeUndefined();
+      definition.schema!.indexes = [{ id: 'index', name: '正文索引', unique: false, fieldIds: ['field-0'] }];
+      expect(validateDefinition(definition)).toBe('长文本和超长文本属性不支持索引。');
+    }
+  })
+
   it('允许 100 个属性与 32 个索引，超过存储预算时保存前明确拒绝', () => {
     expect(validateDefinition(schema(100, 32))).toBeUndefined()
     expect(validateDefinition(schema(101))).toBe('对象模型最多支持 100 个属性。')
