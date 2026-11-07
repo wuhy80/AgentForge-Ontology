@@ -253,7 +253,7 @@ LIMIT 对应最终页大小；游标建议作为查询请求参数传递，沿�
 
 路径及字段辅助均为POST只读编辑接口，使用同一会话/CSRF校验，响应 `no-store`：
 
-- `/data/query/ontology-sql/paths`：输入原请求及 `targetSchemaId`；返回 `requestId/textHash/candidates/diagnostics/truncated`。候选包含接入 `fromAlias`、每步 `linkId/name/category/direction/fromAlias/toAlias/target` 和完整新 `text`。从所有已声明角色查找全局最短授权路径，最多4条总JOIN、20个候选、500次边扩展；预算耗尽不返回任意部分候选。无路径、无权、原稿无效均保留原稿，不猜同名字段关联。
+- `/data/query/ontology-sql/paths`：输入原请求及 `targetSchemaId`；返回 `requestId/textHash/candidates/diagnostics/truncated`。候选包含接入 `fromAlias`、每步 `linkId/name/category/direction/fromAlias/toAlias/target` 和完整新 `text`。扩展只添加JOIN，保留既有SELECT（未限定字段按原作用域补别名），不自动投影目标属性。从所有已声明角色查找全局最短授权路径，最多4条总JOIN、20个候选、500次边扩展；预算耗尽不返回任意部分候选。无路径、无权、原稿无效均保留原稿，不猜同名字段关联。
 - `/data/query/ontology-sql/insert-field`：输入原请求及 `schemaId/fieldId/alias/selectionFrom/selectionTo`；返回 `requestId/textHash/text/from/to/diagnostics`。多角色须明确alias，范围用UTF-16；完整解析绑定后安全添加SELECT并去重，保留筛选、排序及独立参数，注释/字面值等不安全位置不改稿。
 
 路径规划只读取当前授权定义，不访问业务行或预先验证物理目录；执行器重新核验来源启用状态、实际目录和发布gate。候选文本不持有额外权限，采纳后仍须重新分析；前端核对原文摘要和请求代次后才允许采纳。以上实际结构唯一见 [row_query.go](../../contracts/row_query.go)。

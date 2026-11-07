@@ -36,6 +36,8 @@
 .ontology-fields > button:hover, .ontology-fields > button:focus-visible { background: #f4f7ee; }
 .ontology-fields > button > span { flex: 1; overflow-wrap: anywhere; }
 .ontology-fields > button > small { color: #8e9a85; font-size: 9px; }
+.ontology-fields > button.is-projected { background: #f0f5e9; }
+.ontology-fields > button > .ontology-field-selected { display: inline-flex; align-items: center; gap: 2px; color: #496b39; white-space: nowrap; }
 .ontology-center { min-width: 0; }
 .ontology-editor-heading { display: flex; justify-content: space-between; align-items: center; gap: 9px; padding: 14px 16px; font-size: 12px; border-bottom: 1px solid #e6ebdf; }
 .ontology-editor-heading > div { display: flex; align-items: center; gap: 8px; color: #4b684d; }

@@ -61,6 +61,16 @@ describe('OntologySQL field insertion', () => {
     const unqualified = 'SELECT "金额" FROM "笔记";';
     expect(edit(unqualified).text).toBe(unqualified);
   });
+  it('recognizes equivalent Unicode spelling and letter case when checking existing projections', () => {
+    const field = { ...title, name: 'Café' };
+    const named = { ...model, name: 'Notes', category: 'Knowledge', fields: [field] };
+    for (const reference of ['"N"."CAFE\u0301"', '"cafe\u0301"']) {
+      const text = `SELECT ${reference} FROM "knowledge"."notes" AS "n" LIMIT 25;`;
+      const result = proposeFieldInsertion(text, { from: text.length, to: text.length }, named, field, 'knowledge');
+      expect(result.text).toBe(text);
+      expect(result.text.slice(result.from, result.to)).toBe(reference);
+    }
+  });
   it('inserts into WHERE expression slots and preserves field references already used in SELECT', () => {
     const text = 'SELECT "金额" FROM "笔记" WHERE | >= :最低金额 LIMIT 25;';
     expect(at(text, '|').text).toBe(text.replace('|', '"笔记"."金额"'));

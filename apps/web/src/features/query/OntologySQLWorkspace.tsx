@@ -384,6 +384,11 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
   const rowCount = result?.rowMode ? result.rows?.length ?? 0 : result?.data.length ?? 0;
   const queryScope = analysis?.scope ?? analysis?.query?.rows;
   const selectedRoles = queryScope?.nodes.filter((node) => node.schemaId === selectedId) ?? [];
+  const selectedRole = selectedRoles.find((node) => node.alias === fieldAlias) ?? (selectedRoles.length === 1 ? selectedRoles[0] : undefined);
+  // Use bound IDs so equal names on different models or self-Link roles remain independent.
+  const selectedFieldIds = new Set(queryScope
+    ? selectedRole ? (analysis?.fields ?? []).filter((field) => field.id.startsWith(`${selectedRole.id}.`)).map((field) => field.id.slice(selectedRole.id.length + 1)) : []
+    : analysis?.query?.from.schemaId === selectedId ? analysis.query.select : []);
   const category = categories.find((item) => item.id === categoryId);
   const bound = models.find((item) => item.schemaId === analysis?.query?.from.schemaId);
   return <div className="query-page ontology-workspace">
@@ -411,7 +416,7 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
           {pathBusy && <div className="notice ontology-path-progress" role="status"><LoaderCircle size={15} className="query-spin" />正在寻找可见模型之间的关联路径…<button className="button subtle" type="button" onClick={() => { pathController.current?.abort(); setPathBusy(false); }}>取消规划</button></div>}
           {fieldBusy && <div className="notice ontology-path-progress" role="status"><LoaderCircle size={15} className="query-spin" />正在按查询别名检查字段…</div>}
           {pathProposal && <section className="ontology-path-proposal" aria-label="关联路径选择"><div className="ontology-panel-heading"><FolderTree size={16} /><strong>连接到 {pathProposal.target.name}</strong></div>
-            <p className="muted">先预览并选择关联路径；采纳只修改 SQL，原筛选及参数保留，运行时仍会校验来源与权限。</p>
+            <p className="muted">先预览并选择关联路径；采纳后添加 JOIN，保留已有返回列、筛选及参数。新模型的返回字段在右侧按需双击添加。</p>
             {pathProposal.message && <div className="notice" role="status">{pathProposal.message}</div>}
             {pathProposal.truncated && <div className="notice" role="status">已达到路径规划预算，候选可能不完整；请缩小范围或先加入中间模型。</div>}
             {!pathProposal.candidates.length && !pathProposal.message && <p className="muted">当前可用关系中没有找到连接路径；可以保留原稿，或改为此模型的单模型查询。</p>}
@@ -434,7 +439,17 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
           <div className="query-run-bar"><span className="muted">{analysis?.ready && !parameterError ? <><Check size={15} />可运行 · LIMIT 控制每页条数</> : 'SELECT 返回字段，FROM 选择模型，WHERE 添加筛选'}</span><div className="query-actions">{busy && <button className="button" type="button" onClick={cancel}><Square size={14} />取消查询</button>}<button className="button primary" type="button" disabled={busy || composing || !text.trim() || !!parameterError} onClick={() => void run()}>{busy ? <LoaderCircle size={16} className="query-spin" /> : <Play size={16} />}{busy ? '正在查询…' : '运行查询'}</button></div></div>
         </section>
         {fieldsPanel && <aside className="card ontology-field-panel" aria-label="模型字段"><div className="ontology-panel-heading"><Code2 size={16} /><strong>模型字段</strong>{selected && <span className="badge">{selected.fields.length}</span>}</div>
-          {selected ? <><div className="ontology-fields-heading"><strong>{selected.name}</strong><button className="button subtle" type="button" disabled={composing || pathBusy} onClick={() => void handleModelInsert(selected)}>生成 / 关联查询</button></div><p className="muted ontology-directory-note">双击字段或按 Enter 插入，自动使用当前查询中的模型引用。</p>{selectedRoles.length > 1 && <label className="ontology-role-select">字段所属角色<select aria-label="字段所属查询别名" value={fieldAlias} onChange={(event) => setFieldAlias(event.target.value)}><option value="">请选择此模型的角色</option>{selectedRoles.map((node) => <option key={node.id} value={node.alias}>{node.alias}</option>)}</select></label>}<div className="ontology-fields">{selected.fields.map((field) => <button key={field.id} type="button" aria-label={`插入字段 ${field.name}`} title={`${field.name} · ${field.dataType}${field.filterable ? ' · 可筛选' : ''}${field.sortable ? ' · 可排序' : ''} · 双击或 Enter 插入`} onDoubleClick={() => void handleFieldInsert(field)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void handleFieldInsert(field); } }} disabled={composing || fieldBusy}><span>{field.name}</span><small>{field.dataType}</small></button>)}</div></> : <div className="ontology-directory-empty"><p className="muted">先在左侧选择一个可查询模型，即可查看字段。</p></div>}
+          {selected ? <>
+            <div className="ontology-fields-heading"><strong>{selected.name}</strong><button className="button subtle" type="button" disabled={composing || pathBusy} onClick={() => void handleModelInsert(selected)}>生成 / 关联查询</button></div>
+            <p className="muted ontology-directory-note">双击字段或按 Enter 插入。已选字段会标记，重复插入只定位已有返回列；不同模型或角色的同名字段分别保留。</p>
+            {selectedRoles.length > 1 && <label className="ontology-role-select">字段所属角色<select aria-label="字段所属查询别名" value={fieldAlias} onChange={(event) => setFieldAlias(event.target.value)}><option value="">请选择此模型的角色</option>{selectedRoles.map((node) => <option key={node.id} value={node.alias}>{node.alias}</option>)}</select></label>}
+            <div className="ontology-fields">{selected.fields.map((field) => {
+              const included = selectedFieldIds.has(field.id);
+              return <button key={field.id} type="button" className={included ? 'is-projected' : undefined} aria-label={`插入字段 ${field.name}`} title={`${field.name} · ${field.dataType}${field.filterable ? ' · 可筛选' : ''}${field.sortable ? ' · 可排序' : ''} · ${included ? '已在 SELECT 中，重复插入会定位已有列' : '双击或 Enter 插入'}`} onDoubleClick={() => void handleFieldInsert(field)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void handleFieldInsert(field); } }} disabled={composing || fieldBusy}>
+                <span>{field.name}</span>{included && <small className="ontology-field-selected"><Check size={11} aria-hidden="true" />已选</small>}<small>{field.dataType}</small>
+              </button>;
+            })}</div>
+          </> : <div className="ontology-directory-empty"><p className="muted">先在左侧选择一个可查询模型，即可查看字段。</p></div>}
         </aside>}
 
       </div>

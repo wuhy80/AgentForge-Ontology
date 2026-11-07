@@ -61,6 +61,7 @@ function scan(text: string): Token[] {
 
 const keyword = (token: Token | undefined, value: string) => token?.kind === 'word' && token.value === value;
 const symbol = (token: Token | undefined, value: string) => token?.kind === 'symbol' && token.value === value;
+const identifierKey = (value: string) => value.trim().normalize('NFC').toLowerCase();
 function fieldReference(tokens: Token[]): FieldReference | undefined {
   if (tokens.length === 1 && tokens[0].kind === 'identifier') return { ...tokens[0], name: tokens[0].value };
   if (tokens.length === 3 && tokens[0].kind === 'identifier' && symbol(tokens[1], '.') && tokens[2].kind === 'identifier') {
@@ -172,7 +173,7 @@ export function proposeFieldInsertion(text: string, selection: SQLSelection, mod
     return { text: next, from, to: from + reference.length, message: '已生成此字段的查询，检查后点击运行。' };
   }
   const scope = source(text);
-  if (scope.name !== model.name || scope.category !== undefined && scope.category !== model.category || scope.category === undefined && model.categoryId !== defaultCategoryId) {
+  if (identifierKey(scope.name) !== identifierKey(model.name) || scope.category !== undefined && identifierKey(scope.category) !== identifierKey(model.category) || scope.category === undefined && model.categoryId !== defaultCategoryId) {
     throw new Error('此字段所属模型与 FROM 不一致；请先为该模型生成查询，原稿已保留');
   }
   const range = { from: Math.max(0, Math.min(text.length, selection.from)), to: Math.max(0, Math.min(text.length, selection.to)) };
@@ -206,7 +207,7 @@ export function proposeFieldInsertion(text: string, selection: SQLSelection, mod
       return insertReference(text, range, reference);
     }
   }
-  const duplicate = scope.projection.find((item) => item.name === current.name && (!item.qualifier || item.qualifier === scope.alias));
+  const duplicate = scope.projection.find((item) => identifierKey(item.name) === identifierKey(current.name) && (!item.qualifier || identifierKey(item.qualifier) === identifierKey(scope.alias)));
   if (duplicate) return { text, from: duplicate.from, to: duplicate.to, message: '此字段已在 SELECT 中，已定位到现有字段。' };
   const inProjection = range.from >= scope.select.to && range.to <= scope.from.from;
   if (fullSelection && inProjection && scope.projection.some((item) => item.from === fullSelection.from && item.to === fullSelection.to)) return replace(text, range, reference);

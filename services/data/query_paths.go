@@ -217,28 +217,9 @@ func queryPathExtendText(text string, statement *ontologySQLStatement, steps []c
 	if !valid {
 		return "", problem(422, "invalid_path", "无法定位查询的关联插入位置")
 	}
-	joined := text[:joinByte] + "\n" + strings.Join(joins, "\n") + "\n" + text[joinByte:]
-	last := steps[len(steps)-1]
-	fields := []string{}
-	for _, field := range last.Target.Fields {
-		if field.Filterable && field.DataType != "longtext" {
-			fields = append(fields, sqlQuotedIdentifier(last.ToAlias)+"."+sqlQuotedIdentifier(field.Name))
-			if len(fields) == 2 {
-				break
-			}
-		}
-	}
-	if len(fields) == 0 {
-		return "", problem(422, "unsupported_projection", "目标模型没有可用于关联行查询的主表属性")
-	}
-	if len(statement.Projection)+len(fields) > 100 {
-		return "", problem(422, "budget_exceeded", "追加关联字段后超过100列，请先减少返回字段")
-	}
-	projectionByte, valid := sqlCursorByte(text, statement.Projection[len(statement.Projection)-1].Range.To)
-	if !valid {
-		return "", problem(422, "invalid_path", "无法定位SELECT字段位置")
-	}
-	return joined[:projectionByte] + ", " + strings.Join(fields, ", ") + joined[projectionByte:], nil
+	// Adding a model only extends the relationship scope. Users choose its
+	// output fields explicitly; shared field names across roles stay distinct.
+	return text[:joinByte] + "\n" + strings.Join(joins, "\n") + "\n" + text[joinByte:], nil
 }
 
 func (h *handler) queryPathsHTTP(w http.ResponseWriter, r *http.Request) {

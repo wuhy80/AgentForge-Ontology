@@ -89,6 +89,50 @@ describe('多 Link 查询工作台', () => {
     await waitFor(() => expect(api.insertOntologySQLField).toHaveBeenCalledWith(expect.objectContaining({ schemaId: 'customers', fieldId: 'name', alias: '上级客户' }), expect.any(AbortSignal)));
     await waitFor(() => expect(input.value).toContain('"c"."名称"'));
   });
+  it('已选标记区分同模型的两个角色，重复插入不增列，手工删除后同步取消标记', async () => {
+    const original = 'SELECT "当前客户"."名称" FROM "业务"."客户" AS "当前客户" JOIN LINK "当前客户"."上级" AS "上级客户" LIMIT 25;';
+    const nodes = [{ id: 'n0', schemaId: 'customers', alias: '当前客户' }, { id: 'n1', schemaId: 'customers', alias: '上级客户' }];
+    const api = fixture({
+      analyzeOntologySQL: vi.fn().mockImplementation(async (request: OntologySQLRequest) => ({
+        ...response(request), diagnostics: [], parameters: [], ready: false, scope: { nodes, joins: [] },
+        fields: nodes.filter((node) => request.text.slice(0, request.text.indexOf('FROM')).includes(`"${node.alias}"."名称"`)).map((node) => ({ ...name, id: `${node.id}.name` })),
+      })),
+      insertOntologySQLField: vi.fn().mockImplementation(async (request) => {
+        const reference = `"${request.alias}"."名称"`;
+        const text = request.text.includes(reference) ? request.text : request.text.replace(' FROM', `, ${reference} FROM`);
+        return { ...response(request), text, from: text.indexOf(reference), to: text.indexOf(reference) + reference.length, diagnostics: [] };
+      }),
+    });
+    const input = await inputSQL(original); fireEvent.click(await customer());
+    const aliases = await screen.findByRole('combobox', { name: '字段所属查询别名' });
+    const button = screen.getByRole('button', { name: '插入字段 名称' });
+    fireEvent.change(aliases, { target: { value: '当前客户' } });
+    await waitFor(() => expect(within(button).getByText('已选')).toBeTruthy());
+    fireEvent.change(aliases, { target: { value: '上级客户' } });
+    expect(within(button).queryByText('已选')).toBeNull();
+    fireEvent.doubleClick(button);
+    await waitFor(() => expect(input.value).toContain('"当前客户"."名称", "上级客户"."名称"'));
+    await waitFor(() => expect(within(button).getByText('已选')).toBeTruthy());
+    const inserted = input.value;
+    fireEvent.doubleClick(button);
+    await screen.findByText('此字段已在查询中，已定位到现有字段。');
+    expect(input.value).toBe(inserted);
+    expect(api.insertOntologySQLField).toHaveBeenCalledTimes(2);
+    fireEvent.change(input, { target: { value: original } });
+    const restoredAliases = await screen.findByRole('combobox', { name: '字段所属查询别名' });
+    expect(within(button).queryByText('已选')).toBeNull();
+    fireEvent.change(restoredAliases, { target: { value: '当前客户' } });
+    await waitFor(() => expect(within(button).getByText('已选')).toBeTruthy());
+    expect(api.queryOntologySQL).not.toHaveBeenCalled();
+  });
+  it('单模型的已有返回字段显示已选，重复双击保留 SQL', async () => {
+    fixture(); const input = await inputSQL();
+    const button = await screen.findByRole('button', { name: '插入字段 金额' });
+    await waitFor(() => expect(within(button).getByText('已选')).toBeTruthy());
+    fireEvent.doubleClick(button);
+    await screen.findByText('此字段已在 SELECT 中，已定位到现有字段。');
+    expect(input.value).toBe(source);
+  });
   it('迟到字段编辑不覆盖新稿，403会清除路径、角色与结果', async () => {
     const pending = deferred<unknown>(); const api = fixture({ insertOntologySQLField: vi.fn().mockReturnValue(pending.promise) });
     const input = await inputSQL(joined); fireEvent.click(await customer());

@@ -10,14 +10,19 @@ const models: QueryContextModel[] = [
   { schemaId: 'teams', categoryId, category: '业务', name: '团队', fields: [{ id: 'team-name', name: '团队名称', dataType: 'string', filterable: true, sortable: true }] },
 ]
 const base = 'SELECT "o"."金额"\nFROM "业务"."订单" AS "o"\nWHERE "o"."金额" > :最低金额\nLIMIT 25;'
-const first = base.replace('FROM', ', "c"."名称"\nFROM').replace('WHERE', 'JOIN LINK "o" VIA "业务"."订单客户" DIRECTION OUT AS "c"\nWHERE')
-const second = first.replace('FROM', ', "g"."团队名称"\nFROM').replace('WHERE', 'JOIN LINK "c" VIA "业务"."客户团队" DIRECTION OUT AS "g"\nWHERE')
+const first = base.replace('WHERE', 'JOIN LINK "o" VIA "业务"."订单客户" DIRECTION OUT AS "c"\nWHERE')
+const second = first.replace('WHERE', 'JOIN LINK "c" VIA "业务"."客户团队" DIRECTION OUT AS "g"\nWHERE')
 const self = 'SELECT "当前客户"."名称"\nFROM "业务"."客户" AS "当前客户"\nJOIN LINK "当前客户" VIA "业务"."上级客户" DIRECTION OUT AS "上级客户"\nLIMIT 25;'
 
 function queryFor(text: string): QuerySpec {
   const isSelf = text.includes('AS "上级客户"'), hasTeam = text.includes('AS "g"')
   const nodes = isSelf ? [{ id: 'n0', schemaId: 'customers', alias: '当前客户' }, { id: 'n1', schemaId: 'customers', alias: '上级客户' }] : [{ id: 'n0', schemaId: 'orders', alias: 'o' }, { id: 'n1', schemaId: 'customers', alias: 'c' }, ...(hasTeam ? [{ id: 'n2', schemaId: 'teams', alias: 'g' }] : [])]
-  return { from: { schemaId: nodes[0].schemaId }, rows: { nodes, joins: [{ from: 'n0', to: 'n1', linkId: isSelf ? 'parent-customer' : 'order-customer', direction: 'out' }, ...(hasTeam ? [{ from: 'n1', to: 'n2', linkId: 'customer-team', direction: 'out' as const }] : [])] }, select: isSelf ? ['n0.name'] : ['n0.amount', 'n1.name', ...(hasTeam ? ['n2.team-name'] : []), ...(text.includes('"c"."电话"') ? ['n1.phone'] : [])], page: { limit: 25 } }
+  const select = Array.from(text.split('FROM')[0].matchAll(/"([^"]+)"\."([^"]+)"/g), ([, alias, name]) => {
+    const node = nodes.find((item) => item.alias === alias)!
+    const field = models.find((model) => model.schemaId === node.schemaId)!.fields.find((item) => item.name === name)!
+    return `${node.id}.${field.id}`
+  })
+  return { from: { schemaId: nodes[0].schemaId }, rows: { nodes, joins: [{ from: 'n0', to: 'n1', linkId: isSelf ? 'parent-customer' : 'order-customer', direction: 'out' }, ...(hasTeam ? [{ from: 'n1', to: 'n2', linkId: 'customer-team', direction: 'out' as const }] : [])] }, select, page: { limit: 25 } }
 }
 async function fixture(page: Page) {
   const tenantId = 'query-path-fixture'
@@ -94,6 +99,11 @@ test('连续选择两个 Link 保留参数，按别名插入字段，关联行�
   await page.getByRole('group', { name: '查询中的模型角色', exact: true }).getByRole('button', { name: 'c', exact: true }).click()
   await fieldButton(page, '电话').dblclick(); await expect.poll(() => editorText(page)).toContain('"c"."电话"')
   expect(state.fields[0]).toMatchObject({ schemaId: 'customers', fieldId: 'phone', alias: 'c' })
+  await expect(fieldButton(page, '电话').getByText('已选', { exact: true })).toBeVisible()
+  const inserted = await editorText(page)
+  await fieldButton(page, '电话').dblclick()
+  await expect(page.getByText('此字段已在查询中，已定位到现有字段。', { exact: true })).toBeVisible()
+  expect(await editorText(page)).toBe(inserted)
   expect(state.runs).toEqual([])
   await page.getByRole('button', { name: '运行查询', exact: true }).click()
   const table = page.getByRole('table', { name: '关联行查询结果', exact: true })
@@ -115,6 +125,23 @@ test('同模型的两个查询角色需选择别名，字段插入及原生撤�
   await expect.poll(() => editorText(page)).toContain('"上级客户"."电话"')
   expect(state.fields[0]).toMatchObject({ alias: '上级客户', schemaId: 'customers', fieldId: 'phone' })
   await page.getByLabel('OntologySQL 编辑器', { exact: true }).press('ControlOrMeta+z'); await expect.poll(() => editorText(page)).toBe(self)
+  expect(state.runs).toEqual([]); isolated(state)
+})
+
+test('同名字段按角色标记，连续双击保持一列，撤销后恢复已选状态', async ({ page }) => {
+  const state = await fixture(page); await page.goto('/#query'); await expect(modelButton(page, '客户')).toBeVisible(); await setSQL(page, self); await modelButton(page, '客户').click()
+  const roles = page.getByRole('combobox', { name: '字段所属查询别名', exact: true })
+  await roles.selectOption('当前客户'); await expect(fieldButton(page, '名称').getByText('已选', { exact: true })).toBeVisible()
+  await roles.selectOption('上级客户'); await expect(fieldButton(page, '名称').getByText('已选', { exact: true })).toHaveCount(0)
+  await fieldButton(page, '名称').dblclick(); await expect.poll(() => editorText(page)).toContain('"上级客户"."名称"')
+  await expect(fieldButton(page, '名称').getByText('已选', { exact: true })).toBeVisible()
+  const inserted = await editorText(page)
+  await fieldButton(page, '名称').dblclick(); await expect(page.getByText('此字段已在查询中，已定位到现有字段。', { exact: true })).toBeVisible()
+  expect(await editorText(page)).toBe(inserted)
+  await roles.selectOption('当前客户'); await fieldButton(page, '名称').dblclick()
+  await expect.poll(() => state.fields.length).toBe(3); expect(await editorText(page)).toBe(inserted)
+  await page.getByLabel('OntologySQL 编辑器', { exact: true }).press('ControlOrMeta+z'); await expect.poll(() => editorText(page)).toBe(self)
+  await roles.selectOption('上级客户'); await expect(fieldButton(page, '名称').getByText('已选', { exact: true })).toHaveCount(0)
   expect(state.runs).toEqual([]); isolated(state)
 })
 

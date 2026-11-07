@@ -202,6 +202,27 @@ func TestOntologySQLRowFieldInsertionUsesExplicitAliasAndPreservesParameters(t *
 	}
 }
 
+func TestOntologySQLRowFieldInsertionKeepsSameNamedFieldsInDifferentRoles(t *testing.T) {
+	app := rowSQLTestHandler(t, rowSQLDefinitions(), "")
+	text := `SELECT "w"."编号" FROM "工单" AS "w" JOIN LINK "w"."产线" AS "l" WHERE "w"."金额" > :金额 LIMIT 5;`
+	req := c.QueryFieldInsertionRequest{OntologySQLRequest: c.OntologySQLRequest{Text: text, DefaultCategoryID: "category-a", Parameters: map[string]json.RawMessage{"金额": raw("1.23")}}, SchemaID: rowSQLLineID, FieldID: rowSQLLineField, Alias: "l"}
+	for attempt := 0; attempt < 5; attempt++ {
+		req.SelectionFrom, req.SelectionTo = lenUTF16(req.Text), lenUTF16(req.Text)
+		w := callOntologySQL(t, app, "POST", "/data/query/ontology-sql/insert-field", req)
+		var out c.QueryFieldInsertionResult
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.Diagnostics) != 0 {
+			t.Fatalf("insert: %d %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(out.Text, `SELECT "w"."编号", "l"."编号"`) || !strings.Contains(out.Text, `WHERE "w"."金额" > :金额`) {
+			t.Fatalf("lost independent field or condition: %s", out.Text)
+		}
+		if attempt > 0 && out.Text != req.Text {
+			t.Fatalf("duplicate operation changed projection: %s", out.Text)
+		}
+		req.Text = out.Text
+	}
+}
+
 func TestOntologySQLRowLinkAmbiguityRequiresExplicitIdentity(t *testing.T) {
 	definitions := rowSQLDefinitions()
 	alternative := definitions[3]
