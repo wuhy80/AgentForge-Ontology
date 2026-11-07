@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, FlaskConical, LoaderCircle, Pencil, Plus, RefreshCw, Rocket, Save, ShieldCheck, Trash2 } from 'lucide-react'
 import { ApiClient, ApiError } from '../../lib/api'
-import type { DefinitionRecord, Organization, PermissionRule, PolicyRecord, Role, SimulationResult, User } from '../../lib/types'
+import type { DefinitionRecord, Organization, PermissionRule, PolicyRecord, Role, SimulationResult, User, UserGroup } from '../../lib/types'
 import { errorMessage } from '../query/query'
 import { canonicalPolicy, expressionSummary, fieldsSummary, operationName, operations, resourceName } from './policy'
 import { RuleDialog } from './RuleDialog'
 
-function Simulation({ api, record, users, definitions, categories, onForbidden }: { api: ApiClient; record: PolicyRecord; users: User[]; definitions: DefinitionRecord[]; categories: Organization[]; onForbidden: (error: unknown) => void }) {
+const emptyGroups: UserGroup[] = []
+function Simulation({ api, record, users, groups, definitions, categories, onForbidden }: { api: ApiClient; record: PolicyRecord; users: User[]; groups: UserGroup[]; definitions: DefinitionRecord[]; categories: Organization[]; onForbidden: (error: unknown) => void }) {
   const [userId, setUserId] = useState('')
   const [operation, setOperation] = useState('instance.query')
   const [resourceId, setResourceId] = useState('*')
@@ -20,7 +21,7 @@ function Simulation({ api, record, users, definitions, categories, onForbidden }
   useEffect(() => () => request.current?.abort(), [])
   useEffect(() => {
     request.current?.abort(); setResult(undefined); setError(''); setBusy(false)
-  }, [api, record.etag, record.state, users, definitions])
+  }, [api, record.etag, record.state, users, groups, definitions])
   function change() { request.current?.abort(); setResult(undefined); setError(''); setBusy(false) }
   async function run() {
     if (!userId || busy) return
@@ -52,8 +53,8 @@ function Simulation({ api, record, users, definitions, categories, onForbidden }
   </section>
 }
 
-export function PolicyPanel({ api, record, roles, users, definitions, categories, onRecord, onReload, onForbidden }: {
-  api: ApiClient; record: PolicyRecord; roles: Role[]; users: User[]; definitions: DefinitionRecord[]; categories: Organization[]; onRecord: (record: PolicyRecord) => void; onReload: () => void; onForbidden: (error: unknown) => void
+export function PolicyPanel({ api, record, roles, users, groups = emptyGroups, definitions, categories, onRecord, onReload, onForbidden }: {
+  api: ApiClient; record: PolicyRecord; roles: Role[]; users: User[]; groups?: UserGroup[]; definitions: DefinitionRecord[]; categories: Organization[]; onRecord: (record: PolicyRecord) => void; onReload: () => void; onForbidden: (error: unknown) => void
 }) {
   const baseline = record.draft ?? record.current
   const [rules, setRules] = useState<PermissionRule[]>(() => baseline.rules ?? [])
@@ -100,7 +101,7 @@ export function PolicyPanel({ api, record, roles, users, definitions, categories
         })}</div>}
       {!viewCurrent && <div className="admin-policy-actions"><span className="muted">{dirty ? '存在未保存修改，请先保存草稿。' : record.draft ? '已保存草稿可单独模拟，确认后使其生效。' : '修改规则并保存后，才可生效新策略。'}</span><div className="admin-inline"><button className="button" type="button" disabled={busy || !dirty || conflict} onClick={() => void commit(false)}>{busy ? <LoaderCircle size={16} className="admin-spin" /> : <Save size={16} />}保存策略草稿</button><button className="button primary" type="button" disabled={busy || dirty || !publishable || conflict} onClick={() => void commit(true)}><Rocket size={16} />使策略生效</button></div></div>}
     </div>
-  </section><Simulation api={api} record={record} users={users} definitions={definitions} categories={categories} onForbidden={onForbidden} />
+  </section><Simulation api={api} record={record} users={users} groups={groups} definitions={definitions} categories={categories} onForbidden={onForbidden} />
     {dialog && <RuleDialog rule={dialog.rule} roles={roles} definitions={definitions} categories={categories} onClose={() => setDialog(undefined)} onSave={(rule) => { setRules((previous) => dialog.rule ? previous.map((item) => item.id === rule.id ? rule : item) : [...previous, rule]); setDialog(undefined); setError('') }} />}
   </div>
 }

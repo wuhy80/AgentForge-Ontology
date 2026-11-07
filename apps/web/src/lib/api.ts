@@ -1,7 +1,7 @@
 import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
-  AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput,
+  AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
 } from './types'
 
 export class ApiError extends Error {
@@ -127,6 +127,15 @@ export class ApiClient {
   createRole(input: RoleInput): Promise<Role> { return this.request('/api/metadata/admin/roles', { method: 'POST', body: input }) }
   updateRole(id: string, input: RoleInput, etag: string): Promise<Role> {
     return this.request(`/api/metadata/admin/roles/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag })
+  }
+  async listUserGroups(signal?: AbortSignal): Promise<UserGroup[]> {
+    return (await this.request<{ data: UserGroup[] }>('/api/metadata/admin/user-groups', { signal })).data
+  }
+  createUserGroup(input: UserGroupInput): Promise<UserGroup> {
+    return this.request('/api/metadata/admin/user-groups', { method: 'POST', body: input })
+  }
+  updateUserGroup(id: string, input: UserGroupInput, etag: string): Promise<UserGroup> {
+    return this.request(`/api/metadata/admin/user-groups/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag })
   }
   getPolicy(signal?: AbortSignal): Promise<PolicyRecord> { return this.request('/api/metadata/admin/policy', { signal }) }
   savePolicy(policy: PermissionPolicy, etag: string): Promise<PolicyRecord> {

@@ -141,6 +141,15 @@ export interface UserInput {
   roleIds: string[]
 }
 export interface RoleInput { name: string; description: string }
+// Identity groups are independent of the groups used to organize definitions.
+export interface UserGroupInput {
+  name: string
+  description: string
+  enabled: boolean
+  roleIds: string[]
+  userIds: string[]
+}
+export interface UserGroup extends UserGroupInput { id: string; etag: string }
 export interface PermissionRule {
   id: string
   roleId: string

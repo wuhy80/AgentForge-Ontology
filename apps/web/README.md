@@ -35,7 +35,8 @@ npm.cmd run test:e2e
 | [模型管理](src/features/model/ModelsPage.tsx) | 分类分组、五类定义表单、草稿、预览与生效恢复 |
 | [数据探索](src/features/query/QueryPage.tsx) | 可视化 QuerySpec 配置、实际执行、查询状态及续页 |
 | [实例详情](src/features/query/InstanceDialog.tsx) | 单条创建/读取/修改/确认删除，保持精度、幂等及并发凭证 |
-| [用户与权限](src/features/admin/AdminPage.tsx) | 管理员创建/编辑账号、启停与密码重置、角色绑定、权限草稿/生效/试算及最近200条审计 |
+| [用户与权限](src/features/admin/AdminPage.tsx) | 管理员创建/编辑账号、启停与密码重置、直接角色与用户组、权限草稿/生效/试算及最近200条审计 |
+| [用户组编辑](src/features/admin/UserGroupDialog.tsx) | 中文用户组、角色与成员搜索、启停、ETag冲突保留及当前会话变更提示；独立于模型目录分组 |
 | [API](src/lib/api.ts)、[类型](src/lib/types.ts) | 公共协议的前端镜像、目录分页、错误与身份失效；协议以 contracts 和服务说明为准 |
 | [对话框](src/components/Dialog.tsx) | 键盘焦点、Escape、焦点恢复；页面隐藏时不展示 Portal，保留所属页面的编辑状态 |
 | [真实浏览器验证](e2e/workspace.spec.ts) | MySQL/OPA 服务上的模型、查询与实例页面流程及窄屏检查 |
@@ -44,4 +45,4 @@ npm.cmd run test:e2e
 
 首次登录检查两个服务的能力接口；退出、过期或401清除本会话页面数据。查询及实例访问收到403时清除对应旧结果；草稿目录拒绝或对象被过滤时清除私有候选，恢复未确认发布前重新验证读取权限，不用旧缓存替代当前授权。
 
-本轮提供本地账号、角色和受控行列策略表单，尚未接入外部身份目录/SSO、用户组、细分委托管理、完整 ABAC、逐行掩码及 Action/Function 运行授权。当前管理审计仅显示最近200条，完整归档、导出和生产运维仍待后续实现。
+本轮提供本地账号、平面用户组、角色和受控行列策略表单；用户表分别展示直接角色与组继承来源，组变更后清除旧授权模拟结果。尚未接入外部身份目录/SSO、组嵌套、细分委托管理、完整ABAC、逐行掩码及Action/Function运行授权。当前管理审计仅显示最近200条，完整归档、导出和生产运维仍待后续实现。

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiClient, ApiError } from './api'
-import type { PermissionPolicy, Publication, QuerySpec, Session, UserInput } from './types'
+import type { PermissionPolicy, Publication, QuerySpec, Session, UserGroup, UserGroupInput, UserInput } from './types'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const page = (data: unknown[], hasMore = false, nextCursor = '') => json({ data, hasMore, nextCursor })
@@ -201,5 +201,43 @@ describe('cookie sessions and identity administration', () => {
     finish(json({ data: [session.user] }))
     await expect(users).rejects.toMatchObject({ status: 401 })
     expect(reset).toHaveBeenCalledTimes(1)
+  })
+
+  it('manages identity groups using cookie CSRF, encoded paths and strong If-Match', async () => {
+    const input: UserGroupInput = { name: '采购成员', description: '通过组授予采购角色', enabled: true, roleIds: ['purchaser'], userIds: ['operator'] }
+    const group: UserGroup = { ...input, id: 'group / one', etag: 'group-etag' }
+    const updated: UserGroupInput = { ...input, enabled: false, roleIds: [], userIds: [] }
+    const fetcher = vi.fn().mockResolvedValueOnce(json({ data: [group] }))
+      .mockResolvedValueOnce(json(group)).mockResolvedValueOnce(json({ ...group, ...updated, etag: 'next-etag' }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient(), signal = new AbortController().signal
+    api.setCSRFToken('csrf-group')
+    await expect(api.listUserGroups(signal)).resolves.toEqual([group])
+    await expect(api.createUserGroup(input)).resolves.toEqual(group)
+    await expect(api.updateUserGroup(group.id, updated, '"group-etag"')).resolves.toMatchObject({ ...updated, etag: 'next-etag' })
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/metadata/admin/user-groups', '/api/metadata/admin/user-groups', '/api/metadata/admin/user-groups/group%20%2F%20one',
+    ])
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ method: 'GET', signal })
+    expect(fetcher.mock.calls[0][1].headers['X-CSRF-Token']).toBeUndefined()
+    expect(fetcher.mock.calls[1][1]).toMatchObject({ method: 'POST', headers: { 'X-CSRF-Token': 'csrf-group' } })
+    expect(fetcher.mock.calls[1][1].headers['If-Match']).toBeUndefined()
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual(input)
+    expect(fetcher.mock.calls[2][1]).toMatchObject({ method: 'PUT', headers: { 'X-CSRF-Token': 'csrf-group', 'If-Match': '"group-etag"' } })
+    expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual(updated)
+    for (const [, options] of fetcher.mock.calls) {
+      expect(options).toMatchObject({ credentials: 'same-origin', mode: 'same-origin', redirect: 'error', cache: 'no-store' })
+      expect(options.headers.Authorization).toBeUndefined()
+    }
+    await expect(api.updateUserGroup(group.id, input, 'W/"weak"')).rejects.toMatchObject({ code: 'invalid_etag' })
+    expect(fetcher).toHaveBeenCalledTimes(3)
+  })
+
+  it('preserves cancellation when loading identity groups', async () => {
+    const aborted = new DOMException('cancelled', 'AbortError'), signal = new AbortController().signal
+    const fetcher = vi.fn().mockRejectedValue(aborted)
+    vi.stubGlobal('fetch', fetcher)
+    await expect(new ApiClient().listUserGroups(signal)).rejects.toBe(aborted)
+    expect(fetcher.mock.calls[0][1].signal).toBe(signal)
   })
 })

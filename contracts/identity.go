@@ -46,6 +46,26 @@ type RoleInput struct {
 	Description string `json:"description"`
 }
 
+// UserGroup is an identity directory group, independent of definition groups.
+// Its enabled roles add to each member's direct roles without granting admin.
+type UserGroup struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Enabled     bool     `json:"enabled"`
+	RoleIDs     []string `json:"roleIds"`
+	UserIDs     []string `json:"userIds"`
+	ETag        string   `json:"etag"`
+}
+
+type UserGroupInput struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Enabled     bool     `json:"enabled"`
+	RoleIDs     []string `json:"roleIds"`
+	UserIDs     []string `json:"userIds"`
+}
+
 type PermissionRule struct {
 	ID           string      `json:"id"`
 	RoleID       string      `json:"roleId"`

@@ -169,16 +169,23 @@ func roleIDs(ctx context.Context, tx *sql.Tx, tenant string, ids []string) ([]st
 	result := append([]string{}, ids...)
 	sort.Strings(result)
 	for i, id := range result {
-		if id == "" || (i > 0 && result[i-1] == id) {
+		if id == "" || len(id) > 200 || (i > 0 && result[i-1] == id) {
 			return nil, problem(422, "invalid_role", "角色不能缺失或重复")
 		}
-		var exists int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM af_identity_roles WHERE tenant_id=? AND id=?", tenant, id).Scan(&exists); err != nil {
-			return nil, err
-		}
-		if exists != 1 {
-			return nil, problem(422, "invalid_role", "角色必须属于当前租户")
-		}
+	}
+	if len(result) == 0 {
+		return result, nil
+	}
+	args := []any{tenant}
+	for _, id := range result {
+		args = append(args, id)
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM af_identity_roles WHERE tenant_id=? AND id IN ("+placeholders(len(result))+")", args...).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count != len(result) {
+		return nil, problem(422, "invalid_role", "角色必须属于当前租户")
 	}
 	return result, nil
 }
@@ -253,7 +260,7 @@ func (s *Store) Authorize(ctx context.Context, p contracts.Principal, req contra
 		if !user.Enabled {
 			return problem(401, "unauthenticated", "用户不可用")
 		}
-		ids, err := roleIDs(ctx, tx, p.TenantID, user.RoleIDs)
+		ids, err := effectiveRoleIDs(ctx, tx, user)
 		if err != nil {
 			return err
 		}

@@ -346,3 +346,115 @@ test('真实服务：用户、角色、策略生效、行列权限和会话撤�
   mkdirSync(resolve(repo, '.cache/frontend-verification'), { recursive: true })
   await page.screenshot({ path: resolve(repo, '.cache/frontend-verification/user-permissions.png'), fullPage: true })
 })
+
+test('真实服务：用户组继承角色、启停与移除成员撤销授权', async ({ page, browser }) => {
+  const suffix = Date.now().toString()
+  const roleName = `组设备观察员${suffix}`
+  const groupName = `设备巡检组${suffix}`
+  const renamedGroup = `设备巡检组改名${suffix}`
+  const username = `groupreader${suffix}`
+  const displayName = `组授权读者${suffix}`
+  const password = randomUUID()
+  await page.goto('/'); await connect(page)
+  const session = await (await page.request.get('/api/metadata/auth/session')).json() as { csrfToken: string }
+  const headers = { Origin: 'http://127.0.0.1:5173', 'X-CSRF-Token': session.csrfToken }
+  const post = async (path: string, data: unknown, extra = {}) => {
+    const response = await page.request.post(path, { headers: { ...headers, ...extra }, data })
+    expect(response.ok(), `初始化请求失败: ${path} (${response.status()})`).toBe(true)
+    return response.json()
+  }
+  const category = await post('/api/metadata/categories', { name: `组授权验收${suffix}` })
+  const definitionGroup = await post('/api/metadata/groups', { name: '巡检模型', categoryId: category.id })
+  const schema = await post('/api/metadata/definitions', {
+    categoryId: category.id, groupId: definitionGroup.id, kind: 'schema', name: '巡检设备',
+    schema: { mode: 'schema_2_db', storageLayout: 'single', properties: [{ name: '设备名称', dataType: 'string' }] },
+  })
+  await post(`/api/metadata/definitions/${schema.definition.id}/publish`, undefined, { 'If-Match': `"${schema.etag}"` })
+  const fieldId = schema.definition.schema.properties[0].id as string
+  await post(`/api/data/schemas/${schema.definition.id}/instances`, { values: { [fieldId]: '组内可见设备' }, idempotencyKey: randomUUID() })
+  const role = await post('/api/metadata/admin/roles', { name: roleName, description: '经用户组分配业务角色' })
+  const user = await post('/api/metadata/admin/users', { username, displayName, password, enabled: true, administrator: false, roleIds: [] })
+  const policy = await (await page.request.get('/api/metadata/admin/policy')).json()
+  expect(policy.draft, '验收不会覆盖已有未生效草稿').toBeUndefined()
+  const saved = await page.request.put('/api/metadata/admin/policy', { headers: { ...headers, 'If-Match': `"${policy.etag}"` }, data: {
+    rules: [...policy.current.rules, { id: randomUUID(), roleId: role.id, effect: 'allow', operation: 'instance.query', resourceId: schema.definition.id, readFields: [fieldId], writeFields: [] }],
+  } })
+  expect(saved.ok()).toBe(true)
+  const draft = await saved.json()
+  await post('/api/metadata/admin/policy/publish', undefined, { 'If-Match': `"${draft.etag}"` })
+  const readerContext = await browser.newContext({ baseURL: 'http://127.0.0.1:5173' })
+  try {
+    const loginReader = async () => {
+      const response = await readerContext.request.post('/api/metadata/auth/login', { headers: { Origin: headers.Origin }, data: { tenant: account().Tenant, username, password } })
+      expect(response.ok()).toBe(true)
+      const result = await response.json() as { csrfToken: string; user: { roleIds: string[]; administrator: boolean } }
+      expect(result.user.roleIds).toEqual([])
+      expect(result.user.administrator).toBe(false)
+      return { Origin: headers.Origin, 'X-CSRF-Token': result.csrfToken }
+    }
+    const query = { from: { schemaId: schema.definition.id }, select: [fieldId], page: { limit: 10 } }
+    let readerHeaders = await loginReader()
+    expect((await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })).status()).toBe(403)
+    expect((await readerContext.request.get('/api/metadata/admin/user-groups')).status()).toBe(403)
+    await page.reload()
+    await page.getByRole('link', { name: '用户与权限', exact: true }).click()
+    await page.getByRole('tab', { name: '用户组', exact: true }).click()
+    await page.getByRole('button', { name: '创建用户组', exact: true }).click()
+    let dialog = page.getByRole('dialog')
+    await dialog.getByLabel('用户组名称', { exact: true }).fill(groupName)
+    await dialog.getByLabel('用户组说明', { exact: true }).fill('巡检业务成员与角色')
+    await dialog.getByRole('checkbox', { name: roleName, exact: true }).check()
+    await dialog.getByRole('checkbox', { name: `${displayName}（${username}）`, exact: true }).check()
+    await dialog.getByRole('button', { name: '创建用户组', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    expect((await readerContext.request.get('/api/metadata/auth/session')).status()).toBe(401)
+    readerHeaders = await loginReader()
+    const allowed = await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })
+    expect(allowed.status()).toBe(200)
+    expect((await allowed.json()).data[0].values).toEqual({ [fieldId]: '组内可见设备' })
+    const editor = async (name: string) => {
+      await page.getByRole('row').filter({ hasText: name }).getByRole('button', { name: '编辑用户组', exact: true }).click()
+      return page.getByRole('dialog')
+    }
+    dialog = await editor(groupName)
+    await dialog.getByLabel('用户组名称', { exact: true }).fill(renamedGroup)
+    await dialog.getByRole('button', { name: '保存用户组', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    expect((await readerContext.request.get('/api/metadata/auth/session')).status()).toBe(200)
+    expect((await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })).status()).toBe(200)
+    await page.getByRole('tab', { name: '用户', exact: true }).click()
+    const readerRow = page.getByRole('row').filter({ hasText: displayName })
+    await expect(readerRow.getByText(renamedGroup, { exact: true })).toBeVisible()
+    await page.getByRole('tab', { name: '用户组', exact: true }).click()
+    dialog = await editor(renamedGroup)
+    await dialog.getByRole('checkbox', { name: '启用用户组', exact: true }).uncheck()
+    await dialog.getByRole('button', { name: '保存用户组', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    expect((await readerContext.request.get('/api/metadata/auth/session')).status()).toBe(401)
+    readerHeaders = await loginReader()
+    expect((await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })).status()).toBe(403)
+    dialog = await editor(renamedGroup)
+    await dialog.getByRole('checkbox', { name: '启用用户组', exact: true }).check()
+    await dialog.getByRole('button', { name: '保存用户组', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    readerHeaders = await loginReader()
+    expect((await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })).status()).toBe(200)
+    dialog = await editor(renamedGroup)
+    await dialog.getByRole('checkbox', { name: `${displayName}（${username}）`, exact: true }).uncheck()
+    await dialog.getByRole('button', { name: '保存用户组', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    expect((await readerContext.request.get('/api/metadata/auth/session')).status()).toBe(401)
+    readerHeaders = await loginReader()
+    expect((await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })).status()).toBe(403)
+    const currentUser = await (await page.request.get(`/api/metadata/admin/users/${user.id}`)).json()
+    expect(currentUser.roleIds).toEqual([])
+    const directoryGroup = await page.request.get(`/api/metadata/groups?categoryId=${category.id}`)
+    expect((await directoryGroup.json()).data.map((entry: { name: string }) => entry.name)).toEqual(['巡检模型'])
+    await page.getByRole('tab', { name: '审计记录', exact: true }).click()
+    await page.getByRole('button', { name: '重新读取', exact: true }).click()
+    await expect(page.getByRole('cell', { name: '更新用户组', exact: true }).first()).toBeVisible()
+    await page.getByRole('tab', { name: '用户组', exact: true }).click()
+    mkdirSync(resolve(repo, '.cache/frontend-verification'), { recursive: true })
+    await page.screenshot({ path: resolve(repo, '.cache/frontend-verification/user-groups.png'), fullPage: true })
+  } finally { await readerContext.close() }
+})

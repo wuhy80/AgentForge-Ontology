@@ -1,11 +1,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiClient, ApiError } from '../../lib/api'
-import type { DefinitionRecord, PermissionRule, PolicyRecord, Role, Session, User } from '../../lib/types'
+import type { DefinitionRecord, PermissionRule, PolicyRecord, Role, Session, User, UserGroup } from '../../lib/types'
 import { AdminPage } from './AdminPage'
 import { UserDialog } from './IdentityDialogs'
 import { PolicyPanel } from './PolicyPanel'
 import { RuleDialog } from './RuleDialog'
+import { groupAffectsUser, UserGroupDialog } from './UserGroupDialog'
 
 const role: Role = { id: 'role-a', name: '采购员', description: '', etag: 'role-etag' }
 const user: User = { id: 'user-a', tenantId: 'tenant', username: 'buyer', displayName: '采购同事', enabled: true, administrator: false, roleIds: [role.id], etag: 'user-etag' }
@@ -13,6 +14,7 @@ const session: Session = { user: { ...user, id: 'admin', username: 'admin', disp
 const schema: DefinitionRecord = { etag: 'schema-etag', status: 'active', definition: { id: 'schema-a', tenantId: 'tenant', categoryId: 'category', groupId: 'group', kind: 'schema', name: '采购订单', schema: { mode: 'schema_2_db', storageLayout: 'single', properties: [{ id: 'amount', name: '金额', dataType: 'decimal', precision: 24, scale: 6 }, { id: 'dept', name: '部门', dataType: 'string' }] } } }
 const rule: PermissionRule = { id: 'rule-a', roleId: role.id, effect: 'allow', operation: 'instance.query', resourceId: schema.definition.id, readFields: ['amount'], writeFields: [] }
 const policy: PolicyRecord = { current: { rules: [] }, etag: 'policy-one', state: 'state-one' }
+const group: UserGroup = { id: 'group-a', name: '采购组', description: '采购团队', enabled: true, roleIds: [role.id], userIds: [user.id], etag: 'group-etag' }
 const noop = () => {}
 
 describe('identity administration', () => {
@@ -34,7 +36,7 @@ describe('identity administration', () => {
   })
 
   it('clears loaded users and roles when a management mutation is forbidden', async () => {
-    const api = { listUsers: vi.fn().mockResolvedValue([user]), listRoles: vi.fn().mockResolvedValue([role]), getPolicy: vi.fn().mockResolvedValue(policy), listAudit: vi.fn().mockResolvedValue([]), updateUser: vi.fn().mockRejectedValue(new ApiError(403, 'forbidden', '当前不可管理用户')) } as unknown as ApiClient
+    const api = { listUsers: vi.fn().mockResolvedValue([user]), listRoles: vi.fn().mockResolvedValue([role]), listUserGroups: vi.fn().mockResolvedValue([]), getPolicy: vi.fn().mockResolvedValue(policy), listAudit: vi.fn().mockResolvedValue([]), updateUser: vi.fn().mockRejectedValue(new ApiError(403, 'forbidden', '当前不可管理用户')) } as unknown as ApiClient
     render(<AdminPage api={api} session={session} categories={[]} definitions={[schema]} />)
     await screen.findByText('采购同事')
     fireEvent.click(screen.getByRole('button', { name: '编辑用户' }))
@@ -55,9 +57,111 @@ describe('identity administration', () => {
   })
 })
 
+describe('tenant user groups', () => {
+  function apiForGroups(extra: Record<string, unknown> = {}) {
+    return { listUsers: vi.fn().mockResolvedValue([user, session.user]), listRoles: vi.fn().mockResolvedValue([role]), listUserGroups: vi.fn().mockResolvedValue([group]), getPolicy: vi.fn().mockResolvedValue(policy), listAudit: vi.fn().mockResolvedValue([]), ...extra } as unknown as ApiClient
+  }
+
+  it('creates a group from searchable members and roles without changing direct user roles', async () => {
+    const createUserGroup = vi.fn().mockResolvedValue(group), onSaved = vi.fn()
+    render(<UserGroupDialog api={{ createUserGroup } as unknown as ApiClient} roles={[role]} users={[user, session.user]} onClose={noop} onSaved={onSaved} onForbidden={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('用户组名称'), { target: { value: '采购组' } })
+    fireEvent.change(screen.getByLabelText('用户组说明'), { target: { value: '采购团队' } })
+    fireEvent.change(screen.getByLabelText('搜索组角色'), { target: { value: '采购' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: role.name }))
+    fireEvent.change(screen.getByLabelText('搜索组成员'), { target: { value: user.username } })
+    expect(screen.queryByRole('checkbox', { name: `${session.user.displayName}（${session.user.username}）` })).toBeNull()
+    fireEvent.click(screen.getByRole('checkbox', { name: `${user.displayName}（${user.username}）` }))
+    fireEvent.click(screen.getByRole('button', { name: '创建用户组' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(group))
+    expect(createUserGroup).toHaveBeenCalledWith({ name: group.name, description: group.description, enabled: true, roleIds: [role.id], userIds: [user.id] })
+    expect(user.roleIds).toEqual([role.id])
+  })
+
+  it('preserves group inputs after 412 and blocks stale ETag retries, including after further editing', async () => {
+    const updateUserGroup = vi.fn().mockRejectedValue(new ApiError(412, 'precondition_failed', '用户组已改变'))
+    render(<UserGroupDialog api={{ updateUserGroup } as unknown as ApiClient} group={group} roles={[role]} users={[user]} onClose={noop} onSaved={vi.fn()} onForbidden={vi.fn()} />)
+    fireEvent.change(screen.getByLabelText('用户组名称'), { target: { value: '采购一组' } })
+    fireEvent.click(screen.getByLabelText('启用用户组'))
+    fireEvent.click(screen.getByRole('button', { name: '保存用户组' }))
+    await screen.findByText(/用户组已改变/)
+    expect(updateUserGroup).toHaveBeenCalledWith(group.id, { name: '采购一组', description: group.description, enabled: false, roleIds: [role.id], userIds: [user.id] }, group.etag)
+    expect((screen.getByLabelText('启用用户组') as HTMLInputElement).checked).toBe(false)
+    fireEvent.change(screen.getByLabelText('用户组名称'), { target: { value: '继续修改草稿' } })
+    expect(screen.getByText(/用户组已改变/)).toBeTruthy()
+    expect((screen.getByLabelText('用户组名称') as HTMLInputElement).value).toBe('继续修改草稿')
+    expect((screen.getByRole('button', { name: '保存用户组' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(updateUserGroup).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows direct roles separately from group sources and counts group assignments on role cards', async () => {
+    const member = { ...user, roleIds: [] }
+    render(<AdminPage api={apiForGroups({ listUsers: vi.fn().mockResolvedValue([member]) })} session={session} categories={[]} definitions={[schema]} />)
+    await screen.findByRole('row', { name: new RegExp(member.displayName) })
+    const row = screen.getByRole('row', { name: new RegExp(member.displayName) })
+    const cells = within(row).getAllByRole('cell')
+    expect(cells[2].textContent).toBe('未分配直接角色')
+    expect(cells[3].textContent).toContain(group.name)
+    expect(cells[3].textContent).toContain('组角色：采购员')
+    fireEvent.click(within(row).getByRole('button', { name: '编辑用户' }))
+    expect((within(screen.getByRole('dialog')).getByRole('checkbox', { name: role.name }) as HTMLInputElement).checked).toBe(false)
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' }))
+    fireEvent.click(screen.getByRole('tab', { name: '角色' }))
+    expect(screen.getByText('直接分配：0 位用户 · 1 个用户组（含停用组）')).toBeTruthy()
+  })
+
+  it('rechecks the current session when removing the administrator from a group', async () => {
+    const ownGroup = { ...group, userIds: [session.user.id] }
+    const updateUserGroup = vi.fn().mockResolvedValue({ ...ownGroup, userIds: [], etag: 'next' }), onSessionChanged = vi.fn()
+    render(<AdminPage api={apiForGroups({ listUserGroups: vi.fn().mockResolvedValue([ownGroup]), updateUserGroup })} session={session} categories={[]} definitions={[schema]} onSessionChanged={onSessionChanged} />)
+    await screen.findByText(user.displayName)
+    fireEvent.click(screen.getByRole('tab', { name: '用户组' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑用户组' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('checkbox', { name: `${session.user.displayName}（${session.user.username}）` }))
+    fireEvent.click(screen.getByRole('button', { name: '保存用户组' }))
+    await waitFor(() => expect(onSessionChanged).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('clears group records and closes the editor after an authorization refusal', async () => {
+    render(<AdminPage api={apiForGroups({ updateUserGroup: vi.fn().mockRejectedValue(new ApiError(403, 'forbidden', '无权管理用户组')) })} session={session} categories={[]} definitions={[schema]} />)
+    await screen.findByRole('row', { name: new RegExp(user.displayName) })
+    fireEvent.click(screen.getByRole('tab', { name: '用户组' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑用户组' }))
+    fireEvent.change(screen.getByLabelText('用户组名称'), { target: { value: '采购新组' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存用户组' }))
+    await screen.findByText('无权管理用户组')
+    expect(screen.queryByText(group.name)).toBeNull()
+    expect(screen.queryByText(user.displayName)).toBeNull()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('enforces per-group member and role selection limits while allowing deselection', () => {
+    const manyUsers = Array.from({ length: 257 }, (_, index) => ({ ...user, id: `user-${index}`, username: `member${index}`, displayName: `成员${index}` }))
+    const manyRoles = Array.from({ length: 65 }, (_, index) => ({ ...role, id: `role-${index}`, name: `角色${index}` }))
+    const largeGroup: UserGroup = { ...group, userIds: manyUsers.slice(0, 256).map((item) => item.id), roleIds: manyRoles.slice(0, 64).map((item) => item.id) }
+    render(<UserGroupDialog api={{} as ApiClient} group={largeGroup} roles={manyRoles} users={manyUsers} onClose={noop} onSaved={noop} onForbidden={noop} />)
+    expect((screen.getByRole('checkbox', { name: '角色64' }) as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('checkbox', { name: '成员256（member256）' }) as HTMLInputElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: '角色0' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: '成员0（member0）' }))
+    expect((screen.getByRole('checkbox', { name: '角色64' }) as HTMLInputElement).disabled).toBe(false)
+    expect((screen.getByRole('checkbox', { name: '成员256（member256）' }) as HTMLInputElement).disabled).toBe(false)
+  })
+
+  it('only requests session checks for membership, role or status changes affecting that user', () => {
+    expect(groupAffectsUser(group, { ...group, name: '新名称' }, user.id)).toBe(false)
+    expect(groupAffectsUser(group, { ...group, enabled: false }, user.id)).toBe(true)
+    expect(groupAffectsUser(group, { ...group, userIds: [] }, user.id)).toBe(true)
+    expect(groupAffectsUser(group, { ...group, roleIds: [] }, user.id)).toBe(true)
+    expect(groupAffectsUser(group, { ...group, enabled: false }, 'unrelated')).toBe(false)
+    expect(groupAffectsUser(undefined, group, user.id)).toBe(true)
+  })
+})
+
 describe('permission policy editor', () => {
   it('opens an editable rule dialog from the policy tab in the full management page', async () => {
-    const api = { listUsers: vi.fn().mockResolvedValue([user]), listRoles: vi.fn().mockResolvedValue([role]), getPolicy: vi.fn().mockResolvedValue(policy), listAudit: vi.fn().mockResolvedValue([]) } as unknown as ApiClient
+    const api = { listUsers: vi.fn().mockResolvedValue([user]), listRoles: vi.fn().mockResolvedValue([role]), listUserGroups: vi.fn().mockResolvedValue([]), getPolicy: vi.fn().mockResolvedValue(policy), listAudit: vi.fn().mockResolvedValue([]) } as unknown as ApiClient
     render(<AdminPage api={api} session={session} categories={[]} definitions={[schema]} />)
     await screen.findByText('采购同事')
     fireEvent.click(screen.getByRole('tab', { name: '权限策略' }))
@@ -148,5 +252,20 @@ describe('permission policy editor', () => {
     rerender(<PolicyPanel {...props} users={[{ ...user, roleIds: [], enabled: false, etag: 'revoked' }]} />)
     expect(screen.queryByText('匹配已分配角色')).toBeNull()
     expect(screen.queryByText('允许此操作')).toBeNull()
+  })
+
+  it('clears simulation after group changes while preserving unsaved policy rules', async () => {
+    const simulatePolicy = vi.fn().mockResolvedValue({ decision: { allow: true, readFields: ['*'], writeFields: [], state: 'state-one' }, reason: '匹配用户组角色' })
+    const api = { simulatePolicy } as unknown as ApiClient
+    const props = { api, record: { ...policy, current: { rules: [rule] } }, roles: [role], users: [user], definitions: [schema], categories: [], onRecord: noop, onReload: noop, onForbidden: noop }
+    const { rerender } = render(<PolicyPanel {...props} groups={[group]} />)
+    fireEvent.click(screen.getByRole('button', { name: '移除规则：查询实例' }))
+    fireEvent.change(screen.getByLabelText('模拟用户'), { target: { value: user.id } })
+    fireEvent.click(screen.getByRole('button', { name: '模拟授权' }))
+    await screen.findByText('匹配用户组角色')
+    rerender(<PolicyPanel {...props} groups={[{ ...group, enabled: false, etag: 'next' }]} />)
+    expect(screen.queryByText('匹配用户组角色')).toBeNull()
+    expect(screen.getByText('从一条角色规则开始')).toBeTruthy()
+    expect((screen.getByRole('button', { name: '保存策略草稿' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })

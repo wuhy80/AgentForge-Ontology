@@ -145,6 +145,9 @@ func (s *Store) updateUser(w http.ResponseWriter, r *http.Request) error {
 				return err
 			}
 		}
+		if _, err := effectiveRoleIDs(r.Context(), tx, result); err != nil {
+			return err
+		}
 		if hash != "" || old.Enabled != result.Enabled || old.Administrator != result.Administrator || !reflect.DeepEqual(old.RoleIDs, result.RoleIDs) || old.Username != result.Username {
 			if _, err := tx.ExecContext(r.Context(), "DELETE FROM af_identity_sessions WHERE tenant_id=? AND user_id=?", actor.TenantID, result.ID); err != nil {
 				return err

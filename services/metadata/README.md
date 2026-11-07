@@ -48,6 +48,7 @@ go run ./cmd/server
 | `POST /metadata/auth/login`、`GET /metadata/auth/session`、`POST /metadata/auth/logout` | 账号登录、恢复当前会话及服务端注销 |
 | `PUT /metadata/auth/password` | 核对当前密码、修改密码并旋转会话 |
 | `/metadata/admin/users`、`/metadata/admin/roles` | 当前租户的用户、启停、密码重置及角色管理 |
+| `/metadata/admin/user-groups`、`/metadata/admin/user-groups/{id}` | 租户用户组、组角色及成员；列表/创建使用GET/POST，详情/更新使用GET/PUT，更新须带强If-Match |
 | `/metadata/admin/policy`、`POST /metadata/admin/policy/publish` | 权限策略草稿及显式生效 |
 | `POST /metadata/admin/simulate`、`GET /metadata/admin/audit` | 策略试算及最近200条审计；审计响应声明 `hasMore` |
 | `POST/GET /metadata/categories` | 创建和分页读取分类 |
@@ -72,7 +73,7 @@ go run ./cmd/server
 
 `go test ./...` 覆盖名称归一、定义/类型校验、身份隔离、错误关闭、并发凭证及 Data 操作确认。设置 `METADATA_TEST_DSN` 可运行真实 MySQL 测试，显式应用本模块迁移，并以随机租户验证生命周期、失败恢复、outbox 去重、中文名称多轮往返修改、同操作并发恢复和结构变更拒绝；测试不会删除既有数据。
 
-设置 `IDENTITY_TEST_DSN` 运行身份管理的真实 MySQL 生命周期测试，额外设置 `IDENTITY_TEST_OPA_URL` 可连接真实 OPA；覆盖账号隔离、会话吊销、策略草稿/生效、审计、登录限流及并发管理员保护。管理员标记只开放租户内管理，不自动授予业务数据权限；初始管理员通过显式角色获得业务授权。当前仅提供本地账号和受限角色策略，外部身份目录、用户组、委托管理、逐行掩码和完整调用授权仍未交付。
+设置 `IDENTITY_TEST_DSN` 运行身份管理的真实MySQL生命周期测试，额外设置 `IDENTITY_TEST_OPA_URL` 可连接真实OPA。用户组、会话吊销、策略草稿/生效、审计、登录限流及并发管理员保护的验证入口和结果见[identity](identity/README.md)与项目总览。管理员标记只开放租户内管理，不自动授予业务数据权限；初始管理员通过显式角色获得业务授权。当前提供本地账号、平面用户组和受限角色策略；外部身份目录、组嵌套、委托管理、逐行掩码和完整调用授权仍未交付。
 
 发布操作身份独立于候选内容摘要：A→B→A 的最后一步创建新操作，只有候选已与当前内容相同时才清理相同草稿并幂等返回已有成功操作。并发重试按持久阶段推进，较早网络请求的迟到失败不能覆盖已提交或成功状态。
 

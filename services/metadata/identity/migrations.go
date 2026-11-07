@@ -53,4 +53,23 @@ var Migrations = []storage.Migration{
  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
  KEY ix_identity_audit_tenant (tenant_id,created_at,id)
 ) ENGINE=InnoDB`},
+	{ID: "013_identity_user_groups", SQL: `CREATE TABLE af_identity_user_groups (
+ id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
+ tenant_id VARBINARY(128) NOT NULL,
+ name VARCHAR(128) NOT NULL,
+ name_key VARBINARY(512) NOT NULL,
+ description TEXT NOT NULL,
+ enabled BOOLEAN NOT NULL,
+ role_ids LONGTEXT NOT NULL,
+ etag CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ UNIQUE KEY uq_identity_user_group_name (tenant_id,name_key),
+ KEY ix_identity_user_groups_tenant (tenant_id,id)
+) ENGINE=InnoDB`},
+	{ID: "014_identity_user_group_members", SQL: `CREATE TABLE af_identity_user_group_members (
+ tenant_id VARBINARY(128) NOT NULL,
+ group_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ user_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ PRIMARY KEY (tenant_id,group_id,user_id),
+ KEY ix_identity_user_group_members_user (tenant_id,user_id,group_id)
+) ENGINE=InnoDB`},
 }

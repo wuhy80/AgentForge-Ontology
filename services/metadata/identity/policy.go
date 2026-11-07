@@ -143,8 +143,12 @@ func (s *Store) simulate(w http.ResponseWriter, r *http.Request) error {
 		}
 		runtime = contracts.RuntimePolicy{State: policy.State, Rules: []contracts.PermissionRule{}}
 		if user.Enabled {
+			ids, err := effectiveRoleIDs(r.Context(), tx, user)
+			if err != nil {
+				return err
+			}
 			active := map[string]bool{}
-			for _, id := range user.RoleIDs {
+			for _, id := range ids {
 				active[id] = true
 			}
 			for _, rule := range candidate.Rules {
