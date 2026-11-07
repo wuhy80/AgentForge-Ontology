@@ -198,13 +198,19 @@ func validatePolicy(ctx context.Context, tx *sql.Tx, tenant string, policy contr
 			continue
 		}
 		if !instance {
-			if strings.HasPrefix(rule.Operation, "link.") {
+			if strings.HasPrefix(rule.Operation, "link.") || rule.Operation == "function.invoke" || rule.Operation == "action.invoke" {
+				kind := "link"
+				if rule.Operation == "function.invoke" {
+					kind = "function"
+				} else if rule.Operation == "action.invoke" {
+					kind = "action"
+				}
 				var count int
-				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM af_meta_definitions WHERE tenant_id=? AND id=? AND kind='link' AND status='active' AND current_json IS NOT NULL", tenant, rule.ResourceID).Scan(&count); err != nil {
+				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM af_meta_definitions WHERE tenant_id=? AND id=? AND kind=? AND status='active' AND current_json IS NOT NULL", tenant, rule.ResourceID, kind).Scan(&count); err != nil {
 					return err
 				}
 				if count != 1 {
-					return problem(422, "invalid_policy_resource", "关系授权必须绑定当前租户已生效的Link")
+					return problem(422, "invalid_policy_resource", "关系、函数或动作授权必须绑定当前租户已生效的对应类型定义")
 				}
 				continue
 			}

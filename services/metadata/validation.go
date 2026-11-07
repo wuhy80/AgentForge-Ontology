@@ -198,6 +198,27 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if c.SideEffects != "none" && c.SideEffects != "dataWrite" && c.SideEffects != "externalWrite" {
 			return problem(400, "invalid_side_effects", "必须显式声明none、dataWrite或externalWrite")
 		}
+		if c.Runtime != nil {
+			if d.Kind != contracts.KindFunction {
+				return problem(422, "unsupported_runtime", "Action通过绑定Function执行，不能直接配置脚本")
+			}
+			if c.SideEffects != "none" || c.ArtifactRef != "" || c.FunctionID != "" {
+				return problem(422, "unsupported_runtime", "Python脚本仅支持无副作用计算，不能同时绑定产物或其他函数")
+			}
+			if err := contracts.ValidateScriptRuntime(c.Runtime); err != nil {
+				return problem(422, "invalid_runtime", err.Error())
+			}
+			for _, ps := range [][]contracts.Property{c.Input, c.Output} {
+				if len(ps) > 256 {
+					return problem(422, "parameter_budget", "Python输入与输出分别最多256个参数")
+				}
+				for _, property := range ps {
+					if property.EnumID != "" {
+						return problem(422, "unsupported_parameters", "首批Python运行参数尚不支持Enum引用")
+					}
+				}
+			}
+		}
 	default:
 		return problem(400, "invalid_kind", "未知定义类型")
 	}
@@ -316,6 +337,12 @@ func compatibleUpdate(old, next contracts.Definition) error {
 	// signatures, implementation and side effects still require runtime support.
 	if a.Kind == contracts.KindAction && a.Action != nil && b.Action != nil {
 		a.Action.TargetSchemaIDs, b.Action.TargetSchemaIDs = nil, nil
+	}
+	// A pure Function may acquire or replace its inline implementation while
+	// preserving its stable parameter signature. Started invocations own an
+	// immutable snapshot; later invocations resolve the new current definition.
+	if a.Kind == contracts.KindFunction && a.Function != nil && b.Function != nil && a.Function.SideEffects == "none" && b.Function.SideEffects == "none" && a.Function.ArtifactRef == "" && b.Function.ArtifactRef == "" {
+		a.Function.Runtime, b.Function.Runtime = nil, nil
 	}
 	if !reflect.DeepEqual(a, b) {
 		if compatibleLinkBindingAddition(a, b) {

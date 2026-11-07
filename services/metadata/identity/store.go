@@ -227,7 +227,7 @@ func (s *Store) Bootstrap(ctx context.Context, tenant, username, password string
 			return err
 		}
 		policy := contracts.PermissionPolicy{Rules: []contracts.PermissionRule{}}
-		for _, operation := range []string{"organization.read", "organization.edit", "definition.read", "definition.edit", "definition.publish", "instance.read", "instance.create", "instance.patch", "instance.delete", "instance.query", "link.query", "link.create", "link.delete"} {
+		for _, operation := range []string{"organization.read", "organization.edit", "definition.read", "definition.edit", "definition.publish", "instance.read", "instance.create", "instance.patch", "instance.delete", "instance.query", "link.query", "link.create", "link.delete", "function.invoke", "action.invoke"} {
 			policy.Rules = append(policy.Rules, contracts.PermissionRule{ID: contracts.NewID(), RoleID: roleID, Effect: "allow", Operation: operation, ResourceID: "*", ReadFields: []string{"*"}, WriteFields: []string{"*"}})
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE af_identity_tenants SET current_policy=? WHERE tenant_id=?", marshal(policy), tenant); err != nil {

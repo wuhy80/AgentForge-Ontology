@@ -23,7 +23,7 @@ func policyError(message string) error {
 
 func policyOperation(operation string) bool {
 	switch operation {
-	case "organization.read", "organization.edit", "definition.read", "definition.edit", "definition.publish", "instance.create", "instance.read", "instance.patch", "instance.delete", "instance.query", "link.query", "link.create", "link.delete":
+	case "organization.read", "organization.edit", "definition.read", "definition.edit", "definition.publish", "instance.create", "instance.read", "instance.patch", "instance.delete", "instance.query", "link.query", "link.create", "link.delete", "function.invoke", "action.invoke":
 		return true
 	}
 	return false
@@ -164,8 +164,8 @@ func ValidatePermissionPolicy(policy contracts.PermissionPolicy) error {
 		if !strings.HasPrefix(rule.Operation, "instance.") && (rule.RowFilter != nil || rule.NewRowFilter != nil) {
 			return policyError("定义、组织与关系操作不支持行条件")
 		}
-		if strings.HasPrefix(rule.Operation, "link.") && (!wholeResourceFields(rule.ReadFields) || !wholeResourceFields(rule.WriteFields)) {
-			return policyError("关系授权以完整关系为单位，不支持字段投影")
+		if (strings.HasPrefix(rule.Operation, "link.") || callableOperation(rule.Operation)) && (!wholeResourceFields(rule.ReadFields) || !wholeResourceFields(rule.WriteFields)) {
+			return policyError("关系及函数动作调用授权以完整资源为单位，不支持字段投影")
 		}
 		if err := validateFilter(rule.RowFilter); err != nil {
 			return err
@@ -179,6 +179,10 @@ func ValidatePermissionPolicy(policy contracts.PermissionPolicy) error {
 
 func wholeResourceFields(fields []string) bool {
 	return len(fields) == 0 || len(fields) == 1 && fields[0] == "*"
+}
+
+func callableOperation(operation string) bool {
+	return operation == "function.invoke" || operation == "action.invoke"
 }
 
 func validateDecision(decision contracts.Decision) error {
@@ -263,6 +267,12 @@ func mergeRuntime(runtime *contracts.RuntimePolicy, request contracts.Authorizat
 	if strings.HasPrefix(request.Operation, "link.") && request.Kind != "" && request.Kind != contracts.KindLink {
 		return contracts.Decision{}, policyError("关系操作必须使用Link资源类型")
 	}
+	if request.Operation == "function.invoke" && request.Kind != contracts.KindFunction || request.Operation == "action.invoke" && request.Kind != contracts.KindAction {
+		return contracts.Decision{}, policyError("函数或动作调用必须声明对应的资源类型")
+	}
+	if callableOperation(request.Operation) && !validIdentifier(request.ResourceID, false) {
+		return contracts.Decision{}, policyError("调用必须指定具体函数或动作的稳定标识")
+	}
 	decision := contracts.Decision{State: runtime.State}
 	var oldFilters, newFilters []*contracts.Expression
 	for _, rule := range runtime.Rules {
@@ -282,7 +292,7 @@ func mergeRuntime(runtime *contracts.RuntimePolicy, request contracts.Authorizat
 		// Link permissions grant the operation as a whole. Accepted [] and [*]
 		// field lists carry no projection semantics and cannot create a conflict
 		// when two roles grant the same static relation operation.
-		if strings.HasPrefix(request.Operation, "link.") {
+		if strings.HasPrefix(request.Operation, "link.") || callableOperation(request.Operation) {
 			read, write = nil, nil
 		}
 		if decision.Allow && (strings.Join(read, "\x00") != strings.Join(decision.ReadFields, "\x00") || strings.Join(write, "\x00") != strings.Join(decision.WriteFields, "\x00")) {

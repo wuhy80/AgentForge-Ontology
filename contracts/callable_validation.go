@@ -1,0 +1,58 @@
+package contracts
+
+import (
+	"errors"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"unicode/utf8"
+)
+
+const MaxScriptSourceBytes = 64 * 1024
+
+var pythonEntrypoint = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,63}$`)
+
+// ValidateScriptRuntime validates the executable subset, shared by publication
+// and invocation. It deliberately never falls back to a different language.
+func ValidateScriptRuntime(runtime *ScriptRuntime) error {
+	if runtime == nil {
+		return errors.New("尚未配置可执行的Python代码")
+	}
+	if runtime.Language != "python" {
+		return errors.New("首批运行器仅支持python")
+	}
+	if !utf8.ValidString(runtime.Source) || strings.TrimSpace(runtime.Source) == "" || len(runtime.Source) > MaxScriptSourceBytes || strings.ContainsRune(runtime.Source, 0) {
+		return errors.New("Python源码必须为有效UTF-8文本，非空且不超过64KiB，不能含空字符")
+	}
+	if !pythonEntrypoint.MatchString(runtime.Entrypoint) || strings.HasPrefix(runtime.Entrypoint, "__") {
+		return errors.New("入口必须为1至64字符的Python函数标识，且不能以双下划线开头")
+	}
+	for _, keyword := range strings.Fields("False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield") {
+		if runtime.Entrypoint == keyword {
+			return errors.New("入口不能使用Python保留关键字")
+		}
+	}
+	if runtime.TimeoutSeconds < 1 || runtime.TimeoutSeconds > 30 {
+		return errors.New("Python执行超时必须为1至30秒")
+	}
+	return nil
+}
+
+// CallableSignaturesEqual compares the name-to-value protocol accepted by the
+// first Python runner. Each definition owns its own property IDs. Parameter
+// order is immaterial; all declared value semantics must match.
+func CallableSignaturesEqual(left, right *Callable) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	canonical := func(properties []Property) []Property {
+		result := append([]Property{}, properties...)
+		for i := range result {
+			result[i].ID = ""
+		}
+		sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+		return result
+	}
+	return reflect.DeepEqual(canonical(left.Input), canonical(right.Input)) && reflect.DeepEqual(canonical(left.Output), canonical(right.Output))
+}

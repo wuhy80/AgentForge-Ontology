@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react'
 const proxy = {
   '/api/metadata': { target: 'http://127.0.0.1:18080', rewrite: (path: string) => path.replace(/^\/api/, '') },
   '/api/data': { target: 'http://127.0.0.1:18081', rewrite: (path: string) => path.replace(/^\/api/, '') },
+  '/api/execution': { target: 'http://127.0.0.1:18082', rewrite: (path: string) => path.replace(/^\/api/, '') },
 }
 
 export default defineConfig({

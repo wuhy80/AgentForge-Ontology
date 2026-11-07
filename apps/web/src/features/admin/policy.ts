@@ -16,7 +16,15 @@ export const operations = [
   { value: 'link.query', label: '查询关联数据' },
   { value: 'link.create', label: '添加对象关系' },
   { value: 'link.delete', label: '移除对象关系' },
+  { value: 'function.invoke', label: '运行函数' },
+  { value: 'action.invoke', label: '运行动作' },
 ]
+
+export function operationResources(operation: string, definitions: DefinitionRecord[]): DefinitionRecord[] {
+  const kind = operation.startsWith('instance.') ? 'schema' : operation.startsWith('link.') ? 'link'
+    : operation === 'function.invoke' ? 'function' : operation === 'action.invoke' ? 'action' : undefined
+  return definitions.filter((item) => !kind || item.definition.kind === kind)
+}
 
 export function operationName(value: string) { return operations.find((item) => item.value === value)?.label ?? value }
 export function resourceName(id: string, definitions: DefinitionRecord[], categories: Organization[]) {

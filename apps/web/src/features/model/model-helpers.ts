@@ -13,7 +13,7 @@ export const kindDescriptions: Record<Kind, string> = {
   enum: '维护稳定的业务编码与用户可见标签。',
   link: '通过正反方向连接已经生效的对象模型。',
   action: '定义动作的输入、输出和副作用边界。',
-  function: '登记函数签名、产物引用与副作用声明。',
+  function: '维护函数签名，编写和运行无副作用的 Python 计算。',
 }
 
 export function newDefinition(kind: Kind, categoryId = '', groupId = ''): Definition {
@@ -93,6 +93,14 @@ export function validateDefinition(definition: Definition): string | undefined {
     if (!callable) continue
     const error = validateProperties(callable.input ?? [], '输入参数') ?? validateProperties(callable.output ?? [], '输出参数')
     if (error) return error
+    if (callable.runtime) {
+      if (!definition.function || callable.sideEffects !== 'none') return 'Python 实现仅支持无副作用的函数。'
+      if (callable.artifactRef) return 'Python 源码与产物引用不能同时配置。'
+      if (callable.runtime.language !== 'python') return '当前仅支持 Python 运行器。'
+      if (!callable.runtime.source.trim() || new TextEncoder().encode(callable.runtime.source).length > 65536) return '请填写 Python 源码，最多 64 KiB。'
+      if (!/^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(callable.runtime.entrypoint) || ['False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield'].includes(callable.runtime.entrypoint)) return 'Python 入口须为普通函数名，最多 64 个字母、数字或下划线，不使用关键字或双下划线前缀。'
+      if (!Number.isInteger(callable.runtime.timeoutSeconds) || callable.runtime.timeoutSeconds < 1 || callable.runtime.timeoutSeconds > 30) return '执行超时须为 1–30 秒的整数。'
+    }
   }
 }
 

@@ -8,6 +8,7 @@ require (
 	github.com/wuhy80/AgentForge-Ontology/libs/storage v0.0.0
 	github.com/wuhy80/AgentForge-Ontology/services/data v0.0.0
 	github.com/wuhy80/AgentForge-Ontology/services/metadata v0.0.0
+	github.com/wuhy80/AgentForge-Ontology/services/execution v0.0.0
 )
 
 require (
@@ -34,3 +35,5 @@ replace github.com/wuhy80/AgentForge-Ontology/libs/storage => ../../libs/storage
 replace github.com/wuhy80/AgentForge-Ontology/services/metadata => ../../services/metadata
 
 replace github.com/wuhy80/AgentForge-Ontology/services/data => ../../services/data
+
+replace github.com/wuhy80/AgentForge-Ontology/services/execution => ../../services/execution

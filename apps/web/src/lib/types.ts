@@ -181,6 +181,21 @@ export interface Callable {
   functionId?: string
   artifactRef?: string
   sideEffects: 'none' | 'dataWrite' | 'externalWrite'
+  runtime?: ScriptRuntime
+}
+export interface ScriptRuntime { language: 'python'; source: string; entrypoint: string; timeoutSeconds: number }
+export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; reason?: string }
+export interface Invocation {
+  id: string
+  definitionId: string
+  definitionName: string
+  kind: Kind
+  status: 'running' | 'succeeded' | 'failed' | 'timed_out' | 'canceled' | 'interrupted'
+  output?: Values
+  error?: { code: string; message: string }
+  createdAt: string
+  finishedAt?: string
+  codeDigest: string
 }
 export interface Definition {
   id: string

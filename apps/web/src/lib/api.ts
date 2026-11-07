@@ -1,5 +1,5 @@
 import type {
-  DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities,
+  DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
   DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SchemaStorageMapping, SourceVersionOption,
@@ -23,7 +23,7 @@ export class ApiError extends Error {
 }
 
 export interface DefinitionFilters { categoryId?: string; kind?: Kind; view?: 'current' | 'draft' }
-type RequestOptions = { method?: string; body?: unknown; etag?: string; signal?: AbortSignal }
+type RequestOptions = { method?: string; body?: unknown; etag?: string; idempotencyKey?: string; signal?: AbortSignal }
 const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 function strongETag(value: string): string {
@@ -63,6 +63,7 @@ export class ApiClient {
     if (this.csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) headers['X-CSRF-Token'] = this.csrfToken
     if (options.body !== undefined) headers['Content-Type'] = 'application/json; charset=utf-8'
     if (options.etag !== undefined) headers['If-Match'] = strongETag(options.etag)
+    if (options.idempotencyKey !== undefined) headers['Idempotency-Key'] = options.idempotencyKey
     let response: Response
     try {
       response = await fetch(path, {
@@ -101,6 +102,11 @@ export class ApiClient {
   }
 
   setCSRFToken(token: string): void { this.csrfToken = token }
+  executionCapabilities(signal?: AbortSignal): Promise<ExecutionCapabilities> { return this.request('/api/execution/capabilities', { signal }) }
+  invoke(definitionId: string, input: Values, idempotencyKey: string, signal?: AbortSignal): Promise<Invocation> {
+    return this.request('/api/execution/invocations', { method: 'POST', body: { definitionId, input }, idempotencyKey, signal })
+  }
+  getInvocation(id: string, signal?: AbortSignal): Promise<Invocation> { return this.request(`/api/execution/invocations/${encodeURIComponent(id)}`, { signal }) }
   private async readSession(path: string, options: RequestOptions = {}): Promise<Session> {
     const session = await this.request<Session>(path, options)
     this.setCSRFToken(session.csrfToken)

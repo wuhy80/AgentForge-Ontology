@@ -3,7 +3,7 @@ import { Check, FlaskConical, LoaderCircle, Pencil, Plus, RefreshCw, Rocket, Sav
 import { ApiClient, ApiError } from '../../lib/api'
 import type { DefinitionRecord, Organization, PermissionRule, PolicyRecord, Role, SimulationResult, User, UserGroup } from '../../lib/types'
 import { errorMessage } from '../query/query'
-import { canonicalPolicy, expressionSummary, fieldsSummary, operationName, operations, resourceName } from './policy'
+import { canonicalPolicy, expressionSummary, fieldsSummary, operationName, operations, operationResources, resourceName } from './policy'
 import { RuleDialog } from './RuleDialog'
 
 const emptyGroups: UserGroup[] = []
@@ -16,7 +16,7 @@ function Simulation({ api, record, users, groups, definitions, categories, onFor
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const request = useRef<AbortController | undefined>(undefined)
-  const candidates = definitions.filter((item) => operation.startsWith('link.') ? item.definition.kind === 'link' : !operation.startsWith('instance.') || item.definition.kind === 'schema')
+  const candidates = operationResources(operation, definitions)
   const properties = definitions.find((item) => item.definition.id === resourceId)?.definition.schema?.properties ?? []
   useEffect(() => () => request.current?.abort(), [])
   useEffect(() => {

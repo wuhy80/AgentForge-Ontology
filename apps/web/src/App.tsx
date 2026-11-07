@@ -532,7 +532,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                   <strong>探索数据</strong>创建实例，选择字段与条件，显式运行查询。
                 </li>
               </ol>
-              <p className="muted">操作与函数目前支持定义维护；关系事实、多跳、分表和任务执行尚未开放。</p>
+              <p className="muted">函数支持无副作用的 Python 计算，动作可绑定函数运行；关系事实与受限同库查询已开放。事件、定时调度、分表和数据或外部写入动作尚未开放。</p>
               <button className="button subtle" type="button" onClick={() => setHelp(false)}>
                 收起指引
               </button>

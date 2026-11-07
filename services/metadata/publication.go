@@ -278,6 +278,14 @@ func validateReferences(ctx context.Context, tx *sql.Tx, d contracts.Definition)
 			}
 		}
 	}
+	if d.Action != nil && d.Action.FunctionID != "" {
+		if err := validateCallableBinding(d, refs[d.Action.FunctionID]); err != nil {
+			return err
+		}
+	}
+	if err := validateDependentActions(ctx, tx, d); err != nil {
+		return err
+	}
 	// Callable-to-callable dependencies may form longer cycles. The bounded
 	// traversal runs under the tenant write guard so concurrent edits cannot
 	// invalidate the checked graph before current is replaced.

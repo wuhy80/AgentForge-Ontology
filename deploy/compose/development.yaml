@@ -28,6 +28,20 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+  execution-db:
+    image: mysql:26.7.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${ONTOLOGY_MYSQL_ROOT_PASSWORD:?required}
+      MYSQL_DATABASE: ontology_execution
+      MYSQL_USER: ontology
+      MYSQL_PASSWORD: ${ONTOLOGY_MYSQL_PASSWORD:?required}
+    ports: ["127.0.0.1:23308:3306"]
+    volumes: ["execution-db:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
   source-postgres:
     image: postgres:17-alpine
     profiles: ["sources"]
@@ -50,4 +64,5 @@ services:
 volumes:
   metadata-db:
   data-db:
+  execution-db:
   source-postgres:

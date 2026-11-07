@@ -284,3 +284,17 @@
   .model-page-list .model-loaded-count { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .model-spin { animation: none; } .model-card { transition: none; } }
+
+.model-python-editor .form-grid { margin-top: 16px; }
+.model-code-label { display: grid; gap: 8px; margin-top: 16px; }
+.model-python-source { font-family: Consolas, 'Courier New', monospace; line-height: 1.65; tab-size: 4; resize: vertical; min-height: 240px; }
+.model-callable-runner { border: 1px solid var(--border, #dce3eb); border-radius: 10px; padding: 20px; margin: 24px 0; min-width: 0; }
+.model-invocation-inputs { display: grid; gap: 14px; margin-bottom: 18px; }
+.model-invocation-input { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(150px, 1fr) minmax(140px, 2fr); gap: 10px; align-items: start; }
+.model-invocation-input label { display: grid; gap: 4px; }
+.model-invocation-result { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border, #dce3eb); }
+.model-invocation-result dl { margin: 0; }
+.model-invocation-result dl > div { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 12px; padding: 10px 0; }
+.model-invocation-result dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.model-invocation-result p { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .model-invocation-input, .model-invocation-result dl > div { grid-template-columns: minmax(0, 1fr); } .model-callable-runner { padding: 14px; } }

@@ -47,7 +47,7 @@ if (-not (Test-Path -LiteralPath $adminFile)) {
 }
 $initialAdmin = Get-Content -LiteralPath $adminFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
-$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD')
+$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD','ONTOLOGY_PYTHON_IMAGE')
 $savedEnvironment = @{}
 foreach ($name in $envNames) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -61,6 +61,19 @@ try {
     $env:ONTOLOGY_METADATA_URL = 'http://127.0.0.1:18080'
     $env:ONTOLOGY_DATA_URL = 'http://127.0.0.1:18081'
     $env:ONTOLOGY_PUBLIC_ORIGIN = 'http://127.0.0.1:5173'
+    if (-not $env:ONTOLOGY_PYTHON_IMAGE) { $env:ONTOLOGY_PYTHON_IMAGE = 'python:3.12-alpine' }
+    $imageProbePreference = $ErrorActionPreference
+    try {
+        # A missing image is expected on first startup. Windows PowerShell 5
+        # must not turn native stderr into a terminating error before the pull.
+        $ErrorActionPreference = 'Continue'
+        & docker image inspect $env:ONTOLOGY_PYTHON_IMAGE --format '{{.Id}}' 2>$null | Out-Null
+        $imageProbeExitCode = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $imageProbePreference }
+    if ($imageProbeExitCode -ne 0) {
+        & docker pull $env:ONTOLOGY_PYTHON_IMAGE
+        if ($LASTEXITCODE -ne 0) { throw 'Python runtime image is unavailable; inspect the image setting and Docker access.' }
+    }
     $binRoot = Join-Path $devRoot 'bin'
     New-Item -ItemType Directory -Force -Path $binRoot | Out-Null
     $processes = @{}
@@ -73,12 +86,12 @@ try {
             if ($process -and $process.Path -eq (Join-Path $binRoot "$($p.Name).exe")) { $processes[$p.Name] = $p.Value }
         }
     }
-    foreach ($service in @('metadata','data')) {
+    foreach ($service in @('metadata','data','execution')) {
         if ($processes.ContainsKey($service)) { continue }
         $binary = Join-Path $binRoot "$service.exe"
         Push-Location (Join-Path $repoRoot "services/$service")
         try { & go build -o $binary ./cmd/server; if ($LASTEXITCODE -ne 0) { throw "$service build failed" } } finally { Pop-Location }
-        $port = if ($service -eq 'metadata') { 23306 } else { 23307 }
+        $port = @{metadata=23306; data=23307; execution=23308}[$service]
         $env:ONTOLOGY_MYSQL_DSN = "ontology:$($secrets.MySQLPassword)@tcp(127.0.0.1:$port)/ontology_${service}?charset=utf8mb4&parseTime=true&loc=UTC"
         & $binary -migrate
         if ($LASTEXITCODE -ne 0) { throw "$service migration needs inspection; no server was started for this service" }
@@ -92,12 +105,12 @@ try {
             $env:ONTOLOGY_BOOTSTRAP_USERNAME = $null
             $env:ONTOLOGY_BOOTSTRAP_TENANT = $null
         }
-        $env:ONTOLOGY_LISTEN = if ($service -eq 'metadata') { '127.0.0.1:18080' } else { '127.0.0.1:18081' }
+        $env:ONTOLOGY_LISTEN = @{metadata='127.0.0.1:18080'; data='127.0.0.1:18081'; execution='127.0.0.1:18082'}[$service]
         $process = Start-Process -FilePath $binary -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $devRoot "$service.stdout.log") -RedirectStandardError (Join-Path $devRoot "$service.stderr.log")
         $processes[$service] = $process.Id
         $processes | ConvertTo-Json | Set-Content -LiteralPath $pidFile -Encoding UTF8
     }
-    foreach ($port in @(18080,18081)) {
+    foreach ($port in @(18080,18081,18082)) {
         $ready = $false
         for ($attempt=0; $attempt -lt 20; $attempt++) {
             try { $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/readyz" -TimeoutSec 2; if ($response.StatusCode -eq 200) { $ready = $true; break } } catch {}
@@ -105,13 +118,13 @@ try {
         }
         if (-not $ready) { throw "Service on $port is not ready. Inspect .cache/dev/*.stderr.log." }
     }
-    foreach ($service in @('metadata','data')) {
+    foreach ($service in @('metadata','data','execution')) {
         $process = Get-Process -Id $processes[$service] -ErrorAction SilentlyContinue
         if (-not $process -or $process.Path -ne (Join-Path $binRoot "$service.exe")) {
             throw "Cannot verify the $service server process. Another application may own the port; inspect .cache/dev/*.stderr.log."
         }
     }
-    Write-Output 'Metadata: http://127.0.0.1:18080 ; Data: http://127.0.0.1:18081'
+    Write-Output 'Metadata: http://127.0.0.1:18080 ; Data: http://127.0.0.1:18081 ; Execution: http://127.0.0.1:18082'
     Write-Output 'Sign in with the account initialized in .cache/dev/admin.json. Existing account passwords are never reset by startup. Stop services with scripts/stop-dev.ps1.'
 } finally {
     foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process') }
