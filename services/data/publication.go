@@ -30,6 +30,15 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := c.PrepareResult{OperationID: req.OperationID, Status: "preview", Statements: []string{}}
+	if req.Definition.Kind == c.KindLink && req.Definition.Link != nil && req.Definition.Link.StorageBinding != nil {
+		result, err := h.previewLink(r.Context(), req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, 200, result)
+		return
+	}
 	if req.Definition.Kind != c.KindSchema {
 		writeJSON(w, 200, result)
 		return
@@ -94,6 +103,15 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Definition.TenantID != tenant || !uuidPattern.MatchString(req.OperationID) || !uuidPattern.MatchString(req.Definition.ID) || digest(req.Definition) != req.Digest {
 		writeError(w, problem(422, "invalid_publication", "操作、定义、租户或内容摘要不匹配"))
+		return
+	}
+	if req.Definition.Kind == c.KindLink && req.Definition.Link != nil && req.Definition.Link.StorageBinding != nil {
+		result, err := h.prepareLink(r.Context(), req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, 200, result)
 		return
 	}
 	if req.Definition.Kind != c.KindSchema {
@@ -227,7 +245,7 @@ func (h *handler) activate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, problem(409, "publication_conflict", "候选摘要不是权威当前定义"))
 		return
 	}
-	if current.Definition.Kind != c.KindSchema {
+	if current.Definition.Kind != c.KindSchema && !(current.Definition.Kind == c.KindLink && current.Definition.Link != nil && current.Definition.Link.StorageBinding != nil) {
 		writeJSON(w, 200, c.PrepareResult{OperationID: req.OperationID, Status: "ready"})
 		return
 	}

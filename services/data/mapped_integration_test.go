@@ -23,17 +23,18 @@ import (
 )
 
 type mappedIntegrationFixture struct {
-	t        *testing.T
-	ctx      context.Context
-	engine   *storage.Engine
-	app      http.Handler
-	tenant   string
-	sources  []c.DataSource
-	dbs      []*sql.DB
-	decision c.Decision
-	current  map[string]c.CurrentDefinition
-	mu       sync.Mutex
-	service  string
+	t         *testing.T
+	ctx       context.Context
+	engine    *storage.Engine
+	app       http.Handler
+	tenant    string
+	sources   []c.DataSource
+	dbs       []*sql.DB
+	decision  c.Decision
+	current   map[string]c.CurrentDefinition
+	mu        sync.Mutex
+	service   string
+	authorize func(c.AuthorizationRequest) c.Decision
 }
 
 func mappedTestSourceInput(t *testing.T, driver, dsn, name string) c.DataSourceInput {
@@ -94,7 +95,12 @@ func newMappedIntegrationFixture(t *testing.T, secondaryDriver, secondaryDSN str
 		writeJSON(w, 200, record)
 	}))
 	t.Cleanup(metadata.Close)
-	f.app = NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("mapped-encryption-", 3), ServiceToken: f.service, CursorSecret: strings.Repeat("mapped-cursor-", 3), MetadataURL: metadata.URL, HTTPClient: metadata.Client(), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) { return f.decision, nil })})
+	f.app = NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("mapped-encryption-", 3), ServiceToken: f.service, CursorSecret: strings.Repeat("mapped-cursor-", 3), MetadataURL: metadata.URL, HTTPClient: metadata.Client(), Authorizer: authorizerFunc(func(_ context.Context, _ c.Principal, request c.AuthorizationRequest) (c.Decision, error) {
+		if f.authorize != nil {
+			return f.authorize(request), nil
+		}
+		return f.decision, nil
+	})})
 	t.Cleanup(func() {
 		for _, name := range []string{"af_data_mapped_steps", "af_data_mapped_targets", "af_data_gates", "af_data_sources"} {
 			_, _ = engine.DB().Exec("DELETE FROM "+quote(name)+" WHERE tenant_id=?", f.tenant)

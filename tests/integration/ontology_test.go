@@ -81,12 +81,12 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer me.Close()
+	t.Cleanup(func() { _ = me.Close() })
 	de, err := storage.Open(ctx, storage.Config{Driver: "mysql", DSN: ddsn, MaxOpen: 6, MaxIdle: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer de.Close()
+	t.Cleanup(func() { _ = de.Close() })
 	if err := storage.Migrate(ctx, me.DB(), "metadata", metadata.Migrations); err != nil {
 		t.Fatal(err)
 	}
@@ -96,10 +96,11 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 	h := harness{t: t, client: &http.Client{Timeout: 20 * time.Second}}
 	tenant := "verification-" + c.NewID()
 	otherTenant := "verification-other-" + c.NewID()
+	t.Cleanup(func() { cleanupOntologyTenant(t, me, de, tenant) })
 	codeID, nameID, deptID, priceID, countID := c.NewID(), c.NewID(), c.NewID(), c.NewID(), c.NewID()
 	all := map[string]any{"allow": true, "readFields": []string{"*"}, "writeFields": []string{"*"}}
 	adminOps := map[string]any{}
-	for _, op := range []string{"organization.edit", "organization.read", "definition.edit", "definition.read", "definition.publish", "instance.create", "instance.read", "instance.patch", "instance.delete", "instance.query"} {
+	for _, op := range []string{"organization.edit", "organization.read", "definition.edit", "definition.read", "definition.publish", "instance.create", "instance.read", "instance.patch", "instance.delete", "instance.query", "link.query", "link.create", "link.delete"} {
 		adminOps[op] = map[string]any{"*": all}
 	}
 	readerGrant := map[string]any{"allow": true, "readFields": []string{codeID, nameID}, "rowFilter": c.Expression{Op: "eq", Field: deptID, Value: raw("D1")}}
@@ -196,7 +197,7 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 	}
 	first := create("PUMP-001", "D1", "123456789012345.678")
 	second := create("PUMP-002", "D1", nil)
-	_ = create("PUMP-003", "D2", "3.100")
+	third := create("PUMP-003", "D2", "3.100")
 	h.request("POST", instancesURL, admin, "", c.WriteRequest{Values: map[string]json.RawMessage{codeID: raw("PUMP-001"), nameID: raw("duplicate"), deptID: raw("D1"), countID: raw("1")}, IdempotencyKey: c.NewID()}, 409, nil)
 	var outboxCount int
 	if err := de.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM af_data_outbox WHERE tenant_id=?", tenant).Scan(&outboxCount); err != nil {
@@ -247,6 +248,8 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 	if len(page.Data) != 1 || page.Data[0].ID != second.ID {
 		t.Fatal("NULL semantics incorrect")
 	}
+
+	verifyManagedLinks(t, h, ctx, me, de, metaSrv.URL, dataSrv.URL, opaURL, tenant, admin, reader, other, category.ID, group.ID, schemaID, codeID, nameID, deptID, first, second, third, readerOps)
 
 	t.Log("rename preserves IDs; old cursors invalidate; revocation applies to next access")
 	renamed := current.Definition

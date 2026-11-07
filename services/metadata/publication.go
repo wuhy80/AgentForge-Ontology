@@ -261,8 +261,8 @@ func validateReferences(ctx context.Context, tx *sql.Tx, d contracts.Definition)
 		}
 	}
 	if d.Link != nil {
-		if refs[d.Link.SourceSchemaID].Kind != contracts.KindSchema || refs[d.Link.TargetSchemaID].Kind != contracts.KindSchema {
-			return problem(422, "invalid_endpoint", "Link端点必须引用Schema")
+		if err := validateLinkEndpoints(d.Link, refs[d.Link.SourceSchemaID], refs[d.Link.TargetSchemaID], d.TenantID); err != nil {
+			return err
 		}
 	}
 	for _, c := range []*contracts.Callable{d.Action, d.Function} {
@@ -482,6 +482,18 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request, p contracts.Pr
 	}
 	if err := canonicalDefinition(&d, false); err != nil {
 		return err
+	}
+	// Link preview must not describe a plan that publication will reject. In
+	// particular, clearing a bound Link cannot masquerade as a metadata-only
+	// no-op merely because Data has no DDL for definitions without a binding.
+	if d.Link != nil && row.current.Valid {
+		current, err := parseDefinition(row.current)
+		if err != nil {
+			return err
+		}
+		if err := compatibleUpdate(current, d); err != nil {
+			return err
+		}
 	}
 	result, err := h.dataExchange(r.Context(), p.TenantID, "/internal/publications/preview", contracts.PrepareRequest{OperationID: contracts.NewID(), Definition: d, Digest: digest, PreviousDigest: row.currentDigest})
 	if err != nil {

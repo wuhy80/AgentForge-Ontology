@@ -67,6 +67,26 @@ describe('ApiClient transport and complete directories', () => {
 })
 
 describe('ApiClient writes and errors', () => {
+  it('查询正反关系目录并按稳定ID读写关系事实，写入携带CSRF与强ETag', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json({ data: [] }))
+      .mockResolvedValueOnce(json({ data: [], hasMore: false }))
+      .mockResolvedValueOnce(json({ id: 'edge' }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient()
+    api.setCSRFToken('session-csrf')
+    await api.schemaLinks('对象 / 一')
+    await api.listLinkInstances('关系 / 一', 'in', '实例 & 一', 'opaque-cursor')
+    await api.createLinkInstance('关系 / 一', 'source', 'target')
+    await api.deleteLinkInstance('关系 / 一', '边 / 一', 'edge-etag')
+    expect(fetcher.mock.calls[0][0]).toBe('/api/metadata/schemas/%E5%AF%B9%E8%B1%A1%20%2F%20%E4%B8%80/links')
+    const url = new URL(fetcher.mock.calls[1][0], 'http://local')
+    expect(url.searchParams.get('direction')).toBe('in')
+    expect(url.searchParams.get('instanceId')).toBe('实例 & 一')
+    expect(url.searchParams.get('cursor')).toBe('opaque-cursor')
+    expect(fetcher.mock.calls[2][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ sourceId: 'source', targetId: 'target' }), headers: { 'X-CSRF-Token': 'session-csrf' } })
+    expect(fetcher.mock.calls[3][1]).toMatchObject({ method: 'DELETE', headers: { 'X-CSRF-Token': 'session-csrf', 'If-Match': '"edge-etag"' } })
+  })
   it('quotes strong If-Match once and accepts an empty 204 response', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetcher)

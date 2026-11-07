@@ -8,6 +8,7 @@ type DialogProps = {
   onClose: () => void
   children: ReactNode
   wide?: boolean
+  closeDisabled?: boolean
 }
 
 const VisibleDialogContext = createContext(true)
@@ -21,14 +22,14 @@ export function Dialog(props: DialogProps) {
   return visible ? <DialogContent {...props} /> : null
 }
 
-function DialogContent({ title, description, onClose, children, wide }: DialogProps) {
+function DialogContent({ title, description, onClose, children, wide, closeDisabled }: DialogProps) {
   const titleId = useId()
   const descriptionId = useId()
   const dialog = useRef<HTMLDivElement>(null)
   const close = useRef(onClose)
   useEffect(() => {
-    close.current = onClose
-  }, [onClose])
+    close.current = () => { if (!closeDisabled) onClose() }
+  }, [onClose, closeDisabled])
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const overflow = document.body.style.overflow
@@ -85,7 +86,7 @@ function DialogContent({ title, description, onClose, children, wide }: DialogPr
     <div
       className="dialog-backdrop"
       onClick={(event) => {
-        if (event.target === event.currentTarget) onClose()
+        if (event.target === event.currentTarget && !closeDisabled) onClose()
       }}
     >
       <div
@@ -106,7 +107,7 @@ function DialogContent({ title, description, onClose, children, wide }: DialogPr
               </p>
             )}
           </div>
-          <button type="button" className="icon-button" aria-label="关闭对话框" onClick={onClose}>
+          <button type="button" className="icon-button" aria-label="关闭对话框" disabled={closeDisabled} onClick={onClose}>
             <X size={20} />
           </button>
         </div>

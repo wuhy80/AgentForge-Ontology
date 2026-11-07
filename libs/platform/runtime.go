@@ -23,7 +23,7 @@ func policyError(message string) error {
 
 func policyOperation(operation string) bool {
 	switch operation {
-	case "organization.read", "organization.edit", "definition.read", "definition.edit", "definition.publish", "instance.create", "instance.read", "instance.patch", "instance.delete", "instance.query":
+	case "organization.read", "organization.edit", "definition.read", "definition.edit", "definition.publish", "instance.create", "instance.read", "instance.patch", "instance.delete", "instance.query", "link.query", "link.create", "link.delete":
 		return true
 	}
 	return false
@@ -162,7 +162,10 @@ func ValidatePermissionPolicy(policy contracts.PermissionPolicy) error {
 			return policyError("拒绝规则仅支持整项操作，不支持字段或行条件")
 		}
 		if !strings.HasPrefix(rule.Operation, "instance.") && (rule.RowFilter != nil || rule.NewRowFilter != nil) {
-			return policyError("定义与组织操作不支持行条件")
+			return policyError("定义、组织与关系操作不支持行条件")
+		}
+		if strings.HasPrefix(rule.Operation, "link.") && (!wholeResourceFields(rule.ReadFields) || !wholeResourceFields(rule.WriteFields)) {
+			return policyError("关系授权以完整关系为单位，不支持字段投影")
 		}
 		if err := validateFilter(rule.RowFilter); err != nil {
 			return err
@@ -172,6 +175,10 @@ func ValidatePermissionPolicy(policy contracts.PermissionPolicy) error {
 		}
 	}
 	return nil
+}
+
+func wholeResourceFields(fields []string) bool {
+	return len(fields) == 0 || len(fields) == 1 && fields[0] == "*"
 }
 
 func validateDecision(decision contracts.Decision) error {
@@ -253,6 +260,9 @@ func mergeRuntime(runtime *contracts.RuntimePolicy, request contracts.Authorizat
 	if !policyOperation(request.Operation) {
 		return contracts.Decision{}, policyError("未支持的业务授权操作")
 	}
+	if strings.HasPrefix(request.Operation, "link.") && request.Kind != "" && request.Kind != contracts.KindLink {
+		return contracts.Decision{}, policyError("关系操作必须使用Link资源类型")
+	}
 	decision := contracts.Decision{State: runtime.State}
 	var oldFilters, newFilters []*contracts.Expression
 	for _, rule := range runtime.Rules {
@@ -269,6 +279,12 @@ func mergeRuntime(runtime *contracts.RuntimePolicy, request contracts.Authorizat
 		}
 		read, _ := canonicalFields(rule.ReadFields)
 		write, _ := canonicalFields(rule.WriteFields)
+		// Link permissions grant the operation as a whole. Accepted [] and [*]
+		// field lists carry no projection semantics and cannot create a conflict
+		// when two roles grant the same static relation operation.
+		if strings.HasPrefix(request.Operation, "link.") {
+			read, write = nil, nil
+		}
 		if decision.Allow && (strings.Join(read, "\x00") != strings.Join(decision.ReadFields, "\x00") || strings.Join(write, "\x00") != strings.Join(decision.WriteFields, "\x00")) {
 			return contracts.Decision{}, policyError("多角色字段范围不同，无法安全合并权限")
 		}

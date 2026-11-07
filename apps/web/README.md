@@ -38,6 +38,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [模型管理](src/features/model/ModelsPage.tsx) | 分组紧凑列表及独立模型编辑地址，支持刷新、返回、未保存离开保护；五类定义、草稿、预览与生效恢复 |
 | [对象编辑](src/features/model/ModelEditor.tsx) | 基础信息、属性配置、索引信息、Link 信息、动作信息五个 Tab；关联定义可跳转，跨页签保留修改 |
 | [Schema 映射](src/features/model/SchemaStorageEditor.tsx) | 两种建模方向、主表稳定身份及逐属性跨源/跨表映射，反向读取目录保留已有属性身份 |
+| [Link 映射](src/features/model/LinkStorageEditor.tsx) | 区分纯定义、平台关系表、已有外部关联表和外键；可视化表列选择、关系示意、一次性补绑定 |
 | [数据源配置](src/features/sources/SourcesPage.tsx) | 管理员维护多个 MySQL/PostgreSQL 连接、TLS和租户隔离，测试连接及查看表列；密码只写入 |
 | [数据探索](src/features/query/QueryPage.tsx) | 可视化 QuerySpec 配置、实际执行、查询状态及续页 |
 | [实例详情](src/features/query/InstanceDialog.tsx) | 单条创建/读取/修改/确认删除，保持精度、幂等及并发凭证 |
@@ -54,5 +55,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 首次登录检查两个服务的能力接口；退出、过期或401清除本会话页面数据。查询及实例访问收到403时清除对应旧结果；草稿目录拒绝或对象被过滤时清除私有候选，恢复未确认发布前重新验证读取权限，不用旧缓存替代当前授权。
 
 对象页的 Tab 规则统一见 [Schema](../../docs/模块/Schema.md#2-建模方向与预览)。关联关系由两端稳定 ID 筛选，关联动作使用 [Action](../../docs/模块/Action.md) 的目标对象 ID；相关列表包含授权可见的当前定义及草稿，不把关联动作当作可执行按钮。
+
+Link 编辑页可配置实际数据库映射，数据探索从每条结果的“关联数据”进入单跳正反查询并分页；平台关系可添加/移除，已有外部关系只读。未绑定关系显示仅定义，不把“已生效”展示成已有事实。操作使用独立 `link.query/create/delete`，现有租户由管理员在权限配置中显式添加并生效；两端对象仍独立授权。协议与当前限制见 [Link](../../docs/模块/Link.md#当前关系数据库实现2026-11-07)，同库能力不代表跨源关系、多跳或图查询已经开放。
 
 本轮提供本地账号、平面用户组、角色和受控行列策略表单；用户表分别展示直接角色与组继承来源，组变更后清除旧授权模拟结果。尚未接入外部身份目录/SSO、组嵌套、细分委托管理、完整ABAC、逐行掩码及Action/Function运行授权。当前管理审计仅显示最近200条，完整归档、导出和生产运维仍待后续实现。

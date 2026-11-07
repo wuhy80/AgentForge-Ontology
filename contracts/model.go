@@ -102,6 +102,37 @@ type Link struct {
 	ReverseName    string `json:"reverseName"`
 	Cardinality    string `json:"cardinality"`
 	OnDelete       string `json:"onDelete"`
+	// An omitted binding preserves definition-only Links. Runtime traversal
+	// requires an explicit binding and a successful Data publication.
+	StorageBinding *LinkStorageBinding `json:"storageBinding,omitempty"`
+}
+
+// LinkStorageBinding selects platform-managed relation facts or a read-only
+// relation in an external database. Junction and foreign_key bindings are
+// limited to one data source; they do not imply cross-source SQL execution.
+type LinkStorageBinding struct {
+	Mode             string `json:"mode"`
+	DataSourceID     string `json:"dataSourceId,omitempty"`
+	Namespace        string `json:"namespace,omitempty"`
+	Table            string `json:"table,omitempty"`
+	SourceColumn     string `json:"sourceColumn,omitempty"`
+	TargetColumn     string `json:"targetColumn,omitempty"`
+	TenantColumn     string `json:"tenantColumn,omitempty"`
+	ForeignKeySide   string `json:"foreignKeySide,omitempty"`
+	ForeignKeyColumn string `json:"foreignKeyColumn,omitempty"`
+}
+
+type LinkWriteRequest struct {
+	SourceID string `json:"sourceId"`
+	TargetID string `json:"targetId"`
+}
+
+type LinkInstance struct {
+	ID       string `json:"id"`
+	LinkID   string `json:"linkId"`
+	SourceID string `json:"sourceId"`
+	TargetID string `json:"targetId"`
+	ETag     string `json:"etag"`
 }
 
 // Callable definitions are discoverable metadata in the first increment;
@@ -170,11 +201,21 @@ type WriteRequest struct {
 }
 
 type QuerySpec struct {
-	From    Source      `json:"from"`
-	Where   *Expression `json:"where,omitempty"`
-	Select  []string    `json:"select"`
-	OrderBy []Order     `json:"orderBy,omitempty"`
-	Page    Page        `json:"page"`
+	From    Source         `json:"from"`
+	Via     *LinkTraversal `json:"via,omitempty"`
+	Where   *Expression    `json:"where,omitempty"`
+	Select  []string       `json:"select"`
+	OrderBy []Order        `json:"orderBy,omitempty"`
+	Page    Page           `json:"page"`
+}
+
+// LinkTraversal restricts the result Schema to one-hop neighbors of InstanceID.
+// Direction is relative to the Link definition. From, projection, predicates,
+// ordering and pagination describe the result endpoint, not the starting one.
+type LinkTraversal struct {
+	LinkID     string `json:"linkId"`
+	Direction  string `json:"direction"`
+	InstanceID string `json:"instanceId"`
 }
 
 type Source struct {

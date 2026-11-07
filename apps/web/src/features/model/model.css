@@ -153,6 +153,13 @@
 .model-properties-table td:nth-child(2) { width: 21%; }
 .model-editor td, .model-editor th { font-size: 12px; vertical-align: top; }
 .model-property-options { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.model-link-storage { margin-top: 28px; padding-top: 22px; border-top: 1px solid #e7ece5; }
+.model-link-storage label > svg { display: inline-block; margin-left: 6px; vertical-align: middle; }
+.model-link-diagram { display: flex; align-items: center; justify-content: center; gap: 15px; padding: 19px 12px; margin: 18px 0 10px; background: #f5f8f4; border: 1px solid #e0e8de; border-radius: 8px; }
+.model-link-diagram > span { min-width: 0; text-align: center; overflow-wrap: anywhere; }
+.model-link-diagram strong { font-size: 12px; font-weight: 600; }
+.model-link-diagram small { display: block; font-size: 10px; color: #73826e; margin-top: 5px; }
+.model-link-diagram > svg { flex-shrink: 0; color: #71846a; }
 .model-property-options .model-checkbox, .model-checkbox { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-size: 11px; }
 .model-checkbox input { accent-color: #3e7959; }
 .model-decimal-config { display: flex; gap: 8px; width: 100%; }

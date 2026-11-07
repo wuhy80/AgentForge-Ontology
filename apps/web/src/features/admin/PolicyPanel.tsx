@@ -16,7 +16,7 @@ function Simulation({ api, record, users, groups, definitions, categories, onFor
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const request = useRef<AbortController | undefined>(undefined)
-  const candidates = definitions.filter((item) => !operation.startsWith('instance.') || item.definition.kind === 'schema')
+  const candidates = definitions.filter((item) => operation.startsWith('link.') ? item.definition.kind === 'link' : !operation.startsWith('instance.') || item.definition.kind === 'schema')
   const properties = definitions.find((item) => item.definition.id === resourceId)?.definition.schema?.properties ?? []
   useEffect(() => () => request.current?.abort(), [])
   useEffect(() => {

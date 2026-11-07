@@ -6,6 +6,7 @@ import { PropertyEditor } from './PropertyEditor'
 import { SchemaStorageEditor } from './SchemaStorageEditor'
 import { RelatedDefinitions } from './RelatedDefinitions'
 import { ActionTargetsEditor } from './ActionTargetsEditor'
+import { LinkStorageEditor, validateLinkStorage } from './LinkStorageEditor'
 import { activeEntries, cloneDefinition, kindDescriptions, kindLabels, MAX_SCHEMA_INDEXES, MAX_SCHEMA_PROPERTIES, newDefinition, validateDefinition } from './model-helpers'
 
 export interface PendingPublication {
@@ -67,6 +68,8 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
   const currentEnums = activeEntries(authorizedEntries, 'enum')
   const currentFunctions = activeEntries(authorizedEntries, 'function')
   const allowAppend = locked && !!definition.schema?.storageBinding && definition.schema.mode === 'schema_2_db'
+  const currentLink = (currentEntries ?? entries).find((entry) => entry.definition.id === definition.id && entry.status === 'active')
+  const linkStorageLocked = locked && !!(currentLink?.definition.link?.storageBinding ?? (record?.status === 'active' ? record.definition.link?.storageBinding : !currentEntries ? initialRecord?.definition.link?.storageBinding : undefined))
 
   function panelProps(id: EditorTab) {
     return definition.schema ? { role: 'tabpanel', id: `${tabId}-panel-${id}`, 'aria-labelledby': `${tabId}-tab-${id}`, hidden: tab !== id, tabIndex: 0 } : {}
@@ -126,7 +129,7 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
   }
   async function save() {
     if (!bindingReady) { setError('请先选择当前分类下的分组；如目录尚未建立，请前往「分类与分组」。'); return }
-    const invalid = validateDefinition(definition)
+    const invalid = validateDefinition(definition) ?? (definition.link ? validateLinkStorage(definition.link, currentSchemas) : undefined)
     if (invalid) {
       setError(invalid)
       if (definition.schema) {
@@ -198,7 +201,7 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
     <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" onClick={requestClose} disabled={!!busy}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑定义' : `新建${kindLabels[definition.kind]}`}</h1><p className="muted">{kindDescriptions[definition.kind]}</p></div></div>
     <div className="model-editor">
       <div className="model-editor-meta"><span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}</div>
-      {locked && <div className="notice model-lock-notice">{allowAppend ? '此定义已生效。现有结构与来源绑定保持锁定，可新增允许空值的属性，预览并发布后安全增加目标列。' : definition.action ? '此动作已生效。可修改展示信息和关联对象；参数、实现和副作用保持锁定。' : '此定义已生效。可修改名称、描述和显示标签；数据结构与绑定保持锁定。'}</div>}
+      {locked && <div className="notice model-lock-notice">{allowAppend ? '此定义已生效。现有结构与来源绑定保持锁定，可新增允许空值的属性，预览并发布后安全增加目标列。' : definition.action ? '此动作已生效。可修改展示信息和关联对象；参数、实现和副作用保持锁定。' : definition.link && !linkStorageLocked ? '此关系定义已生效。可补充关系存储映射，保存并发布后启用关联查询；关系两端、基数及删除策略保持锁定。' : '此定义已生效。可修改名称、描述和显示标签；数据结构与绑定保持锁定。'}</div>}
       {uncertain && <div className="notice notice-error" role="status"><strong>发布结果待确认</strong><p>编辑已暂停。使用同一份已保存内容继续恢复；返回列表后可从模型页的待恢复记录重新进入。</p><span className="muted">阶段：{publication?.status === 'activation_pending' ? '已提交，等待激活' : publication?.status === 'prepare_failed' ? '准备未完成' : '等待确认'}</span></div>}
       {error && <div className="notice notice-error" role="alert"><AlertCircle size={16} /><span>{error}</span></div>}
       {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
@@ -246,7 +249,7 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
           <label>反向业务名称<input className="field" value={definition.link.reverseName} onChange={(event) => update({ link: { ...definition.link!, reverseName: event.target.value } })} placeholder="例如：包含设备" /></label>
           <label>关系基数<select className="field" disabled={locked} value={definition.link.cardinality} onChange={(event) => update({ link: { ...definition.link!, cardinality: event.target.value as Link['cardinality'] } })}><option value="1:1">一对一</option><option value="1:N">一对多</option><option value="N:1">多对一</option><option value="N:M">多对多</option></select></label>
           <label>删除策略<select className="field" disabled value="restrict"><option value="restrict">有关联时限制删除</option></select></label>
-        </div></section>}
+        </div><LinkStorageEditor api={api} link={definition.link} schemas={currentSchemas} locked={linkStorageLocked} active={active} onSources={onSources} onChange={(link) => update({ link })} /></section>}
         {(definition.action || definition.function) && (() => {
           const key = definition.action ? 'action' : 'function'
           const callable = definition[key]!

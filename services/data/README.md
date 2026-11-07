@@ -59,7 +59,19 @@ Data 在同一事务内提交实例、创建幂等记录和 outbox，并在更�
 
 QuerySpec 目前每页为 1 至 100 条、最多一个业务排序字段并以实例 ID 决胜；表达式有深度、节点和集合预算。支持 AND/OR/NOT、等值及比较、显式空值、有限 IN/NOT IN、字面前缀；NULL 保留 SQL 三值逻辑。decimal 条件和游标参数显式转换为对应精度，防止 MySQL 将字符串比较转为 DOUBLE 后丢失大数精度。属性名称按 Metadata 相同的 NFC 和大小写折叠规则绑定，属性名称不能覆盖另一属性 ID。游标绑定主体、租户、定义摘要、完整查询和授权决策，并在一小时后过期。跨页期间业务数据变动按每次新执行可见状态处理，不提供跨请求历史快照。
 
-分表、计算属性、Enum 属性的跨定义协调、Link 实例及多跳、批量事务、OntologySQL、聚合及任意联邦条件尚未开放。权限当前支持受控行条件、静态字段集合及可安全合并的角色规则，不能安全合并的组合明确拒绝；不代表完整 ABAC、逐行掩码或 Action/Function 运行授权已经实现。前端已在 [apps/web](../../apps/web/README.md) 接入现有 CRUD 与单 Schema 查询，未增加上述运行能力。服务对无法表达的请求直接拒绝，`capabilities` 不将五类元数据可维护等同于这些运行能力已实现。outbox 和幂等记录目前不自动清理；保留期限、事件投递、全量恢复和生产容量仍待后续实现及验证。
+分表、计算属性、Enum 属性的跨定义协调、Link 多跳/跨源、批量事务、OntologySQL、聚合及任意联邦条件尚未开放。权限当前支持受控行条件、静态字段集合及可安全合并的角色规则，不能安全合并的组合明确拒绝；不代表完整 ABAC、逐行掩码或 Action/Function 运行授权已经实现。前端已在 [apps/web](../../apps/web/README.md) 接入 CRUD、单 Schema 查询及 Link 单跳导航。服务对无法表达的请求直接拒绝，`capabilities` 不将五类元数据可维护等同于这些运行能力已实现。outbox 和幂等记录目前不自动清理；保留期限、事件投递、全量恢复和生产容量仍待后续实现及验证。
+
+## Link 运行接口
+
+关系映射、生命周期与实际协议统一见 [Link](../../docs/模块/Link.md#当前关系数据库实现2026-11-07)，公共查询规则见 [DataSet](../../docs/数据查询/DataSet.md)。`POST /data/query` 接受可选 `via={linkId,direction,instanceId}`，`from` 为返回端；在数据库内通过参数化关系条件完成正向或反向单跳，端点权限过滤先于排序分页。平台默认 MySQL 关系事实可增删，外部同源 MySQL/PostgreSQL 关联表和外键只读，跨源关系明确拒绝。
+
+| HTTP | 用途 |
+| --- | --- |
+| `GET /data/links/{linkId}/instances?direction=out&instanceId=...&limit=25` | 平台关系记录分页，游标通过 `cursor` 传回，结果只包含可访问的两端 |
+| `POST /data/links/{linkId}/instances` | 平台关系新增，正文为 `sourceId/targetId`，返回关系及 ETag；重复边拒绝 |
+| `DELETE /data/links/{linkId}/instances/{id}` | 平台关系移除，携带强 If-Match；不删除对象 |
+
+托管关系在显式发布中建表、核验索引/外键并经持久 gate 激活，普通启动及查询不创建表。业务事务串行检查端点与基数，关系/outbox 原子提交；对象有关联时默认限制删除。外部绑定通过实际目录验证，保留来源系统的维护边界。关系授权为独立 `link.query/create/delete`，已有租户须显式授权；两端实例授权继续检查，不通过读取一页后隐藏行实现。这里不承诺跨服务原子撤权或外部源跨表快照。
 
 ## 验证
 

@@ -189,7 +189,7 @@ func validatePolicy(ctx context.Context, tx *sql.Tx, tenant string, policy contr
 		}
 		instance := strings.HasPrefix(rule.Operation, "instance.")
 		if !instance && (rule.RowFilter != nil || rule.NewRowFilter != nil) {
-			return problem(422, "unsupported_policy", "定义与组织管理不支持行条件")
+			return problem(422, "unsupported_policy", "定义、组织与关系管理不支持行条件")
 		}
 		if rule.ResourceID == "*" {
 			if rule.RowFilter != nil || rule.NewRowFilter != nil || !wildcardFields(rule.ReadFields) || !wildcardFields(rule.WriteFields) {
@@ -198,6 +198,16 @@ func validatePolicy(ctx context.Context, tx *sql.Tx, tenant string, policy contr
 			continue
 		}
 		if !instance {
+			if strings.HasPrefix(rule.Operation, "link.") {
+				var count int
+				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM af_meta_definitions WHERE tenant_id=? AND id=? AND kind='link' AND status='active' AND current_json IS NOT NULL", tenant, rule.ResourceID).Scan(&count); err != nil {
+					return err
+				}
+				if count != 1 {
+					return problem(422, "invalid_policy_resource", "关系授权必须绑定当前租户已生效的Link")
+				}
+				continue
+			}
 			var count int
 			table := "af_meta_definitions"
 			if strings.HasPrefix(rule.Operation, "organization.") {

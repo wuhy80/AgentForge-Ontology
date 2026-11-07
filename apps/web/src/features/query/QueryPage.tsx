@@ -3,6 +3,7 @@ import { ArrowDownWideNarrow, ArrowRight, Braces, Check, ChevronRight, Columns3,
 import { ApiClient, ApiError } from '../../lib/api';
 import type { DefinitionRecord, Organization, Property, QueryResult, QuerySpec } from '../../lib/types';
 import { InstanceDialog, ValueInput } from './InstanceDialog';
+import { RelatedInstances } from './RelatedInstances';
 import { availableOperators, compileQuery, errorMessage, newCondition, newGroup, valueText } from './query';
 import type { FilterCondition, FilterGroup, FilterNode, QueryEditor } from './query';
 import './query.css';
@@ -119,6 +120,7 @@ function QueryWorkspace({ api, schema, createIntents }: { api: ApiClient; schema
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [dialog, setDialog] = useState<{ id?: string }>();
+  const [relatedId, setRelatedId] = useState<string>();
   const request = useRef<{ controller: AbortController; sequence: number } | undefined>(undefined);
   const sequence = useRef(0);
 
@@ -199,6 +201,7 @@ function QueryWorkspace({ api, schema, createIntents }: { api: ApiClient; schema
     setExecuted(undefined);
     setStale(false);
     setDialog(undefined);
+    setRelatedId(undefined);
     setError(message);
     setNotice('操作被授权拒绝，已清除先前读取的结果。');
   }
@@ -245,11 +248,12 @@ function QueryWorkspace({ api, schema, createIntents }: { api: ApiClient; schema
           : <div className="table-wrap query-result-table"><table><thead><tr><th className="query-row-number">#</th><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}<small>{field.dataType}</small></th>)}<th className="query-row-action">操作</th></tr></thead>
             <tbody>{result.data.map((instance, index) => <tr key={instance.id}><td className="query-row-number">{index + 1}</td><td><button type="button" className="query-id-link" title={instance.id} onClick={() => setDialog({ id: instance.id })}>{instance.id}</button></td>
               {result.fields.map((field) => { const value = instance.values[field.id]; return <td key={field.id}><span className={value === undefined || value === null || value === '' ? 'query-cell-special' : 'query-cell-value'}>{valueText(value)}</span></td>; })}
-              <td className="query-row-action"><button type="button" className="button subtle" onClick={() => setDialog({ id: instance.id })}>查看<ChevronRight size={14} /></button></td></tr>)}</tbody>
+              <td className="query-row-action"><div className="query-instance-actions"><button type="button" className="button subtle" onClick={() => setDialog({ id: instance.id })}>查看<ChevronRight size={14} /></button><button type="button" className="button subtle" onClick={() => setRelatedId(instance.id)}>关联数据</button></div></td></tr>)}</tbody>
           </table></div>}
       {executed && <div className="query-result-footer"><span className="muted">第 {executed.page} 页 · {executed.result.hasMore ? '后面还有数据' : '已到结果末尾'}</span>
         <button className="button" type="button" disabled={busy || stale || !executed.result.hasMore || !executed.result.nextCursor} onClick={nextPage}>下一页<ArrowRight size={15} /></button></div>}
     </section>
     {dialog && <InstanceDialog key={dialog.id ?? 'new'} api={api} schema={schema} instanceId={dialog.id} createIntents={createIntents} onClose={() => setDialog(undefined)} onChanged={changed} onForbidden={forbidden} />}
+    {relatedId && <RelatedInstances key={relatedId} api={api} schema={schema} instanceId={relatedId} onClose={() => setRelatedId(undefined)} onForbidden={forbidden} />}
   </>;
 }

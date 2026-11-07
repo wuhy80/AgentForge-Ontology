@@ -3,6 +3,7 @@ import type {
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
   DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult,
+  SchemaLink, LinkInstance,
 } from './types'
 
 export class ApiError extends Error {
@@ -188,6 +189,9 @@ export class ApiClient {
   getDraft(id: string, signal?: AbortSignal): Promise<DefinitionRecord> {
     return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/draft`, { signal })
   }
+  async schemaLinks(schemaId: string, signal?: AbortSignal): Promise<SchemaLink[]> {
+    return (await this.request<{ data: SchemaLink[] }>(`/api/metadata/schemas/${encodeURIComponent(schemaId)}/links`, { signal })).data
+  }
   createCategory(name: string): Promise<Organization> {
     return this.request('/api/metadata/categories', { method: 'POST', body: { name } })
   }
@@ -236,6 +240,17 @@ export class ApiClient {
   }
   query(spec: QuerySpec, signal?: AbortSignal): Promise<QueryResult> {
     return this.request('/api/data/query', { method: 'POST', body: spec, signal })
+  }
+  listLinkInstances(linkId: string, direction: 'out' | 'in', instanceId: string, cursor?: string, signal?: AbortSignal): Promise<Page<LinkInstance>> {
+    const params = new URLSearchParams({ direction, instanceId, limit: '100' })
+    if (cursor) params.set('cursor', cursor)
+    return this.request(`/api/data/links/${encodeURIComponent(linkId)}/instances?${params}`, { signal })
+  }
+  createLinkInstance(linkId: string, sourceId: string, targetId: string): Promise<LinkInstance> {
+    return this.request(`/api/data/links/${encodeURIComponent(linkId)}/instances`, { method: 'POST', body: { sourceId, targetId } })
+  }
+  deleteLinkInstance(linkId: string, id: string, etag: string): Promise<void> {
+    return this.request(`/api/data/links/${encodeURIComponent(linkId)}/instances/${encodeURIComponent(id)}`, { method: 'DELETE', etag })
   }
   getInstance(schemaId: string, id: string, signal?: AbortSignal): Promise<Instance> {
     return this.request(`/api/data/schemas/${encodeURIComponent(schemaId)}/instances/${encodeURIComponent(id)}`, { signal })

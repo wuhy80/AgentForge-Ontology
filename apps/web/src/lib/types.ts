@@ -101,7 +101,31 @@ export interface Link {
   reverseName: string
   cardinality: '1:1' | '1:N' | 'N:1' | 'N:M'
   onDelete: string
+  storageBinding?: LinkStorageBinding
 }
+export interface LinkStorageBinding {
+  mode: 'managed' | 'junction' | 'foreign_key'
+  dataSourceId?: string
+  namespace?: string
+  table?: string
+  sourceColumn?: string
+  targetColumn?: string
+  tenantColumn?: string
+  foreignKeySide?: 'source' | 'target'
+  foreignKeyColumn?: string
+}
+// sourceSchemaId is the navigation start and targetSchemaId its result,
+// including for the reverse direction returned by Metadata.
+export interface SchemaLink {
+  linkRef: { id: string }
+  direction: 'out' | 'in'
+  name: string
+  sourceSchemaId: string
+  targetSchemaId: string
+  cardinality: Link['cardinality']
+}
+export interface LinkInstance { id: string; linkId: string; sourceId: string; targetId: string; etag: string }
+export interface LinkTraversal { linkId: string; direction: 'out' | 'in'; instanceId: string }
 export interface Callable {
   input?: Property[]
   output?: Property[]
@@ -151,6 +175,7 @@ export interface Source { schemaId?: string; category?: string; schema?: string 
 export interface Order { field: string; direction: 'asc' | 'desc' }
 export interface QuerySpec {
   from: Source
+  via?: LinkTraversal
   where?: Expression
   select: string[]
   orderBy?: Order[]

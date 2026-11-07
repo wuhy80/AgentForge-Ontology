@@ -156,6 +156,9 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if l.OnDelete != "restrict" {
 			return problem(422, "unsupported_capability", "首批仅支持restrict删除策略")
 		}
+		if err := canonicalLinkMapping(l); err != nil {
+			return err
+		}
 	case contracts.KindAction, contracts.KindFunction:
 		c := d.Action
 		if d.Kind == contracts.KindFunction {
@@ -301,8 +304,8 @@ func dependencyIDs(d contracts.Definition) []string {
 	return ids
 }
 
-// compatibleUpdate intentionally supports display-only updates. Type, constraints,
-// code, endpoint and index changes need a separately implemented migration path.
+// compatibleUpdate supports display edits and separately checked safe additions.
+// Endpoint, constraint and existing storage changes require migration support.
 func compatibleUpdate(old, next contracts.Definition) error {
 	if old.ID != next.ID || old.TenantID != next.TenantID || old.Kind != next.Kind || old.CategoryID != next.CategoryID || old.GroupID != next.GroupID {
 		return problem(422, "unsupported_change", "首批不支持改变类型或组织归属")
@@ -315,6 +318,9 @@ func compatibleUpdate(old, next contracts.Definition) error {
 		a.Action.TargetSchemaIDs, b.Action.TargetSchemaIDs = nil, nil
 	}
 	if !reflect.DeepEqual(a, b) {
+		if compatibleLinkBindingAddition(a, b) {
+			return nil
+		}
 		if compatibleMappedAddition(a, b) {
 			return nil
 		}

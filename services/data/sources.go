@@ -353,7 +353,7 @@ func (h *handler) saveSource(w http.ResponseWriter, r *http.Request) error {
 		// that two differently cased names identify the same actual database.
 		if endpointKey(old) != key || old.Database != s.Database || old.TenantIsolation != s.TenantIsolation {
 			var bound int
-			if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM af_data_gates WHERE tenant_id=? AND (JSON_UNQUOTE(JSON_EXTRACT(definition,'$.schema.storageBinding.dataSourceId'))=? OR JSON_SEARCH(definition,'one',?,NULL,'$.schema.properties[*].mapping.dataSourceId') IS NOT NULL)", p.TenantID, id, id).Scan(&bound); err != nil {
+			if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM af_data_gates WHERE tenant_id=? AND (JSON_UNQUOTE(JSON_EXTRACT(definition,'$.schema.storageBinding.dataSourceId'))=? OR JSON_SEARCH(definition,'one',?,NULL,'$.schema.properties[*].mapping.dataSourceId') IS NOT NULL OR JSON_UNQUOTE(JSON_EXTRACT(definition,'$.link.storageBinding.dataSourceId'))=?)", p.TenantID, id, id, id).Scan(&bound); err != nil {
 				return err
 			}
 			if bound > 0 {

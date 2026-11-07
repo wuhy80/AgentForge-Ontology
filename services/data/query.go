@@ -222,6 +222,20 @@ type compiledQuery struct {
 }
 
 func compileQuery(d c.Definition, etag string, p c.Principal, dec c.Decision, q c.QuerySpec, secret string) (compiledQuery, error) {
+	if q.Via != nil {
+		return compiledQuery{}, problem(422, "link_context_required", "关系查询必须先解析并授权关系两端")
+	}
+	return compileQueryPredicate(d, etag, p, dec, q, secret, nil)
+}
+
+// sqlPredicate is generated only by the authorized Link planner, never supplied
+// by a client. It is applied in SQL before ordering and the page limit.
+type sqlPredicate struct {
+	SQL  string
+	Args []any
+}
+
+func compileQueryPredicate(d c.Definition, etag string, p c.Principal, dec c.Decision, q c.QuerySpec, secret string, relation *sqlPredicate) (compiledQuery, error) {
 	var result compiledQuery
 	if err := validateSchema(d); err != nil {
 		return result, err
@@ -261,6 +275,10 @@ func compileQuery(d c.Definition, etag string, p c.Principal, dec c.Decision, q 
 	allArgs := []any{p.TenantID}
 	allArgs = append(allArgs, args...)
 	allArgs = append(allArgs, authArgs...)
+	if relation != nil {
+		conditions = append(conditions, "("+relation.SQL+")")
+		allArgs = append(allArgs, relation.Args...)
+	}
 	order := "`id` ASC"
 	descending := false
 	if len(q.OrderBy) == 1 {

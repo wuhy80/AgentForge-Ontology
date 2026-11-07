@@ -63,7 +63,7 @@ export function RuleDialog({ rule, roles, definitions, categories, onClose, onSa
   const [filterError, setFilterError] = useState(initialFilters.error)
   const [error, setError] = useState('')
   const instanceOperation = operation.startsWith('instance.')
-  const candidates = definitions.filter((item) => !instanceOperation || item.definition.kind === 'schema')
+  const candidates = definitions.filter((item) => operation.startsWith('link.') ? item.definition.kind === 'link' : !instanceOperation || item.definition.kind === 'schema')
   const selected = candidates.find((item) => item.definition.id === resourceId)
   const properties = selected?.definition.schema?.properties ?? []
   const canCondition = effect === 'allow' && instanceOperation && resourceId !== '*' && properties.length > 0
@@ -103,7 +103,7 @@ export function RuleDialog({ rule, roles, definitions, categories, onClose, onSa
           {!operation.startsWith('organization.') && candidates.map((item) => <option key={item.definition.id} value={item.definition.id}>{resourceName(item.definition.id, definitions, categories)}</option>)}
         </select></label></div>
       {effect === 'deny' ? <div className="notice">拒绝规则作用于整个操作，不附加字段或行条件。</div>
-        : !instanceOperation ? <div className="notice">定义及组织管理按整个操作授权，无需选择字段或行条件。</div>
+        : !instanceOperation ? <div className="notice">{operation.startsWith('link.') ? '关系按整个操作授权；查询和维护关系时仍独立检查两端对象的数据权限。' : '定义及组织管理按整个操作授权，无需选择字段或行条件。'}</div>
           : <><div className="form-grid"><FieldSelection title="可读字段" fields={readFields} properties={resourceId === '*' ? [] : properties} onChange={setReadFields} /><FieldSelection title="可写字段" fields={writeFields} properties={resourceId === '*' ? [] : properties.filter((property) => !property.readOnly)} onChange={setWriteFields} /></div>
             {resourceId === '*' && <p className="muted">全部资源范围仅支持“全部字段”或“无字段”，不支持行条件。</p>}
             {canCondition && <><section><h3>读取 / 原行条件</h3><p className="muted admin-help">先在服务端限制可读取、可修改或可删除的原行。</p><FilterEditor group={rowFilter} properties={properties} onChange={setRowFilter} /></section>

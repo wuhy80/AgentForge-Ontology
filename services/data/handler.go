@@ -48,6 +48,7 @@ func NewHandler(cfg Config) http.Handler {
 	}
 	mux := http.NewServeMux()
 	h.registerSources(mux)
+	h.registerLinks(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -63,7 +64,7 @@ func NewHandler(cfg Config) http.Handler {
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"backend": "mysql", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "layouts": []string{"single"}, "operations": []string{"create", "read", "patch", "delete", "query"}, "sourceDrivers": []string{"mysql", "postgresql"}, "mappedOperations": []string{"read", "query"}, "mappedUpdates": "nullable-fields-and-indexes", "maxMappedTables": maxMappedTables, "crossSourceProjection": true, "crossSourceConditions": false, "crossSourceTransactions": false, "dataTypes": []string{"string", "text", "longtext", "uuid", "int64", "decimal", "boolean", "timestamp"}, "maxTextBytes": c.MaxTextBytes, "maxLongTextBytes": c.MaxLongTextBytes, "maxRequestBytes": c.MaxDataRequestBytes, "maxPageSize": 100, "maxSortFields": 1, "links": false, "ontologySQL": false, "batch": false, "calculatedProperties": false})
+		writeJSON(w, 200, map[string]any{"backend": "mysql", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "layouts": []string{"single"}, "operations": []string{"create", "read", "patch", "delete", "query"}, "sourceDrivers": []string{"mysql", "postgresql"}, "mappedOperations": []string{"read", "query"}, "mappedUpdates": "nullable-fields-and-indexes", "maxMappedTables": maxMappedTables, "crossSourceProjection": true, "crossSourceConditions": false, "crossSourceTransactions": false, "dataTypes": []string{"string", "text", "longtext", "uuid", "int64", "decimal", "boolean", "timestamp"}, "maxTextBytes": c.MaxTextBytes, "maxLongTextBytes": c.MaxLongTextBytes, "maxRequestBytes": c.MaxDataRequestBytes, "maxPageSize": 100, "maxSortFields": 1, "links": true, "linkStorageModes": []string{"managed", "junction", "foreign_key"}, "linkDirections": []string{"out", "in"}, "maxLinkHops": 1, "managedLinkOperations": []string{"create", "query", "delete"}, "mappedLinkOperations": []string{"query"}, "crossSourceLinks": false, "ontologySQL": false, "batch": false, "calculatedProperties": false})
 	})
 	mux.HandleFunc("POST /internal/publications/prepare", h.prepare)
 	mux.HandleFunc("POST /internal/publications/activate", h.activate)
@@ -99,6 +100,12 @@ func writeError(w http.ResponseWriter, err error) {
 			return
 		case 1205, 1213:
 			writeJSON(w, http.StatusConflict, c.Error{Code: "transaction_conflict", Message: "并发操作冲突，请核对后重试"})
+			return
+		case 1451:
+			writeJSON(w, http.StatusConflict, c.Error{Code: "link_restrict", Message: "对象仍有关联关系，需先移除关系再删除"})
+			return
+		case 1452:
+			writeJSON(w, http.StatusConflict, c.Error{Code: "link_endpoint_conflict", Message: "关系端点已改变或不存在，请重新读取"})
 			return
 		}
 	}
@@ -145,10 +152,14 @@ func (h *handler) internalTenant(r *http.Request) (string, error) {
 	return tenant, nil
 }
 func (h *handler) authorize(ctx context.Context, p c.Principal, operation, id string) (c.Decision, error) {
+	return h.authorizeKind(ctx, p, operation, id, c.KindSchema)
+}
+
+func (h *handler) authorizeKind(ctx context.Context, p c.Principal, operation, id string, kind c.Kind) (c.Decision, error) {
 	if h.cfg.Authorizer == nil {
 		return c.Decision{}, problem(503, "authorization_unavailable", "权限服务未配置")
 	}
-	dec, err := h.cfg.Authorizer.Authorize(ctx, p, c.AuthorizationRequest{Operation: operation, ResourceID: id, Kind: c.KindSchema})
+	dec, err := h.cfg.Authorizer.Authorize(ctx, p, c.AuthorizationRequest{Operation: operation, ResourceID: id, Kind: kind})
 	if err != nil {
 		var access *platform.AccessError
 		if errors.As(err, &access) && (access.Status == 401 || access.Status == 403 || access.Status == 422 || access.Status == 503) {

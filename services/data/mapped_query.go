@@ -129,6 +129,13 @@ func mappedFilterColumn(tables []*mappedTable) func(c.Property) (string, error) 
 }
 
 func compileMappedQuery(d c.Definition, tables []*mappedTable, etag string, principal c.Principal, decision c.Decision, query c.QuerySpec, secret, entityID string) (mappedCompiledQuery, error) {
+	if query.Via != nil {
+		return mappedCompiledQuery{}, problem(422, "link_context_required", "关系查询必须先解析并授权关系两端")
+	}
+	return compileMappedQueryPredicate(d, tables, etag, principal, decision, query, secret, entityID, nil)
+}
+
+func compileMappedQueryPredicate(d c.Definition, tables []*mappedTable, etag string, principal c.Principal, decision c.Decision, query c.QuerySpec, secret, entityID string, relation *sqlPredicate) (mappedCompiledQuery, error) {
 	result := mappedCompiledQuery{Limit: query.Page.Limit}
 	if query.Page.Limit < 1 || query.Page.Limit > 100 || (len(query.Select) == 0 && entityID == "") || len(query.Select) > 100 || len(query.OrderBy) > 1 {
 		return result, problem(422, "budget_exceeded", "需显式投影、每页1到100条且最多一个主表排序属性")
@@ -169,6 +176,10 @@ func compileMappedQuery(d c.Definition, tables []*mappedTable, etag string, prin
 	}
 	conditions := []string{"(" + user + ")", "(" + auth + ")"}
 	args := append(userArgs, authArgs...)
+	if relation != nil {
+		conditions = append(conditions, "("+relation.SQL+")")
+		args = append(args, relation.Args...)
+	}
 	if primary.tenantColumn != "" {
 		conditions = append(conditions, sourceExactStringColumn(primary, primary.tenantColumn)+" = "+sourceExactStringParameter(primary))
 		args = append(args, principal.TenantID)

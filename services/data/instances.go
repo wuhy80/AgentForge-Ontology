@@ -511,6 +511,15 @@ func (h *handler) query(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if req.Via != nil {
+		result, err := h.queryLink(r.Context(), p, current, dec, req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, 200, result)
+		return
+	}
 	if current.Definition.Schema != nil && current.Definition.Schema.StorageBinding != nil {
 		result, err := h.queryMapped(r.Context(), p, current, dec, req, "", "instance.query")
 		if err != nil {
