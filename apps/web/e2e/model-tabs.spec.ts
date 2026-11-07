@@ -36,6 +36,8 @@ async function fixture(page: Page) {
     if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
     if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'] })
     if (path === '/api/data/sources') return reply({ data: [], hasMore: false })
+    if (path === '/api/metadata/schemas/equipment/links') return reply({ data: [], hasMore: false })
+    if (path === '/api/data/query' && method === 'POST') return reply({ fields: current[0].definition.schema!.properties, data: [{ id: 'equipment-1', schemaId: 'equipment', etag: 'equipment-1', values: { 'name-field': '设备一' } }], hasMore: false })
     const mappingTarget = path.match(/^\/api\/data\/schemas\/([^/]+)\/storage-mapping$/)
     if (mappingTarget) {
       const record = current.find((entry) => entry.definition.id === mappingTarget[1] && entry.definition.schema)
@@ -76,6 +78,7 @@ test('对象页签保留编辑、整份保存并导航相关关系和跨分类�
   await page.goto('/#models/equipment')
   const editor = page.getByRole('region', { name: '模型编辑', exact: true })
   await expect(editor.getByRole('tab', { name: '基础信息', selected: true, exact: true })).toBeVisible()
+  await expect(editor.getByRole('tab')).toHaveCount(6)
   await expect(editor.getByRole('tabpanel')).toHaveCount(1)
   await editor.getByLabel('业务名称', { exact: true }).fill('生产设备台账')
   await editor.getByRole('tab', { name: '属性配置', exact: true }).click()
@@ -101,11 +104,12 @@ test('对象页签保留编辑、整份保存并导航相关关系和跨分类�
   await page.goBack()
   await expect(page).toHaveURL(/#models\/equipment$/)
   await page.setViewportSize({ width: 390, height: 844 })
-  for (const name of ['基础信息', '属性配置', '索引信息', 'Link 信息', '动作信息']) {
+  for (const name of ['基础信息', '属性配置', '索引信息', 'Link 信息', '动作信息', '数据预览']) {
     await editor.getByRole('tab', { name, exact: true }).click()
     await expect(editor.getByRole('tabpanel', { name, exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name}在390px下不应撑宽页面`).toBe(true)
   }
+  await editor.getByRole('tab', { name: '动作信息', exact: true }).click()
   await editor.getByRole('link', { name: '设备校准', exact: true }).click()
   await expect(page).toHaveURL(/#models\/calibrate$/)
   await expect(page.getByLabel('当前分类', { exact: true })).toHaveValue('quality')

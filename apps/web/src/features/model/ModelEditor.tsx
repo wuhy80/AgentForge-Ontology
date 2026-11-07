@@ -4,6 +4,7 @@ import { ApiError, type ApiClient } from '../../lib/api'
 import type { Callable, Definition, DefinitionRecord, Index, Kind, Link, Organization, Preview, Publication } from '../../lib/types'
 import { PropertyEditor } from './PropertyEditor'
 import { SchemaStorageEditor } from './SchemaStorageEditor'
+import { ModelDataPreview } from './ModelDataPreview'
 import { RelatedDefinitions } from './RelatedDefinitions'
 import { ActionTargetsEditor } from './ActionTargetsEditor'
 import { LinkStorageEditor, validateLinkStorage } from './LinkStorageEditor'
@@ -20,6 +21,7 @@ const schemaTabs = [
   { id: 'indexes', label: '索引信息' },
   { id: 'links', label: 'Link 信息' },
   { id: 'actions', label: '动作信息' },
+  { id: 'data', label: '数据预览' },
 ] as const
 type EditorTab = typeof schemaTabs[number]['id']
 
@@ -257,8 +259,13 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
           return <>{definition.action && <ActionTargetsEditor selected={callable.targetSchemaIds ?? []} schemas={currentSchemas} categories={categories} onChange={(targetSchemaIds) => update({ action: { ...callable, targetSchemaIds: targetSchemaIds.length ? targetSchemaIds : undefined } })} />}<section><div className="model-section-heading"><div><h3>实现声明</h3><p className="muted">当前支持元数据登记与发现，暂未开放执行。</p></div></div><div className="form-grid"><label>产物引用<input className="field" disabled={locked} value={callable.artifactRef ?? ''} onChange={(event) => update({ [key]: { ...callable, artifactRef: event.target.value || undefined } })} placeholder="例如：registry.example.com/business/handler" /></label><label>副作用<select className="field" disabled={locked} value={callable.sideEffects} onChange={(event) => update({ [key]: { ...callable, sideEffects: event.target.value as Callable['sideEffects'] } })}><option value="none">无副作用</option><option value="dataWrite">写入业务数据</option><option value="externalWrite">修改外部系统</option></select></label>{definition.action && <label className="model-span-full">实现函数<select className="field" disabled={locked} value={callable.functionId ?? ''} onChange={(event) => update({ action: { ...callable, functionId: event.target.value || undefined } })}><option value="">暂不绑定函数</option>{callable.functionId && !currentFunctions.some((entry) => entry.definition.id === callable.functionId) && <option value={callable.functionId}>当前实现函数（无目录权限）</option>}{currentFunctions.map(({ definition: fn }) => <option key={fn.id} value={fn.id}>{fn.name}</option>)}</select></label>}</div></section><PropertyEditor title="输入参数" properties={callable.input ?? []} enums={currentEnums} locked={locked} onChange={(input) => update({ [key]: { ...callable, input } })} /><PropertyEditor title="输出参数" properties={callable.output ?? []} enums={currentEnums} locked={locked} onChange={(output) => update({ [key]: { ...callable, output } })} /></>
         })()}
       </fieldset>
+      {definition.schema && <section className="model-editor-panel" {...panelProps('data')}>
+        <ModelDataPreview key={definition.id || 'unpublished'} api={api} schemaId={definition.id} active={active && tab === 'data' && !uncertain} hasCurrent={locked} draft={record?.status !== 'active' || dirty} />
+      </section>}
+      {tab !== 'data' && <>
       {preview && <section className="model-preview"><div className="model-section-heading"><div><h3><FileCode2 size={17} />存储计划预览</h3><p className="muted">预览不会执行 SQL，也不会占用发布状态。</p></div></div>{preview.statements?.length ? <pre>{preview.statements.join('\n\n')}</pre> : <p className="model-inline-empty">此变更没有需要执行的存储语句。</p>}</section>}
       <div className="model-editor-footer"><span className="muted">{dirty ? '先保存草稿，再预览或发布。' : record?.status === 'active' ? '当前内容已生效，可再次确认或恢复发布。' : '草稿已保存，发布后对业务生效。'}</span><div className="model-inline-actions"><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle className="model-spin" size={16} /> : <FileCode2 size={16} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle className="model-spin" size={16} /> : <Save size={16} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle className="model-spin" size={16} /> : uncertain ? <RefreshCw size={16} /> : <Send size={16} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}<ArrowRight size={15} /></button></div></div>
+      </>}
     </div>
   </section>
 }

@@ -35,6 +35,8 @@ function fixture(initial = schema(), entries = [initial]) {
   const api = {
     listGroups: vi.fn().mockResolvedValue([{ id: 'group', categoryId: 'production', tenantId: 'tenant', name: '基础资料' }]),
     listDataSources: vi.fn().mockResolvedValue([]), listSourceTables: vi.fn().mockResolvedValue([]),
+    getCurrent: vi.fn().mockResolvedValue(initial), query: vi.fn().mockResolvedValue({ fields: initial.definition.schema?.properties ?? [], data: [], hasMore: false }),
+    schemaLinks: vi.fn().mockResolvedValue([]),
     getSchemaStorageMapping: vi.fn().mockResolvedValue({ schemaId: initial.definition.id, definitionETag: initial.etag, managed: true, mode: 'schema_2_db', primary: { dataSourceName: '平台默认存储', driver: 'mysql', namespace: 'data', table: 'entities', keyColumn: 'id' }, properties: [] }),
     saveDraft: vi.fn().mockImplementation(async (_id, definition) => ({ ...initial, definition, etag: 'saved' })),
   }
@@ -76,7 +78,7 @@ describe('对象编辑页签', () => {
     const { props } = fixture()
     render(<ModelEditor {...props} />)
     const tabs = within(screen.getByRole('tablist', { name: '模型配置' })).getAllByRole('tab')
-    expect(tabs.map((tab) => tab.textContent?.replace(/\d+/g, '').trim())).toEqual(['基础信息', '属性配置', '索引信息', 'Link 信息', '动作信息'])
+    expect(tabs.map((tab) => tab.textContent?.replace(/\d+/g, '').trim())).toEqual(['基础信息', '属性配置', '索引信息', 'Link 信息', '动作信息', '数据预览'])
     expect(tabs[0].getAttribute('aria-selected')).toBe('true')
     expect(tabs[0].tabIndex).toBe(0)
     expect(tabs.slice(1).every((tab) => tab.tabIndex === -1)).toBe(true)
@@ -88,7 +90,7 @@ describe('对象编辑页签', () => {
     expect(tabs[1].getAttribute('aria-selected')).toBe('true')
     expect(screen.getByRole('tabpanel', { name: '属性配置' }).getAttribute('aria-labelledby')).toBe(tabs[1].id)
     await userEvent.keyboard('{End}')
-    expect(document.activeElement).toBe(tabs[4])
+    expect(document.activeElement).toBe(tabs[5])
     await userEvent.keyboard('{ArrowRight}')
     expect(document.activeElement).toBe(tabs[0])
     await userEvent.keyboard('{ArrowLeft}{Home}')
@@ -119,6 +121,30 @@ describe('对象编辑页签', () => {
       }),
     }), 'etag-equipment'))
     expect(screen.getByRole('tab', { name: 'Link 信息', selected: true })).toBeTruthy()
+  })
+
+  it('只在进入数据预览时读取当前定义与数据，返回基础信息保留未保存编辑', async () => {
+    const initial = schema()
+    initial.status = 'active'
+    const { api, props } = fixture(initial)
+    api.query.mockResolvedValue({ fields: initial.definition.schema!.properties, data: [{ id: 'equipment-1', schemaId: 'equipment', etag: 'row-1', values: { 'name-field': '一号设备' } }], hasMore: false })
+    render(<ModelEditor {...props} />)
+    expect(api.getCurrent).not.toHaveBeenCalled()
+    expect(api.query).not.toHaveBeenCalled()
+    await userEvent.clear(screen.getByLabelText('业务名称'))
+    await userEvent.type(screen.getByLabelText('业务名称'), '设备台账')
+    expect(api.getCurrent).not.toHaveBeenCalled()
+    expect(api.query).not.toHaveBeenCalled()
+    const panel = await selectTab('数据预览')
+    expect(await within(panel).findByRole('table', { name: '对象数据预览' })).toBeTruthy()
+    expect(api.getCurrent).toHaveBeenCalledExactlyOnceWith('equipment', expect.any(AbortSignal))
+    expect(api.query).toHaveBeenCalledExactlyOnceWith({ from: { schemaId: 'equipment' }, select: ['name-field'], page: { limit: 10 } }, expect.any(AbortSignal))
+    expect(within(panel).getByText(/草稿尚未发布；此处读取当前生效模型的数据/)).toBeTruthy()
+    expect(within(panel).getByRole('cell', { name: '一号设备' })).toBeTruthy()
+    await selectTab('基础信息')
+    expect((screen.getByLabelText('业务名称') as HTMLInputElement).value).toBe('设备台账')
+    expect(api.saveDraft).not.toHaveBeenCalled()
+    expect(screen.queryByRole('table', { name: '对象数据预览' })).toBeNull()
   })
 
   it('关系按稳定ID包含入站、出站、自关联及跨分类，排除无关和异租户定义', async () => {

@@ -599,7 +599,10 @@ func (h *handler) links(w http.ResponseWriter, r *http.Request, p contracts.Prin
 	if err := h.db.QueryRowContext(r.Context(), "SELECT id FROM af_meta_definitions WHERE tenant_id=? AND id=? AND kind='schema' AND current_json IS NOT NULL", p.TenantID, id).Scan(&exists); err != nil {
 		return err
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT DISTINCT d.current_json FROM af_meta_definitions d JOIN af_meta_dependencies dep ON dep.tenant_id=d.tenant_id AND dep.source_id=d.id WHERE d.tenant_id=? AND d.kind='link' AND d.current_json IS NOT NULL AND dep.target_id=? ORDER BY d.id LIMIT 1001`, p.TenantID, id)
+	rows, err := h.db.QueryContext(r.Context(), `SELECT d.current_json FROM af_meta_definitions d
+ WHERE d.tenant_id=? AND d.kind='link' AND d.current_json IS NOT NULL
+ AND EXISTS (SELECT 1 FROM af_meta_dependencies dep WHERE dep.tenant_id=d.tenant_id AND dep.source_id=d.id AND dep.target_id=?)
+ ORDER BY d.id LIMIT 1001`, p.TenantID, id)
 	if err != nil {
 		return err
 	}
