@@ -1,7 +1,7 @@
 param([switch]$Integration)
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path -Parent $PSScriptRoot
-$names=@('GOCACHE','GOWORK','MYSQL_TEST_DSN','METADATA_TEST_DSN','ONTOLOGY_TEST_METADATA_DSN','ONTOLOGY_TEST_DATA_DSN','ONTOLOGY_TEST_OPA_URL')
+$names=@('GOCACHE','GOWORK','MYSQL_TEST_DSN','METADATA_TEST_DSN','IDENTITY_TEST_DSN','IDENTITY_TEST_OPA_URL','ONTOLOGY_TEST_METADATA_DSN','ONTOLOGY_TEST_DATA_DSN','ONTOLOGY_TEST_OPA_URL')
 $prior=@{}
 foreach($name in $names){$prior[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 try {
@@ -15,6 +15,8 @@ try {
         $env:ONTOLOGY_TEST_DATA_DSN="ontology:$($secrets.MySQLPassword)@tcp(127.0.0.1:23307)/ontology_data?charset=utf8mb4&parseTime=true&loc=UTC"
         $env:ONTOLOGY_TEST_OPA_URL='http://127.0.0.1:28181'
         $env:METADATA_TEST_DSN=$env:ONTOLOGY_TEST_METADATA_DSN
+        $env:IDENTITY_TEST_DSN=$env:ONTOLOGY_TEST_METADATA_DSN
+        $env:IDENTITY_TEST_OPA_URL=$env:ONTOLOGY_TEST_OPA_URL
     } else {
         foreach($name in $names|Where-Object{$_ -notin @('GOCACHE','GOWORK')}){[Environment]::SetEnvironmentVariable($name,$null,'Process')}
     }

@@ -472,7 +472,7 @@ func (h *handler) query(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	dec, err := h.authorize(r.Context(), p, "instance.read", current.Definition.ID)
+	dec, err := h.authorize(r.Context(), p, "instance.query", current.Definition.ID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -530,7 +530,7 @@ func (h *handler) query(w http.ResponseWriter, r *http.Request) {
 		if err = rows.Close(); err != nil {
 			return err
 		}
-		return h.recheck(r.Context(), p, "instance.read", current.Definition.ID, dec)
+		return h.recheck(r.Context(), p, "instance.query", current.Definition.ID, dec)
 	})
 	if err != nil {
 		writeError(w, err)

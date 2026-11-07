@@ -36,18 +36,19 @@ func run() error {
 	if *migrate {
 		return storage.Migrate(ctx, e.DB(), "data", data.Migrations)
 	}
-	secret, service, cursor := os.Getenv("ONTOLOGY_AUTH_SECRET"), os.Getenv("ONTOLOGY_SERVICE_TOKEN"), os.Getenv("ONTOLOGY_CURSOR_SECRET")
-	if len(secret) < 32 || len(service) < 32 || len(cursor) < 32 || secret == service || secret == cursor || service == cursor {
-		return fmt.Errorf("认证、服务和游标密钥须分别配置，至少32字节且不能相同")
+	service, cursor := os.Getenv("ONTOLOGY_SERVICE_TOKEN"), os.Getenv("ONTOLOGY_CURSOR_SECRET")
+	if len(service) < 32 || len(cursor) < 32 || service == cursor {
+		return fmt.Errorf("服务和游标密钥须分别配置，至少32字节且不能相同")
 	}
-	if os.Getenv("ONTOLOGY_OPA_URL") == "" || os.Getenv("ONTOLOGY_METADATA_URL") == "" {
-		return fmt.Errorf("须配置 ONTOLOGY_OPA_URL 与 ONTOLOGY_METADATA_URL")
+	if os.Getenv("ONTOLOGY_METADATA_URL") == "" {
+		return fmt.Errorf("须配置 ONTOLOGY_METADATA_URL")
 	}
-	app := data.NewHandler(data.Config{Engine: e, Authorizer: &platform.OPAAuthorizer{URL: os.Getenv("ONTOLOGY_OPA_URL"), BearerToken: os.Getenv("ONTOLOGY_OPA_TOKEN")}, MetadataURL: os.Getenv("ONTOLOGY_METADATA_URL"), ServiceToken: service, CursorSecret: cursor})
+	metadataURL := os.Getenv("ONTOLOGY_METADATA_URL")
+	app := data.NewHandler(data.Config{Engine: e, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, MetadataURL: metadataURL, ServiceToken: service, CursorSecret: cursor})
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18081"
 	}
 	log.Printf("Data listening on %s", addr)
-	return platform.Serve(ctx, addr, platform.ProtectRoutes(secret, service, false, app))
+	return platform.Serve(ctx, addr, platform.ProtectSessionRoutes(service, false, &platform.RemoteSessionChecker{URL: metadataURL, ServiceToken: service}, app))
 }

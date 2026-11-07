@@ -1,6 +1,7 @@
 import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
+  AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput,
 } from './types'
 
 export class ApiError extends Error {
@@ -31,13 +32,14 @@ function strongETag(value: string): string {
 }
 
 // Credentials live only in this instance. All calls stay under the same-origin
-// development proxy and never follow redirects carrying the bearer credential.
+// development proxy and never follow redirects carrying session credentials.
 export class ApiClient {
-  private readonly token: string
+  private readonly token?: string
+  private csrfToken = ''
   private readonly onUnauthorized?: () => void
   private invalidated = false
 
-  constructor(token: string, onUnauthorized?: () => void) {
+  constructor(token?: string, onUnauthorized?: () => void) {
     this.token = token
     this.onUnauthorized = onUnauthorized
   }
@@ -45,20 +47,24 @@ export class ApiClient {
   private expire(): void {
     if (this.invalidated) return
     this.invalidated = true
+    this.csrfToken = ''
     this.onUnauthorized?.()
   }
 
   private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {
     if (this.invalidated) throw new ApiError(401, 'unauthenticated', '身份已失效，请重新连接')
-    const headers: Record<string, string> = { Authorization: `Bearer ${this.token}`, Accept: 'application/json' }
+    const headers: Record<string, string> = { Accept: 'application/json' }
+    if (this.token) headers.Authorization = `Bearer ${this.token}`
+    const method = options.method ?? 'GET'
+    if (this.csrfToken && !['GET', 'HEAD', 'OPTIONS'].includes(method)) headers['X-CSRF-Token'] = this.csrfToken
     if (options.body !== undefined) headers['Content-Type'] = 'application/json; charset=utf-8'
     if (options.etag !== undefined) headers['If-Match'] = strongETag(options.etag)
     let response: Response
     try {
       response = await fetch(path, {
-        method: options.method ?? 'GET', headers,
+        method, headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
-        signal: options.signal, credentials: 'omit', mode: 'same-origin', redirect: 'error', cache: 'no-store',
+        signal: options.signal, credentials: this.token ? 'omit' : 'same-origin', mode: 'same-origin', redirect: 'error', cache: 'no-store',
       })
     } catch (error) {
       if (isObject(error) && error.name === 'AbortError') throw error
@@ -88,6 +94,52 @@ export class ApiClient {
     if (this.invalidated) throw new ApiError(401, 'unauthenticated', '身份已失效，请重新连接')
     if (payload === undefined) throw new ApiError(502, 'invalid_response', '服务未返回预期数据，请核对结果')
     return payload as T
+  }
+
+  setCSRFToken(token: string): void { this.csrfToken = token }
+  private async readSession(path: string, options: RequestOptions = {}): Promise<Session> {
+    const session = await this.request<Session>(path, options)
+    this.setCSRFToken(session.csrfToken)
+    return session
+  }
+  login(input: LoginRequest): Promise<Session> {
+    return this.readSession('/api/metadata/auth/login', { method: 'POST', body: input })
+  }
+  getSession(signal?: AbortSignal): Promise<Session> { return this.readSession('/api/metadata/auth/session', { signal }) }
+  async logout(): Promise<void> {
+    await this.request<void>('/api/metadata/auth/logout', { method: 'POST' })
+    this.expire()
+  }
+  changePassword(currentPassword: string, password: string): Promise<Session> {
+    return this.readSession('/api/metadata/auth/password', { method: 'PUT', body: { currentPassword, password } })
+  }
+
+  async listUsers(signal?: AbortSignal): Promise<User[]> {
+    return (await this.request<{ data: User[] }>('/api/metadata/admin/users', { signal })).data
+  }
+  createUser(input: UserInput): Promise<User> { return this.request('/api/metadata/admin/users', { method: 'POST', body: input }) }
+  updateUser(id: string, input: UserInput, etag: string): Promise<User> {
+    return this.request(`/api/metadata/admin/users/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag })
+  }
+  async listRoles(signal?: AbortSignal): Promise<Role[]> {
+    return (await this.request<{ data: Role[] }>('/api/metadata/admin/roles', { signal })).data
+  }
+  createRole(input: RoleInput): Promise<Role> { return this.request('/api/metadata/admin/roles', { method: 'POST', body: input }) }
+  updateRole(id: string, input: RoleInput, etag: string): Promise<Role> {
+    return this.request(`/api/metadata/admin/roles/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag })
+  }
+  getPolicy(signal?: AbortSignal): Promise<PolicyRecord> { return this.request('/api/metadata/admin/policy', { signal }) }
+  savePolicy(policy: PermissionPolicy, etag: string): Promise<PolicyRecord> {
+    return this.request('/api/metadata/admin/policy', { method: 'PUT', body: policy, etag })
+  }
+  publishPolicy(etag: string): Promise<PolicyRecord> {
+    return this.request('/api/metadata/admin/policy/publish', { method: 'POST', etag })
+  }
+  simulatePolicy(input: SimulationRequest, signal?: AbortSignal): Promise<SimulationResult> {
+    return this.request('/api/metadata/admin/simulate', { method: 'POST', body: input, signal })
+  }
+  async listAudit(signal?: AbortSignal): Promise<AuditRecord[]> {
+    return (await this.request<{ data: AuditRecord[] }>('/api/metadata/admin/audit', { signal })).data
   }
 
   private async listAll<T>(path: string, params: URLSearchParams, signal?: AbortSignal): Promise<T[]> {

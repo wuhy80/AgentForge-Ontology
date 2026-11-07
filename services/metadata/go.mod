@@ -6,6 +6,7 @@ require (
 	github.com/wuhy80/AgentForge-Ontology/contracts v0.0.0
 	github.com/wuhy80/AgentForge-Ontology/libs/platform v0.0.0
 	github.com/wuhy80/AgentForge-Ontology/libs/storage v0.0.0
+	golang.org/x/crypto v0.33.0
 	golang.org/x/text v0.22.0
 )
 

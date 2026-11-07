@@ -1,22 +1,28 @@
 import { test, expect, type Page } from '@playwright/test'
-import { createHmac } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, mkdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url))
-const credentialsFile = resolve(repo, '.cache/dev/secrets.json')
+const credentialsFile = resolve(repo, '.cache/dev/admin.json')
 test.skip(!existsSync(credentialsFile), '需要先启动本项目的本地 MySQL/OPA 和两个后端服务')
 
-function credential() {
-  const secrets = JSON.parse(readFileSync(credentialsFile, 'utf8').replace(/^\uFEFF/, '')) as { AuthSecret: string }
-  const payload = Buffer.from(JSON.stringify({ tenantId: 'demo-tenant', subject: 'developer', expiresAt: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')
-  return `${payload}.${createHmac('sha256', secrets.AuthSecret).update(payload).digest('base64url')}`
+function account() {
+  return JSON.parse(readFileSync(credentialsFile, 'utf8').replace(/^\uFEFF/, '')) as { Tenant: string; Username: string; Password: string }
 }
 
 async function connect(page: Page) {
-  await page.getByLabel('访问凭证', { exact: true }).fill(credential())
-  await page.getByRole('button', { name: '进入工作空间' }).click()
+  const login = page.getByRole('button', { name: '登录', exact: true })
+  const navigation = page.getByRole('navigation', { name: '工作台导航' })
+  await expect(login.or(navigation)).toBeVisible()
+  if (await login.isVisible()) {
+    const credentials = account()
+    await page.getByLabel('租户', { exact: true }).fill(credentials.Tenant)
+    await page.getByLabel('用户名', { exact: true }).fill(credentials.Username)
+    await page.getByLabel('密码', { exact: true }).fill(credentials.Password)
+    await login.click()
+  }
   await expect(page.getByRole('navigation', { name: '工作台导航' })).toBeVisible()
 }
 
@@ -54,7 +60,7 @@ test('真实服务：分类、可重新发现的草稿、发布、精确查询�
   await dialog.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(dialog.getByText('草稿已保存。可以继续配置索引、预览存储计划或发布。')).toBeVisible()
   await dialog.getByRole('button', { name: '关闭', exact: true }).click()
-  // Reload intentionally destroys all frontend memory and requires a new session.
+  // A reload restores the server session without exposing a credential to JS.
   await page.reload(); await connect(page)
   await page.getByLabel('按分类筛选').selectOption({ label: category })
   await page.getByRole('button', { name: '精密设备', exact: true }).click()
@@ -152,14 +158,18 @@ test('真实服务：分类、可重新发现的草稿、发布、精确查询�
   await page.screenshot({ path: resolve(artifacts, 'mobile-query.png'), fullPage: true })
   expect(pageErrors).toEqual([])
   await page.getByRole('button', { name: '退出工作空间', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '连接你的工作空间', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '登录你的工作空间', exact: true })).toBeVisible()
   const persistedSecrets = await page.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length }))
   expect(persistedSecrets).toEqual({ local: 0, session: 0 })
 })
 
 test('真实服务：枚举、函数、动作和关系通过中文表单维护', async ({ page }) => {
   const categoryName = `定义验收${Date.now()}`
-  const headers = { Authorization: `Bearer ${credential()}` }
+  const credentials = account()
+  const loggedIn = await page.request.post('/api/metadata/auth/login', { headers: { Origin: 'http://127.0.0.1:5173' }, data: { tenant: credentials.Tenant, username: credentials.Username, password: credentials.Password } })
+  expect(loggedIn.ok()).toBe(true)
+  const session = await loggedIn.json() as { csrfToken: string }
+  const headers = { 'X-CSRF-Token': session.csrfToken, Origin: 'http://127.0.0.1:5173' }
   const categoryResponse = await page.request.post('/api/metadata/categories', { headers, data: { name: categoryName } })
   expect(categoryResponse.ok()).toBe(true)
   const category = await categoryResponse.json() as { id: string }
@@ -202,4 +212,137 @@ test('真实服务：枚举、函数、动作和关系通过中文表单维护',
     await expect(dialog.getByText('发布成功，当前定义已生效。')).toBeVisible()
     await dialog.getByRole('button', { name: '关闭', exact: true }).click()
   }
+})
+
+test('真实服务：用户、角色、策略生效、行列权限和会话撤销', async ({ page, browser }) => {
+  const suffix = Date.now().toString()
+  const roleName = `产线观察员${suffix}`
+  const username = `reader${suffix}`
+  const displayName = `验收读者${suffix}`
+  const password = randomUUID()
+  const newPassword = randomUUID()
+  await page.goto('/'); await connect(page)
+  const session = await (await page.request.get('/api/metadata/auth/session')).json() as { csrfToken: string }
+  const headers = { Origin: 'http://127.0.0.1:5173', 'X-CSRF-Token': session.csrfToken }
+  const post = async (path: string, data: unknown, extra = {}) => {
+    const response = await page.request.post(path, { headers: { ...headers, ...extra }, data })
+    expect(response.ok(), `初始化请求失败: ${path} (${response.status()})`).toBe(true)
+    return response.json()
+  }
+  const categoryName = `权限验收${suffix}`
+  const category = await post('/api/metadata/categories', { name: categoryName })
+  const group = await post('/api/metadata/groups', { name: '设备', categoryId: category.id })
+  const schema = await post('/api/metadata/definitions', {
+    categoryId: category.id, groupId: group.id, kind: 'schema', name: '权限设备',
+    schema: { mode: 'schema_2_db', storageLayout: 'single', properties: [{ name: '设备名称', dataType: 'string' }, { name: '所属部门', dataType: 'string' }, { name: '采购价', dataType: 'decimal', precision: 18, scale: 2 }] },
+  })
+  await post(`/api/metadata/definitions/${schema.definition.id}/publish`, undefined, { 'If-Match': `"${schema.etag}"` })
+  const properties = schema.definition.schema.properties as { id: string; name: string }[]
+  const field = (name: string) => properties.find(item => item.name === name)!.id
+  for (const [name, department] of [['授权设备', 'A'], ['其他部门设备', 'B']]) {
+    await post(`/api/data/schemas/${schema.definition.id}/instances`, { values: { [field('设备名称')]: name, [field('所属部门')]: department, [field('采购价')]: '1234.56' }, idempotencyKey: randomUUID() })
+  }
+  await page.reload()
+  await expect(page.getByRole('link', { name: '用户与权限', exact: true })).toBeVisible()
+  await page.getByRole('link', { name: '用户与权限', exact: true }).click()
+  await page.getByRole('tab', { name: '角色', exact: true }).click()
+  await page.getByRole('button', { name: '创建角色', exact: true }).click()
+  let dialog = page.getByRole('dialog')
+  await dialog.getByLabel('角色名称', { exact: true }).fill(roleName)
+  await dialog.getByLabel('角色说明', { exact: true }).fill('仅查看A部门设备名称')
+  await dialog.getByRole('button', { name: '创建角色', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await page.getByRole('tab', { name: '用户', exact: true }).click()
+  await page.getByRole('button', { name: '创建用户', exact: true }).click()
+  dialog = page.getByRole('dialog')
+  await dialog.getByLabel('用户名', { exact: true }).fill(username)
+  await dialog.getByLabel('显示名称', { exact: true }).fill(displayName)
+  await dialog.getByLabel('初始密码', { exact: true }).fill(password)
+  await dialog.getByRole('checkbox', { name: roleName, exact: true }).check()
+  await dialog.getByRole('button', { name: '创建用户', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await page.getByRole('tab', { name: '权限策略', exact: true }).click()
+  await page.getByRole('button', { name: '添加规则', exact: true }).click()
+  dialog = page.getByRole('dialog')
+  await dialog.getByLabel('授权角色', { exact: true }).selectOption({ label: roleName })
+  await dialog.getByLabel('业务操作', { exact: true }).selectOption('instance.query')
+  await dialog.getByLabel('资源范围', { exact: true }).selectOption(schema.definition.id)
+  await dialog.getByRole('group', { name: '可读字段', exact: true }).getByRole('checkbox', { name: '设备名称', exact: true }).check()
+  await dialog.getByRole('button', { name: '添加行条件', exact: true }).first().click()
+  await dialog.getByLabel('行条件字段', { exact: true }).selectOption(field('所属部门'))
+  await dialog.getByLabel('行条件比较值', { exact: true }).fill('A')
+  await dialog.getByRole('button', { name: '保存规则到编辑区', exact: true }).click()
+  for (const operation of ['organization.read', 'definition.read']) {
+    await page.getByRole('button', { name: '添加规则', exact: true }).click()
+    dialog = page.getByRole('dialog')
+    await dialog.getByLabel('授权角色', { exact: true }).selectOption({ label: roleName })
+    await dialog.getByLabel('业务操作', { exact: true }).selectOption(operation)
+    await dialog.getByLabel('资源范围', { exact: true }).selectOption('*')
+    await dialog.getByRole('button', { name: '保存规则到编辑区', exact: true }).click()
+  }
+  await page.getByRole('button', { name: '保存策略草稿', exact: true }).click()
+  await expect(page.getByRole('button', { name: '使策略生效', exact: true })).toBeEnabled()
+  await page.getByLabel('模拟用户', { exact: true }).selectOption({ label: `${displayName}（${username}）` })
+  await page.getByLabel('模拟资源', { exact: true }).selectOption(schema.definition.id)
+  await page.getByRole('button', { name: '模拟授权', exact: true }).click()
+  await expect(page.getByText('拒绝此操作', { exact: true })).toBeVisible()
+  await page.getByLabel('使用策略', { exact: true }).selectOption('draft')
+  await page.getByRole('button', { name: '模拟授权', exact: true }).click()
+  await expect(page.getByText('允许此操作', { exact: true })).toBeVisible()
+  const readerContext = await browser.newContext({ baseURL: 'http://127.0.0.1:5173' })
+  try {
+    const readerLogin = await readerContext.request.post('/api/metadata/auth/login', { headers: { Origin: headers.Origin }, data: { tenant: account().Tenant, username, password } })
+    expect(readerLogin.ok()).toBe(true)
+    const readerSession = await readerLogin.json() as { csrfToken: string }
+    const readerHeaders = { Origin: headers.Origin, 'X-CSRF-Token': readerSession.csrfToken }
+    const query = { from: { schemaId: schema.definition.id }, select: [field('设备名称')], page: { limit: 10 } }
+    expect((await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })).status()).toBe(403)
+    await page.getByRole('button', { name: '使策略生效', exact: true }).click()
+    await expect(page.getByText('权限策略已生效。', { exact: true }).first()).toBeVisible()
+    const allowed = await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })
+    expect(allowed.status()).toBe(200)
+    const result = await allowed.json()
+    expect(result.data).toHaveLength(1)
+    expect(result.data[0].values).toEqual({ [field('设备名称')]: '授权设备' })
+    expect(result.fields.map((item: { id: string }) => item.id)).toEqual([field('设备名称')])
+    expect((await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: { ...query, select: [field('采购价')] } })).status()).toBe(403)
+    expect((await readerContext.request.get('/api/metadata/admin/users')).status()).toBe(403)
+    await page.getByRole('tab', { name: '用户', exact: true }).click()
+    await page.getByRole('row').filter({ hasText: displayName }).getByRole('button', { name: '编辑用户', exact: true }).click()
+    dialog = page.getByRole('dialog')
+    await dialog.getByRole('checkbox', { name: '启用账户', exact: true }).uncheck()
+    await dialog.getByRole('button', { name: '保存用户', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    expect((await readerContext.request.get('/api/metadata/auth/session')).status()).toBe(401)
+    expect((await readerContext.request.post('/api/data/query', { headers: readerHeaders, data: query })).status()).toBe(401)
+    await page.getByRole('row').filter({ hasText: displayName }).getByRole('button', { name: '编辑用户', exact: true }).click()
+    dialog = page.getByRole('dialog')
+    await dialog.getByRole('checkbox', { name: '启用账户', exact: true }).check()
+    await dialog.getByLabel('重置密码（留空则保留原密码）', { exact: true }).fill(newPassword)
+    await dialog.getByRole('button', { name: '保存用户', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    const readerPage = await readerContext.newPage()
+    await readerPage.goto('/')
+    await readerPage.getByLabel('租户', { exact: true }).fill(account().Tenant)
+    await readerPage.getByLabel('用户名', { exact: true }).fill(username)
+    await readerPage.getByLabel('密码', { exact: true }).fill(newPassword)
+    await readerPage.getByRole('button', { name: '登录', exact: true }).click()
+    await expect(readerPage.getByRole('navigation', { name: '工作台导航' })).toBeVisible()
+    await expect(readerPage.getByRole('link', { name: '用户与权限', exact: true })).toHaveCount(0)
+    await readerPage.getByRole('link', { name: '数据探索', exact: true }).click()
+    await readerPage.getByLabel('查询模型', { exact: true }).selectOption(schema.definition.id)
+    await readerPage.getByRole('button', { name: '清空', exact: true }).click()
+    await readerPage.getByRole('checkbox', { name: '设备名称', exact: true }).check()
+    await readerPage.getByRole('button', { name: '运行查询', exact: true }).click()
+    await expect(readerPage.getByRole('region', { name: '查询结果', exact: true }).getByText('授权设备', { exact: true })).toBeVisible()
+    const replayCookie = (await readerContext.cookies()).find(cookie => cookie.name === 'ontology_session')!
+    await readerPage.getByRole('button', { name: '退出工作空间', exact: true }).click()
+    await expect(readerPage.getByRole('heading', { name: '登录你的工作空间' })).toBeVisible()
+    expect((await readerContext.request.get('/api/metadata/auth/session', { headers: { Cookie: `ontology_session=${replayCookie.value}` } })).status()).toBe(401)
+  } finally { await readerContext.close() }
+  await page.getByRole('tab', { name: '审计记录', exact: true }).click()
+  await page.getByRole('button', { name: '重新读取', exact: true }).click()
+  await expect(page.getByRole('cell', { name: '策略生效', exact: true }).first()).toBeVisible()
+  mkdirSync(resolve(repo, '.cache/frontend-verification'), { recursive: true })
+  await page.screenshot({ path: resolve(repo, '.cache/frontend-verification/user-permissions.png'), fullPage: true })
 })

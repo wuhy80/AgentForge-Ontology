@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiClient, ApiError } from './api'
-import type { Publication, QuerySpec } from './types'
+import type { PermissionPolicy, Publication, QuerySpec, Session, UserInput } from './types'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const page = (data: unknown[], hasMore = false, nextCursor = '') => json({ data, hasMore, nextCursor })
@@ -124,5 +124,82 @@ describe('ApiClient writes and errors', () => {
     await expect(api.listCategories()).rejects.toMatchObject({ status: 401 })
     expect(reset).toHaveBeenCalledTimes(1)
     expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('cookie sessions and identity administration', () => {
+  const session: Session = { user: { id: 'user', tenantId: 'tenant', username: 'operator', displayName: '管理员', administrator: true, enabled: true, roleIds: [], etag: 'user-etag' }, expiresAt: 1800000000, csrfToken: 'csrf-one' }
+
+  it('uses same-origin cookies by default and installs the login CSRF token for unsafe requests', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json(session)).mockResolvedValueOnce(json({ id: 'category' })).mockResolvedValueOnce(json(session))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient()
+    await expect(api.login({ tenant: 'tenant', username: 'operator', password: 'a-private-password' })).resolves.toEqual(session)
+    await api.createCategory('生产')
+    await api.getSession()
+    expect(fetcher.mock.calls[0][0]).toBe('/api/metadata/auth/login')
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ tenant: 'tenant', username: 'operator', password: 'a-private-password' })
+    expect(fetcher.mock.calls[0][1].headers['X-CSRF-Token']).toBeUndefined()
+    expect(fetcher.mock.calls[1][1].headers['X-CSRF-Token']).toBe('csrf-one')
+    expect(fetcher.mock.calls[2][1].headers['X-CSRF-Token']).toBeUndefined()
+    for (const [path, options] of fetcher.mock.calls) {
+      expect(options.credentials).toBe('same-origin')
+      expect(options.headers.Authorization).toBeUndefined()
+      expect(path).not.toContain('private-password')
+      expect(options).toMatchObject({ redirect: 'error', cache: 'no-store', mode: 'same-origin' })
+    }
+  })
+
+  it('rotates CSRF after password changes and invalidates the session after logout', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(json({ ...session, csrfToken: 'csrf-two' })).mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetcher)
+    const reset = vi.fn(), api = new ApiClient(undefined, reset)
+    api.setCSRFToken('csrf-one')
+    await api.changePassword('old-password', 'new-password')
+    expect(fetcher.mock.calls[0][1].headers['X-CSRF-Token']).toBe('csrf-one')
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ currentPassword: 'old-password', password: 'new-password' })
+    await api.logout()
+    expect(fetcher.mock.calls[1][1].headers['X-CSRF-Token']).toBe('csrf-two')
+    expect(reset).toHaveBeenCalledTimes(1)
+    await expect(api.getSession()).rejects.toMatchObject({ status: 401 })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+  })
+
+  it('uses administration routes, typed bodies and strong optimistic concurrency for updates and publication', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => json({ data: [], current: { rules: [] }, etag: 'next', state: 'next' }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient()
+    api.setCSRFToken('csrf')
+    const user: UserInput = { username: 'operator', displayName: '用户', enabled: false, administrator: false, roleIds: ['role'] }
+    await api.listUsers(); await api.createUser(user); await api.updateUser('user / one', user, 'user-etag')
+    await api.listRoles(); await api.createRole({ name: '采购', description: '采购数据' }); await api.updateRole('role', { name: '采购', description: '' }, 'role-etag')
+    const policy: PermissionPolicy = { rules: [{ id: 'rule', roleId: 'role', effect: 'allow', operation: 'instance.query', resourceId: 'schema', readFields: ['field'], writeFields: [] }] }
+    await api.getPolicy(); await api.savePolicy(policy, 'policy-etag'); await api.publishPolicy('saved-etag')
+    await api.simulatePolicy({ userId: 'user', request: { operation: 'instance.query', resourceId: 'schema' }, draft: true }); await api.listAudit()
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/metadata/admin/users', '/api/metadata/admin/users', '/api/metadata/admin/users/user%20%2F%20one',
+      '/api/metadata/admin/roles', '/api/metadata/admin/roles', '/api/metadata/admin/roles/role',
+      '/api/metadata/admin/policy', '/api/metadata/admin/policy', '/api/metadata/admin/policy/publish',
+      '/api/metadata/admin/simulate', '/api/metadata/admin/audit',
+    ])
+    expect(fetcher.mock.calls[2][1].headers['If-Match']).toBe('"user-etag"')
+    expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual(user)
+    expect(fetcher.mock.calls[5][1].headers['If-Match']).toBe('"role-etag"')
+    expect(fetcher.mock.calls[7][1].headers['If-Match']).toBe('"policy-etag"')
+    expect(JSON.parse(fetcher.mock.calls[7][1].body)).toEqual(policy)
+    expect(fetcher.mock.calls[8][1].headers['If-Match']).toBe('"saved-etag"')
+  })
+
+  it('clears cookie identity on any 401 and never reuses pending successful responses', async () => {
+    let finish!: (response: Response) => void
+    const fetcher = vi.fn().mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve }))
+      .mockResolvedValueOnce(json({ code: 'unauthenticated', message: '身份过期' }, 401))
+    vi.stubGlobal('fetch', fetcher)
+    const reset = vi.fn(), api = new ApiClient(undefined, reset)
+    const users = api.listUsers()
+    await expect(api.getSession()).rejects.toMatchObject({ status: 401 })
+    finish(json({ data: [session.user] }))
+    await expect(users).rejects.toMatchObject({ status: 401 })
+    expect(reset).toHaveBeenCalledTimes(1)
   })
 })

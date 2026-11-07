@@ -8,11 +8,10 @@
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-dev.ps1
-$token = powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev-token.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1 -Integration
 ```
 
-服务分别监听 `127.0.0.1:18080`、`127.0.0.1:18081`。启动脚本创建独立的开发数据库，显式迁移后启动服务；密钥仅保存在忽略的 `.cache/dev/`。本地示例主体为 `demo-tenant / developer`。完整使用方式见[开发指南](docs/开发指南.md)。
+服务分别监听 `127.0.0.1:18080`、`127.0.0.1:18081`。启动脚本创建独立的开发数据库，显式迁移并初始化首个账号后启动服务；密钥与本地初始管理员信息仅保存在忽略的 `.cache/dev/`。完整使用方式见[开发指南](docs/开发指南.md)。
 
 前端需要 Node.js 22.12+ 或 24。另开终端运行：
 
@@ -22,7 +21,7 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-打开 `http://127.0.0.1:5173`，粘贴上方 `$token` 的值进入工作空间。前端接入真实服务，提供分类/分组、五类定义、草稿、预览和生效、可视化单模型查询及实例维护；凭证只存在内存，刷新后需要重新连接。工程说明见[前端](apps/web/README.md)。
+打开 `http://127.0.0.1:5173`，使用租户、用户名和密码登录。首次初始化的本地管理员为 `demo-tenant / admin`，随机初始密码见 `.cache/dev/admin.json`；后续账号在“用户与权限”页面创建、分配角色并配置策略。会话在服务端可撤销，刷新可恢复，退出、停用或密码重置使旧会话失效；不再使用手工签发凭证登录。工程说明见[前端](apps/web/README.md)。
 
 Schema、Enum、Link、Action、Function 统一使用单份当前生效定义，不设置业务 version；用户通过中文业务名称维护定义和编写查询，内部引用、保存及执行使用稳定 ID，改名不改变已有绑定身份；修改经校验及必要迁移后替换当前定义。
 

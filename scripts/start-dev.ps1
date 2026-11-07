@@ -30,7 +30,13 @@ $compose = Join-Path $repoRoot 'deploy/compose/development.yaml'
 if ($LASTEXITCODE -ne 0) { throw 'Development dependencies did not become ready. Start Docker Desktop and inspect docker compose logs.' }
 if ($DependenciesOnly) { Write-Output 'Development MySQL and OPA are ready.'; return }
 
-$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN')
+$adminFile = Join-Path $devRoot 'admin.json'
+if (-not (Test-Path -LiteralPath $adminFile)) {
+    [ordered]@{Tenant='demo-tenant'; Username='admin'; Password=(New-LocalSecret)} | ConvertTo-Json | Set-Content -LiteralPath $adminFile -Encoding UTF8
+}
+$initialAdmin = Get-Content -LiteralPath $adminFile -Raw -Encoding UTF8 | ConvertFrom-Json
+
+$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD')
 $savedEnvironment = @{}
 foreach ($name in $envNames) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -42,6 +48,7 @@ try {
     $env:ONTOLOGY_OPA_URL = 'http://127.0.0.1:28181'
     $env:ONTOLOGY_METADATA_URL = 'http://127.0.0.1:18080'
     $env:ONTOLOGY_DATA_URL = 'http://127.0.0.1:18081'
+    $env:ONTOLOGY_PUBLIC_ORIGIN = 'http://127.0.0.1:5173'
     $binRoot = Join-Path $devRoot 'bin'
     New-Item -ItemType Directory -Force -Path $binRoot | Out-Null
     $processes = @{}
@@ -63,6 +70,16 @@ try {
         $env:ONTOLOGY_MYSQL_DSN = "ontology:$($secrets.MySQLPassword)@tcp(127.0.0.1:$port)/ontology_${service}?charset=utf8mb4&parseTime=true&loc=UTC"
         & $binary -migrate
         if ($LASTEXITCODE -ne 0) { throw "$service migration needs inspection; no server was started for this service" }
+        if ($service -eq 'metadata') {
+            $env:ONTOLOGY_BOOTSTRAP_TENANT = $initialAdmin.Tenant
+            $env:ONTOLOGY_BOOTSTRAP_USERNAME = $initialAdmin.Username
+            $env:ONTOLOGY_BOOTSTRAP_PASSWORD = $initialAdmin.Password
+            & $binary -bootstrap-admin
+            if ($LASTEXITCODE -ne 0) { throw 'Administrator initialization failed; no Metadata server was started.' }
+            $env:ONTOLOGY_BOOTSTRAP_PASSWORD = $null
+            $env:ONTOLOGY_BOOTSTRAP_USERNAME = $null
+            $env:ONTOLOGY_BOOTSTRAP_TENANT = $null
+        }
         $env:ONTOLOGY_LISTEN = if ($service -eq 'metadata') { '127.0.0.1:18080' } else { '127.0.0.1:18081' }
         $process = Start-Process -FilePath $binary -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $devRoot "$service.stdout.log") -RedirectStandardError (Join-Path $devRoot "$service.stderr.log")
         $processes[$service] = $process.Id
@@ -83,7 +100,7 @@ try {
         }
     }
     Write-Output 'Metadata: http://127.0.0.1:18080 ; Data: http://127.0.0.1:18081'
-    Write-Output 'Get a demo-tenant/developer token with scripts/dev-token.ps1. Stop services with scripts/stop-dev.ps1.'
+    Write-Output 'Sign in with the account initialized in .cache/dev/admin.json. Existing account passwords are never reset by startup. Stop services with scripts/stop-dev.ps1.'
 } finally {
     foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process') }
 }

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,6 +14,7 @@ import (
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 	"github.com/wuhy80/AgentForge-Ontology/libs/storage"
 	metadata "github.com/wuhy80/AgentForge-Ontology/services/metadata"
+	"github.com/wuhy80/AgentForge-Ontology/services/metadata/identity"
 )
 
 func main() {
@@ -23,6 +25,7 @@ func main() {
 }
 func run() error {
 	migrate := flag.Bool("migrate", false, "显式应用 Metadata 平台迁移后退出")
+	bootstrap := flag.Bool("bootstrap-admin", false, "显式初始化首个租户管理员后退出")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -34,20 +37,35 @@ func run() error {
 	}
 	defer e.Close()
 	if *migrate {
-		return storage.Migrate(ctx, e.DB(), "metadata", metadata.Migrations)
+		migrations := append(append([]storage.Migration{}, metadata.Migrations...), identity.Migrations...)
+		return storage.Migrate(ctx, e.DB(), "metadata", migrations)
 	}
-	secret, service := os.Getenv("ONTOLOGY_AUTH_SECRET"), os.Getenv("ONTOLOGY_SERVICE_TOKEN")
-	if len(secret) < 32 || len(service) < 32 || secret == service {
-		return fmt.Errorf("认证密钥与服务凭据须分别配置，至少32字节且不能相同")
+	service := os.Getenv("ONTOLOGY_SERVICE_TOKEN")
+	if len(service) < 32 {
+		return fmt.Errorf("服务凭据须至少32字节")
 	}
 	if os.Getenv("ONTOLOGY_OPA_URL") == "" || os.Getenv("ONTOLOGY_DATA_URL") == "" {
 		return fmt.Errorf("须配置 ONTOLOGY_OPA_URL 与 ONTOLOGY_DATA_URL")
 	}
-	app := metadata.NewHandler(metadata.Config{Engine: e, Authorizer: &platform.OPAAuthorizer{URL: os.Getenv("ONTOLOGY_OPA_URL"), BearerToken: os.Getenv("ONTOLOGY_OPA_TOKEN")}, DataURL: os.Getenv("ONTOLOGY_DATA_URL"), ServiceToken: service})
+	origin := os.Getenv("ONTOLOGY_PUBLIC_ORIGIN")
+	if origin == "" {
+		origin = "http://127.0.0.1:5173"
+	}
+	accounts := identity.NewStore(e.DB(), &platform.OPAAuthorizer{URL: os.Getenv("ONTOLOGY_OPA_URL"), BearerToken: os.Getenv("ONTOLOGY_OPA_TOKEN")}, origin)
+	if *bootstrap {
+		return accounts.Bootstrap(ctx, os.Getenv("ONTOLOGY_BOOTSTRAP_TENANT"), os.Getenv("ONTOLOGY_BOOTSTRAP_USERNAME"), os.Getenv("ONTOLOGY_BOOTSTRAP_PASSWORD"))
+	}
+	app := metadata.NewHandler(metadata.Config{Engine: e, Authorizer: accounts, DataURL: os.Getenv("ONTOLOGY_DATA_URL"), ServiceToken: service})
+	mux := http.NewServeMux()
+	mux.Handle("/metadata/auth/", accounts.NewHandler())
+	mux.Handle("/metadata/admin/", accounts.NewHandler())
+	mux.Handle("POST /internal/identity/session", internalSession(service, accounts))
+	mux.Handle("POST /internal/authorization/decision", internalDecision(service, accounts))
+	mux.Handle("/", app)
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18080"
 	}
 	log.Printf("Metadata listening on %s", addr)
-	return platform.Serve(ctx, addr, platform.ProtectRoutes(secret, service, true, app))
+	return platform.Serve(ctx, addr, platform.ProtectSessionRoutes(service, true, accounts, mux))
 }

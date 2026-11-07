@@ -6,7 +6,6 @@ import {
   Braces,
   Check,
   ChevronRight,
-  CircleHelp,
   Database,
   FileEdit,
   GitBranch,
@@ -18,51 +17,30 @@ import {
   ShieldCheck,
   Sparkles,
   Workflow,
+  Users,
 } from 'lucide-react'
 import { ApiClient, ApiError } from './lib/api'
-import type { DataCapabilities, DefinitionRecord, MetadataCapabilities, Organization } from './lib/types'
+import type { DataCapabilities, DefinitionRecord, MetadataCapabilities, Organization, Session as AccountSession } from './lib/types'
 import { ModelsPage } from './features/model/ModelsPage'
 import { QueryPage } from './features/query/QueryPage'
 import { DialogScope } from './components/Dialog'
+import { Dialog } from './components/Dialog'
+import { AdminPage } from './features/admin/AdminPage'
 
-type View = 'overview' | 'models' | 'query'
+type View = 'overview' | 'models' | 'query' | 'admin'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
-type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities }
+type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
 const nav = [
   { id: 'overview' as const, name: '工作空间', subtitle: '概览', icon: LayoutDashboard },
   { id: 'models' as const, name: '模型管理', subtitle: '定义业务世界', icon: Layers3 },
   { id: 'query' as const, name: '数据探索', subtitle: '让数据回答问题', icon: Search },
+  { id: 'admin' as const, name: '用户与权限', subtitle: '管理成员和访问范围', icon: Users },
 ]
 
 function currentView(): View {
   const hash = window.location.hash.slice(1)
-  return hash === 'models' || hash === 'query' ? hash : 'overview'
-}
-
-// The claims are only displayed after both services accept the signed identity.
-// They never select a tenant header or substitute for backend authentication.
-function identityLabel(token: string): Identity {
-  try {
-    const part = token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')
-    const bytes = Uint8Array.from(atob(part), (char) => char.charCodeAt(0))
-    const value: unknown = JSON.parse(new TextDecoder().decode(bytes))
-    if (
-      typeof value === 'object' &&
-      value !== null &&
-      'tenantId' in value &&
-      'subject' in value &&
-      'expiresAt' in value &&
-      typeof value.tenantId === 'string' &&
-      typeof value.subject === 'string' &&
-      typeof value.expiresAt === 'number'
-    ) {
-      return { tenantId: value.tenantId, subject: value.subject, expiresAt: value.expiresAt }
-    }
-  } catch {
-    /* A malformed bootstrap credential is rejected before connecting. */
-  }
-  throw new Error('请输入当前服务签发的有效访问凭证')
+  return hash === 'models' || hash === 'query' || hash === 'admin' ? hash : 'overview'
 }
 
 function Brand({ light = false }: { light?: boolean }) {
@@ -121,8 +99,10 @@ function OntologyIllustration() {
   )
 }
 
-function Connect({ onConnect, reason }: { onConnect: (token: string) => Promise<void>; reason: string }) {
-  const [token, setToken] = useState('')
+function Connect({ onConnect, reason }: { onConnect: (tenant: string, username: string, password: string) => Promise<void>; reason: string }) {
+  const [tenant, setTenant] = useState('demo-tenant')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   async function submit(event: FormEvent) {
@@ -131,8 +111,8 @@ function Connect({ onConnect, reason }: { onConnect: (token: string) => Promise<
     setBusy(true)
     setError('')
     try {
-      await onConnect(token.trim())
-      setToken('')
+      await onConnect(tenant.trim(), username.trim(), password)
+      setPassword('')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '连接失败，请稍后重试')
     } finally {
@@ -168,7 +148,7 @@ function Connect({ onConnect, reason }: { onConnect: (token: string) => Promise<
           <span className="product-label">
             <Box size={17} /> ONTOLOGY WORKSPACE
           </span>
-          <h2>连接你的工作空间</h2>
+          <h2>登录你的工作空间</h2>
           <p className="connect-intro">从业务模型开始，探索数据的更多可能。</p>
           {reason && (
             <div className="notice" role="status">
@@ -181,37 +161,32 @@ function Connect({ onConnect, reason }: { onConnect: (token: string) => Promise<
             </div>
           )}
           <form onSubmit={submit}>
+            <label className="field">租户<input name="tenant" autoComplete="organization" value={tenant} onChange={(event) => setTenant(event.target.value)} required disabled={busy} /></label>
+            <label className="field">用户名<input name="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required disabled={busy} /></label>
             <label className="field">
-              访问凭证
+              密码
               <input
                 type="password"
-                name="credential"
-                autoComplete="off"
+                name="password"
+                autoComplete="current-password"
                 spellCheck={false}
-                placeholder="粘贴你的访问凭证"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
+                placeholder="请输入密码"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
                 required
                 disabled={busy}
               />
             </label>
             <p className="field-hint">
-              <ShieldCheck size={15} /> 凭证仅在当前页面会话中使用，退出后即清除。
+              <ShieldCheck size={15} /> 账号与访问权限由你的租户管理员管理。
             </p>
-            <button className="button primary connect-submit" disabled={busy || !token.trim()}>
+            <button className="button primary connect-submit" disabled={busy || !tenant.trim() || !username.trim() || !password}>
               {busy ? <LoaderCircle className="spin" size={18} /> : null}
-              {busy ? '正在连接…' : '进入工作空间'}
+              {busy ? '正在登录…' : '登录'}
               {!busy && <ArrowRight size={18} />}
             </button>
           </form>
-          <details className="connect-help">
-            <summary>
-              <CircleHelp size={16} /> 如何获取本地开发凭证
-            </summary>
-            <p>先启动本地后端，在仓库根目录运行以下命令，将输出粘贴到上方。</p>
-            <code>powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/dev-token.ps1</code>
-            <p>刷新页面后需要重新连接。该凭证用于当前本地开发环境。</p>
-          </details>
+          <p className="field-hint">忘记密码或需要开通账号，请联系租户管理员。</p>
           <div className="connect-footer">
             AgentForge Ontology <span>首批工作台</span>
           </div>
@@ -226,50 +201,71 @@ export function App() {
   const [reason, setReason] = useState('')
   const connecting = useRef(0)
   const activeClient = useRef<ApiClient | null>(null)
-  const connect = useCallback(async (token: string) => {
+  const [checking, setChecking] = useState(true)
+  const [disconnecting, setDisconnecting] = useState(false)
+  const establish = useCallback(async (credentials?: { tenant: string; username: string; password: string }) => {
     const request = ++connecting.current
-    const identity = identityLabel(token)
-    const api: ApiClient = new ApiClient(token, () => {
+    const api: ApiClient = new ApiClient(undefined, () => {
       if (activeClient.current !== api) return
       activeClient.current = null
       setSession(null)
-      setReason('访问凭证已失效，请重新连接。')
+      setReason('登录已失效，请重新登录。')
     })
+    const account = credentials ? await api.login(credentials) : await api.getSession()
+    const identity = { tenantId: account.user.tenantId, subject: account.user.displayName || account.user.username, expiresAt: account.expiresAt }
     const [metadata, data] = await Promise.all([api.metadataCapabilities(), api.dataCapabilities()])
     if (request !== connecting.current) return
     activeClient.current = api
     setReason('')
-    setSession({ api, identity, metadata, data })
+    setSession({ api, identity, metadata, data, account })
   }, [])
+  const connect = (tenant: string, username: string, password: string) => establish({ tenant, username, password })
+  useEffect(() => {
+    let mounted = true
+    void establish().catch((failure) => {
+      if (mounted && !(failure instanceof ApiError && failure.status === 401)) setReason(failure instanceof Error ? failure.message : '无法检查登录状态')
+    }).finally(() => { if (mounted) setChecking(false) })
+    return () => { mounted = false; ++connecting.current }
+  }, [establish])
   useEffect(() => {
     if (!session) return
     const expires = session.identity.expiresAt * 1000 - Date.now()
     const timer = window.setTimeout(
       () => {
         activeClient.current = null
-        setReason('访问凭证已过期，请重新连接。')
+        setReason('登录已过期，请重新登录。')
         setSession(null)
       },
       Math.max(0, Math.min(expires, 2147483647)),
     )
     return () => window.clearTimeout(timer)
   }, [session])
+  if (checking) return <div className="empty-state"><LoaderCircle className="spin" size={25} /><p>正在检查登录状态…</p></div>
   if (!session) return <Connect onConnect={connect} reason={reason} />
   return (
     <Workspace
-      key={`${session.identity.tenantId}:${session.identity.subject}`}
+      key={`${session.identity.tenantId}:${session.account.user.id}`}
       session={session}
-      onDisconnect={() => {
-        ++connecting.current
-        activeClient.current = null
-        setReason('')
-        setSession(null)
+      onAccountUpdated={(account) => setSession((value) => value?.api === session.api ? { ...value, account, identity: { tenantId: account.user.tenantId, subject: account.user.displayName || account.user.username, expiresAt: account.expiresAt } } : value)}
+      notice={reason}
+      disconnecting={disconnecting}
+      onDisconnect={async () => {
+        if (disconnecting) return
+        setDisconnecting(true)
+        try {
+          await session.api.logout()
+          ++connecting.current
+          activeClient.current = null
+          setReason('')
+          setSession(null)
+        } catch (failure) { setReason(failure instanceof Error ? failure.message : '退出失败，请重试') }
+        finally { setDisconnecting(false) }
       }}
     />
   )
 }
 
-function Workspace({ session, onDisconnect }: { session: Session; onDisconnect: () => void }) {
+function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnecting }: { session: Session; onDisconnect: () => Promise<void>; onAccountUpdated: (account: AccountSession) => void; notice: string; disconnecting: boolean }) {
   const [view, setView] = useState<View>(currentView)
   const [categories, setCategories] = useState<Organization[]>([])
   const [current, setCurrent] = useState<DefinitionRecord[]>([])
@@ -281,6 +277,7 @@ function Workspace({ session, onDisconnect }: { session: Session; onDisconnect: 
   const [selectionRequest, setSelectionRequest] = useState(0)
   const [draftDirectoryDenied, setDraftDirectoryDenied] = useState(false)
   const [help, setHelp] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
   const requests = useRef(0)
   const controller = useRef<AbortController | null>(null)
   const refresh = useCallback(async () => {
@@ -377,7 +374,7 @@ function Workspace({ session, onDisconnect }: { session: Session; onDisconnect: 
         </div>
         <div className="nav-label">工作台</div>
         <nav aria-label="工作台导航">
-          {nav.map((item) => (
+          {nav.filter((item) => item.id !== 'admin' || session.account.user.administrator).map((item) => (
             <a
               href={`#${item.id}`}
               key={item.id}
@@ -435,18 +432,22 @@ function Workspace({ session, onDisconnect }: { session: Session; onDisconnect: 
             <span className="topbar-separator" />
             <span className="user-avatar">{session.identity.subject.slice(0, 1).toUpperCase()}</span>
             <span className="subject-name">{session.identity.subject}</span>
+            <button className="button subtle" type="button" onClick={() => setPasswordOpen(true)}>修改密码</button>
             <button
               type="button"
               className="icon-button"
               aria-label="退出工作空间"
               title="退出工作空间"
               onClick={onDisconnect}
+              disabled={disconnecting}
             >
               <LogOut size={17} />
             </button>
           </div>
         </header>
         <main id="main-content" className="main-content" tabIndex={-1}>
+          {notice && <div className="notice notice-error" role="alert">{notice}</div>}
+          {passwordOpen && <ChangePassword api={session.api} onUpdated={onAccountUpdated} onClose={() => setPasswordOpen(false)} />}
           {help && (
             <div className="help-panel card">
               <div>
@@ -519,6 +520,9 @@ function Workspace({ session, onDisconnect }: { session: Session; onDisconnect: 
                   />
                 </DialogScope>
               </section>
+              {view === 'admin' && (session.account.user.administrator
+                ? <AdminPage api={session.api} session={session.account} categories={categories} definitions={current} onSessionChanged={() => { void session.api.getSession().then(onAccountUpdated).catch(() => {}) }} />
+                : <div className="notice notice-error" role="alert">你没有用户与权限管理权限。</div>)}
             </>
           )}
         </main>
@@ -529,6 +533,34 @@ function Workspace({ session, onDisconnect }: { session: Session; onDisconnect: 
       </div>
     </div>
   )
+}
+
+function ChangePassword({ api, onClose, onUpdated }: { api: ApiClient; onClose: () => void; onUpdated: (account: AccountSession) => void }) {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    if (busy) return
+    if (password !== confirm) { setError('两次输入的新密码不一致'); return }
+    setBusy(true); setError('')
+    try { const account = await api.changePassword(currentPassword, password); onUpdated(account); setCurrentPassword(''); setPassword(''); setConfirm(''); setSaved(true) }
+    catch (failure) { setError(failure instanceof Error ? failure.message : '密码修改失败') }
+    finally { setBusy(false) }
+  }
+  return <Dialog title="修改密码" description="修改后，其他设备上的登录将失效。" onClose={onClose}>
+    {saved ? <><div className="notice" role="status">密码已修改，请妥善保管新密码。</div><button className="button primary" onClick={onClose}>完成</button></>
+      : <form onSubmit={submit}>
+        {error && <div className="notice notice-error" role="alert">{error}</div>}
+        <label className="field">当前密码<input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label>
+        <label className="field">新密码<input type="password" autoComplete="new-password" minLength={12} maxLength={72} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+        <label className="field">确认新密码<input type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></label>
+        <button className="button primary" disabled={busy}>{busy ? '正在保存…' : '保存密码'}</button>
+      </form>}
+  </Dialog>
 }
 
 function Overview({

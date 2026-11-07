@@ -107,6 +107,10 @@ func (h *handler) authorize(ctx context.Context, p contracts.Principal, op, id s
 	}
 	d, err := h.cfg.Authorizer.Authorize(ctx, p, contracts.AuthorizationRequest{Operation: op, ResourceID: id, Kind: kind})
 	if err != nil {
+		var access *platform.AccessError
+		if errors.As(err, &access) && (access.Status == 401 || access.Status == 403 || access.Status == 422 || access.Status == 503) {
+			return problem(access.Status, access.Code, access.Message)
+		}
 		return problem(503, "authorization_unavailable", "无法确认当前授权")
 	}
 	if !d.Allow {

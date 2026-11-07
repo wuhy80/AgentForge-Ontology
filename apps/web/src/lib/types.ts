@@ -118,3 +118,50 @@ export interface DataCapabilities {
   batch: boolean
   calculatedProperties: boolean
 }
+
+export interface User {
+  id: string
+  tenantId: string
+  username: string
+  displayName: string
+  enabled: boolean
+  administrator: boolean
+  roleIds: string[]
+  etag: string
+}
+export interface Role { id: string; name: string; description: string; etag: string }
+export interface Session { user: User; expiresAt: number; csrfToken: string }
+export interface LoginRequest { tenant: string; username: string; password: string }
+export interface UserInput {
+  username: string
+  displayName: string
+  password?: string
+  enabled: boolean
+  administrator: boolean
+  roleIds: string[]
+}
+export interface RoleInput { name: string; description: string }
+export interface PermissionRule {
+  id: string
+  roleId: string
+  effect: 'allow' | 'deny'
+  operation: string
+  resourceId: string
+  readFields: string[]
+  writeFields: string[]
+  rowFilter?: Expression | null
+  newRowFilter?: Expression | null
+}
+export interface PermissionPolicy { rules: PermissionRule[] }
+export interface PolicyRecord { current: PermissionPolicy; draft?: PermissionPolicy | null; etag: string; state: string }
+export interface AuditRecord { id: string; actorId: string; operation: string; targetId: string; createdAt: string }
+export interface Decision {
+  allow: boolean
+  readFields: string[]
+  writeFields: string[]
+  rowFilter?: Expression | null
+  newRowFilter?: Expression | null
+  state: string
+}
+export interface SimulationRequest { userId: string; request: { operation: string; resourceId: string }; draft: boolean }
+export interface SimulationResult { decision: Decision; reason: string }

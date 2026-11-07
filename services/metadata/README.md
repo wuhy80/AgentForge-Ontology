@@ -1,6 +1,6 @@
 # Metadata 开发入口
 
-本模块实现组织管理、五类定义草稿与当前态、名称解析、方向发现，以及与 Data 协作的持久发布操作。公共规则继续维护在[总体架构](../../docs/总体架构.md)、[组织与隔离](../../docs/组织与隔离.md)及[发布与迁移](../../docs/发布与迁移.md)。
+本模块实现组织管理、五类定义草稿与当前态、名称解析、方向发现、与 Data 协作的持久发布操作，以及本地账号、会话和权限管理。身份及管理接口协议见 [identity](identity/README.md)，公共权限规则以[权限设计](../../docs/权限/权限设计.md)为主要说明；架构、组织及定义生效分别见[总体架构](../../docs/总体架构.md)、[组织与隔离](../../docs/组织与隔离.md)及[发布与迁移](../../docs/发布与迁移.md)。
 
 ## 构建与运行
 
@@ -17,27 +17,39 @@ go vet ./...
 | 变量 | 用途 |
 | --- | --- |
 | `ONTOLOGY_MYSQL_DSN` | 本服务拥有的 MySQL 数据库连接，连接字符集使用 utf8mb4 |
-| `ONTOLOGY_AUTH_SECRET` | 用户身份凭证签名密钥，至少32字节 |
-| `ONTOLOGY_SERVICE_TOKEN` | Data/Metadata 内部通信凭据，至少32字节且与身份密钥不同 |
+| `ONTOLOGY_SERVICE_TOKEN` | Data/Metadata 内部通信凭据，至少32字节 |
 | `ONTOLOGY_OPA_URL` | OPA 服务地址 |
 | `ONTOLOGY_OPA_TOKEN` | 可选的 OPA 服务凭据 |
 | `ONTOLOGY_DATA_URL` | Data 服务地址 |
+| `ONTOLOGY_PUBLIC_ORIGIN` | 工作台允许的完整来源，默认 `http://127.0.0.1:5173`；须与浏览器实际地址一致 |
 | `ONTOLOGY_LISTEN` | 监听地址，默认 `127.0.0.1:18080` |
+| `ONTOLOGY_BOOTSTRAP_TENANT`、`ONTOLOGY_BOOTSTRAP_USERNAME`、`ONTOLOGY_BOOTSTRAP_PASSWORD` | 仅显式执行 `-bootstrap-admin` 时使用的初始租户及管理员账号 |
 
 ```powershell
 # 显式迁移后退出；普通启动不创建平台表。
 go run ./cmd/server -migrate
+# 首次使用时配置上述三个 BOOTSTRAP 变量，再显式初始化空租户。
+go run ./cmd/server -bootstrap-admin
 go run ./cmd/server
 ```
 
+仓库的 `scripts/start-dev.ps1` 会显式迁移并初始化本地管理员，首次生成的账号保存在忽略目录 `.cache/dev/admin.json`。重复启动及重复初始化不会覆盖已有账号或密码；首次登录后可在工作台修改密码。正常使用不需要手工签发或粘贴 Bearer 凭证。
+
 ## HTTP 入口
 
-普通请求需要签名身份凭证，租户来自已验证身份。定义管理使用整份定义的 `definition.read`、`definition.edit`、`definition.publish` 授权；组织管理使用 `organization.read`、`organization.edit`。本增量对带行条件的定义管理授权返回422，不忽略条件继续访问。
+用户通过租户、用户名和密码登录，浏览器使用可撤销的 HttpOnly Cookie 会话；每次请求核对当前账号、有效期及角色。登录后的非安全方法请求，包括 POST 预览，必须发送匹配的 `Origin` 与 `X-CSRF-Token`，CLI 也须显式携带这两项；登录请求校验来源，不要求已有会话的 CSRF。会话与密码规则、吊销行为及管理接口详见 [identity](identity/README.md)。
+
+定义管理使用整份定义的 `definition.read`、`definition.edit`、`definition.publish` 授权；组织管理使用 `organization.read`、`organization.edit`。Metadata 从数据库读取当前用户、角色绑定及已生效策略，向 OPA 提供受控运行时授权；不以示例静态授权替代当前账号策略。带行条件的定义管理授权返回422，不忽略条件继续访问。
 
 | 方法和路径 | 用途 |
 | --- | --- |
 | `GET /healthz`、`GET /readyz` | 存活与数据库就绪探针 |
 | `GET /metadata/capabilities` | 当前开放能力与限制 |
+| `POST /metadata/auth/login`、`GET /metadata/auth/session`、`POST /metadata/auth/logout` | 账号登录、恢复当前会话及服务端注销 |
+| `PUT /metadata/auth/password` | 核对当前密码、修改密码并旋转会话 |
+| `/metadata/admin/users`、`/metadata/admin/roles` | 当前租户的用户、启停、密码重置及角色管理 |
+| `/metadata/admin/policy`、`POST /metadata/admin/policy/publish` | 权限策略草稿及显式生效 |
+| `POST /metadata/admin/simulate`、`GET /metadata/admin/audit` | 策略试算及最近200条审计；审计响应声明 `hasMore` |
 | `POST/GET /metadata/categories` | 创建和分页读取分类 |
 | `POST/GET /metadata/groups` | 创建和分页读取分组；读取指定 categoryId |
 | `POST /metadata/definitions` | 创建定义及首份草稿，返回服务端生成的定义/字段 ID |
@@ -50,7 +62,7 @@ go run ./cmd/server
 | `GET /metadata/resolve?category=分类名&name=定义名&kind=schema` | 中文名称解析；kind 可选 |
 | `GET /metadata/schemas/{id}/links` | 发现正反方向，按 Link ID 与 direction 定位 |
 
-`GET current` 和 `GET resolve` 是内部服务凭据唯一可访问的业务路径；必须同时提供 `X-Tenant-ID`。该凭据不能编辑、发布、读取草稿或替代普通用户授权。JSON `etag` 为裸摘要，HTTP `ETag` 和 `If-Match` 使用双引号包围摘要。
+`GET current` 和 `GET resolve` 是内部服务凭据唯一可访问的业务路径；必须同时提供 `X-Tenant-ID`。内部身份核对及权限决策分别通过受服务凭据保护的 `/internal/identity/session`、`/internal/authorization/decision` 提供给 Data。服务凭据不能编辑、发布、读取草稿或替代普通用户授权。JSON `etag` 为裸并发凭证，HTTP `ETag` 和 `If-Match` 使用双引号包围凭证。
 
 组织及定义列表默认100条、最多200条，使用返回的 `nextCursor` 作为下一次 `after`。这与 Data 的查询游标分别处理。
 
@@ -60,6 +72,8 @@ go run ./cmd/server
 
 `go test ./...` 覆盖名称归一、定义/类型校验、身份隔离、错误关闭、并发凭证及 Data 操作确认。设置 `METADATA_TEST_DSN` 可运行真实 MySQL 测试，显式应用本模块迁移，并以随机租户验证生命周期、失败恢复、outbox 去重、中文名称多轮往返修改、同操作并发恢复和结构变更拒绝；测试不会删除既有数据。
 
+设置 `IDENTITY_TEST_DSN` 运行身份管理的真实 MySQL 生命周期测试，额外设置 `IDENTITY_TEST_OPA_URL` 可连接真实 OPA；覆盖账号隔离、会话吊销、策略草稿/生效、审计、登录限流及并发管理员保护。管理员标记只开放租户内管理，不自动授予业务数据权限；初始管理员通过显式角色获得业务授权。当前仅提供本地账号和受限角色策略，外部身份目录、用户组、委托管理、逐行掩码和完整调用授权仍未交付。
+
 发布操作身份独立于候选内容摘要：A→B→A 的最后一步创建新操作，只有候选已与当前内容相同时才清理相同草稿并幂等返回已有成功操作。并发重试按持久阶段推进，较早网络请求的迟到失败不能覆盖已提交或成功状态。
 
-当前生命周期为草稿与生效态；停用、删除、移动定义、结构性迁移及运行调用尚未开放。已生效定义只接受保留绑定身份的展示元数据修改，实例存储能力由 Data 再次认证。outbox 当前仅持久记录，没有消费者。发布故障须通过同一接口/凭证显式恢复；跨服务自动恢复及进行中操作的即时撤权尚未验收。
+当前定义生命周期为草稿与生效态；定义停用、删除、移动、结构性迁移及运行调用尚未开放。已生效定义只接受保留绑定身份的展示元数据修改，实例存储能力由 Data 再次认证。outbox 当前仅持久记录，没有消费者。发布故障须通过同一接口和已保存的并发凭证显式恢复；跨服务自动恢复及进行中操作的即时撤权尚未验收。
