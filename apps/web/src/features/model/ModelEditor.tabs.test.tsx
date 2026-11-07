@@ -35,6 +35,7 @@ function fixture(initial = schema(), entries = [initial]) {
   const api = {
     listGroups: vi.fn().mockResolvedValue([{ id: 'group', categoryId: 'production', tenantId: 'tenant', name: '基础资料' }]),
     listDataSources: vi.fn().mockResolvedValue([]), listSourceTables: vi.fn().mockResolvedValue([]),
+    getSchemaStorageMapping: vi.fn().mockResolvedValue({ schemaId: initial.definition.id, definitionETag: initial.etag, managed: true, mode: 'schema_2_db', primary: { dataSourceName: '平台默认存储', driver: 'mysql', namespace: 'data', table: 'entities', keyColumn: 'id' }, properties: [] }),
     saveDraft: vi.fn().mockImplementation(async (_id, definition) => ({ ...initial, definition, etag: 'saved' })),
   }
   const props = {

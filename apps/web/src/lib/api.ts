@@ -2,7 +2,7 @@ import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
-  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult,
+  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SchemaStorageMapping,
   SchemaLink, LinkInstance,
 } from './types'
 
@@ -200,6 +200,9 @@ export class ApiClient {
   }
   async listDataSources(signal?: AbortSignal, selectable = false): Promise<DataSource[]> {
     return (await this.request<Page<DataSource>>(`/api/data/sources${selectable ? '?view=select' : ''}`, { signal })).data
+  }
+  getSchemaStorageMapping(schemaId: string, signal?: AbortSignal): Promise<SchemaStorageMapping> {
+    return this.request(`/api/data/schemas/${encodeURIComponent(schemaId)}/storage-mapping`, { signal })
   }
   createDataSource(input: DataSourceInput): Promise<DataSource> {
     return this.request('/api/data/sources', { method: 'POST', body: input })

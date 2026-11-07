@@ -69,6 +69,7 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
   const currentFunctions = activeEntries(authorizedEntries, 'function')
   const allowAppend = locked && !!definition.schema?.storageBinding && definition.schema.mode === 'schema_2_db'
   const currentLink = (currentEntries ?? entries).find((entry) => entry.definition.id === definition.id && entry.status === 'active')
+  const currentSchema = definition.schema ? currentLink ?? (record?.status === 'active' ? record : undefined) : undefined
   const linkStorageLocked = locked && !!(currentLink?.definition.link?.storageBinding ?? (record?.status === 'active' ? record.definition.link?.storageBinding : !currentEntries ? initialRecord?.definition.link?.storageBinding : undefined))
 
   function panelProps(id: EditorTab) {
@@ -224,8 +225,8 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
         </section>
         {definition.schema && <>
           <section className="model-editor-panel" {...panelProps('properties')}>
+          <SchemaStorageEditor section="mappings" api={api} schema={definition.schema} locked={locked} active={active && tab === 'properties'} currentId={locked ? definition.id : undefined} currentETag={currentSchema?.etag} draft={record?.status !== 'active'} onSources={onSources} onChange={(schema) => update({ schema })} />
           <PropertyEditor title="对象属性" properties={definition.schema.properties} locked={locked} allowAppend={allowAppend} enums={currentEnums} allowEnumBinding={false} maxProperties={MAX_SCHEMA_PROPERTIES} onChange={(properties) => update({ schema: { ...definition.schema!, properties, indexes: (definition.schema!.indexes ?? []).filter((index) => index.fieldIds.every((id) => properties.some((property) => property.id === id))) } })} />
-          <SchemaStorageEditor section="mappings" api={api} schema={definition.schema} locked={locked} active={active} onChange={(schema) => update({ schema })} />
           </section>
           <section className="model-editor-panel" {...panelProps('indexes')}><div className="model-section-heading"><div><h3>索引</h3><p className="muted">最多 {MAX_SCHEMA_INDEXES} 个普通或唯一索引，每个索引最多组合两个属性。长文本和超长文本不支持索引。</p></div>{!locked && <button type="button" className="button subtle" disabled={!definition.schema.properties.some((property) => property.id && property.dataType !== 'text' && property.dataType !== 'longtext') || (definition.schema.indexes?.length ?? 0) >= MAX_SCHEMA_INDEXES} onClick={() => update({ schema: { ...definition.schema!, indexes: [...definition.schema!.indexes ?? [], { id: '', name: '', unique: false, fieldIds: [] }] } })}><Plus size={15} />添加索引</button>}</div>
             {definition.schema.properties.some((property) => !property.id) && <div className="notice model-index-hint">新增属性需先保存草稿，再在此选择属性建立索引。</div>}

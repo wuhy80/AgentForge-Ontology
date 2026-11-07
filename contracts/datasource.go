@@ -70,3 +70,34 @@ type DataSourceTestResult struct {
 	Success       bool   `json:"success"`
 	ServerVersion string `json:"serverVersion"`
 }
+
+// SchemaStorageMapping describes the current effective definition's physical
+// mapping and the columns observed in the database catalog. It contains no
+// connection credentials and does not change the definition or database.
+type SchemaStorageMapping struct {
+	SchemaID       string                   `json:"schemaId"`
+	DefinitionETag string                   `json:"definitionETag"`
+	Managed        bool                     `json:"managed"`
+	Mode           string                   `json:"mode"`
+	Primary        StorageMappingTable      `json:"primary"`
+	Properties     []StoragePropertyMapping `json:"properties"`
+}
+
+type StorageMappingTable struct {
+	DataSourceID   string `json:"dataSourceId,omitempty"`
+	DataSourceName string `json:"dataSourceName"`
+	Driver         string `json:"driver"`
+	Namespace      string `json:"namespace"`
+	Table          string `json:"table"`
+	KeyColumn      string `json:"keyColumn"`
+	TenantColumn   string `json:"tenantColumn,omitempty"`
+}
+
+type StoragePropertyMapping struct {
+	StorageMappingTable
+	PropertyID   string `json:"propertyId"`
+	PropertyName string `json:"propertyName"`
+	Column       string `json:"column"`
+	DatabaseType string `json:"databaseType"`
+	Exists       bool   `json:"exists"`
+}

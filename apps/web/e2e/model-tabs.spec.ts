@@ -36,6 +36,15 @@ async function fixture(page: Page) {
     if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
     if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'] })
     if (path === '/api/data/sources') return reply({ data: [], hasMore: false })
+    const mappingTarget = path.match(/^\/api\/data\/schemas\/([^/]+)\/storage-mapping$/)
+    if (mappingTarget) {
+      const record = current.find((entry) => entry.definition.id === mappingTarget[1] && entry.definition.schema)
+      if (!record) return reply({ code: 'not_found', message: '未找到对象' }, 404)
+      const primary = { dataSourceName: '平台默认存储', driver: 'mysql', namespace: 'fixture_data', table: 'af_s_fixture_equipment', keyColumn: 'id', tenantColumn: 'tenant_id' }
+      return reply({ schemaId: record.definition.id, definitionETag: record.etag, managed: true, mode: 'schema_2_db', primary,
+        properties: record.definition.schema!.properties.map((property) => ({ ...primary, propertyId: property.id, propertyName: property.name, column: 'f_fixture_name', databaseType: 'varchar(255)', exists: true })),
+      })
+    }
     if (path === '/api/metadata/categories') return reply({ data: [{ id: 'production', tenantId, name: '生产管理' }, { id: 'quality', tenantId, name: '质量管理' }], hasMore: false })
     if (path === '/api/metadata/groups') {
       const categoryId = url.searchParams.get('categoryId')
@@ -71,6 +80,11 @@ test('对象页签保留编辑、整份保存并导航相关关系和跨分类�
   await editor.getByLabel('业务名称', { exact: true }).fill('生产设备台账')
   await editor.getByRole('tab', { name: '属性配置', exact: true }).click()
   await expect(editor.getByLabel('对象属性第1项名称')).toHaveValue('设备名称')
+  const mapping = editor.getByRole('table', { name: '当前生效的数据库映射', exact: true })
+  await expect(mapping.getByRole('cell', { name: '平台默认存储', exact: true })).toBeVisible()
+  await expect(mapping.getByRole('cell', { name: 'af_s_fixture_equipment', exact: true })).toBeVisible()
+  await expect(mapping.getByRole('cell', { name: 'f_fixture_name', exact: true })).toBeVisible()
+  await expect(mapping.getByRole('cell', { name: 'varchar(255)', exact: true })).toBeVisible()
   await editor.getByRole('tab', { name: '索引信息', exact: true }).click()
   await expect(editor.getByLabel('索引1名称')).toHaveValue('名称索引')
   await editor.getByRole('tab', { name: '基础信息', exact: true }).click()

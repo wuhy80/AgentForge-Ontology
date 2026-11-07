@@ -152,7 +152,9 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 	schemaID := draft.Definition.ID
 	definitionURL := metaSrv.URL + "/metadata/definitions/" + schemaID
 	instancesURL := dataSrv.URL + "/data/schemas/" + schemaID + "/instances"
+	mappingURL := dataSrv.URL + "/data/schemas/" + schemaID + "/storage-mapping"
 	h.request("GET", definitionURL, admin, "", nil, 404, nil)
+	h.request("GET", mappingURL, admin, "", nil, 404, nil)
 	h.request("POST", metaSrv.URL+"/metadata/definitions", admin, "", c.Definition{CategoryID: category.ID, GroupID: group.ID, Kind: c.KindEnum, Name: "设备", Enum: &c.Enum{Values: []c.EnumValue{{Code: "A", Label: "甲"}}}}, 409, nil)
 	h.request("GET", definitionURL, other, "", nil, 404, nil)
 
@@ -166,6 +168,7 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 		t.Fatal("failed activation reopened data gate")
 	}
 	h.request("POST", instancesURL, admin, "", c.WriteRequest{Values: map[string]json.RawMessage{codeID: raw("PUMP-000")}, IdempotencyKey: c.NewID()}, 409, nil)
+	h.request("GET", mappingURL, admin, "", nil, 409, nil)
 	failActivation.Store(false)
 	var pub c.Publication
 	h.request("POST", definitionURL+"/publish", admin, draftHeaders.Get("ETag"), nil, 200, &pub)
@@ -176,6 +179,23 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 	h.request("GET", definitionURL, admin, "", nil, 200, &current)
 	if current.Definition.ID != schemaID || current.Status != "active" {
 		t.Fatal("wrong current definition")
+	}
+
+	t.Log("effective physical mapping uses current definition and real catalog with independent author permissions")
+	h.request("GET", mappingURL, "", "", nil, 401, nil)
+	h.request("GET", mappingURL, reader, "", nil, 403, nil)
+	h.request("GET", mappingURL, other, "", nil, 404, nil)
+	var mapping c.SchemaStorageMapping
+	mappingHeaders := h.request("GET", mappingURL, admin, "", nil, 200, &mapping)
+	if mappingHeaders.Get("Cache-Control") != "no-store" || mapping.SchemaID != schemaID || mapping.DefinitionETag != current.ETag || !mapping.Managed || len(mapping.Properties) != len(current.Definition.Schema.Properties) {
+		t.Fatal("mapping must describe only the current active schema without a shared cache")
+	}
+	for _, property := range mapping.Properties {
+		var databaseType string
+		err := de.DB().QueryRowContext(ctx, "SELECT column_type FROM information_schema.columns WHERE table_schema=? AND table_name=? AND column_name=?", property.Namespace, property.Table, property.Column).Scan(&databaseType)
+		if err != nil || !property.Exists || property.DatabaseType != databaseType || property.DataSourceName != "平台默认存储" {
+			t.Fatal("mapping column must exist in the actual database catalog with the reported type")
+		}
 	}
 
 	t.Log("typed instance persistence, idempotency, unique keys, ETags and outbox")

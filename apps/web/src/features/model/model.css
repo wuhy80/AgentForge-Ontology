@@ -114,6 +114,13 @@
 .model-mapping-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; }
 .model-mapping-grid label { min-width: 0; }
 .model-mapping-warning { margin: 8px 0 0; color: #a27b3f; font-size: 11px; }
+.model-effective-mapping { display: grid; gap: 10px; min-width: 0; }
+.model-mapping-location { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0; color: #617567; font-size: 11px; }
+.model-mapping-location code { overflow-wrap: anywhere; }
+.model-effective-mapping-table table { min-width: 760px; }
+.model-effective-mapping-table th, .model-effective-mapping-table td { padding: 7px 10px; font-size: 11px; vertical-align: middle; }
+.model-effective-mapping-table td { max-width: 280px; overflow-wrap: anywhere; }
+.model-effective-mapping-table td code { font-size: 10px; }
 .model-editor-meta { display: flex; align-items: center; gap: 8px; }
 .model-editor-tabs { display: flex; gap: 5px; min-width: 0; max-width: 100%; overflow-x: auto; border-bottom: 1px solid #e3eae1; }
 .model-editor-tabs > button { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 11px 15px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #78877c; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }

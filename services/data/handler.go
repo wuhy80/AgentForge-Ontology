@@ -69,6 +69,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("POST /internal/publications/prepare", h.prepare)
 	mux.HandleFunc("POST /internal/publications/activate", h.activate)
 	mux.HandleFunc("POST /internal/publications/preview", h.preview)
+	mux.HandleFunc("GET /data/schemas/{schemaId}/storage-mapping", h.storageMappingHTTP)
 	mux.HandleFunc("POST /data/schemas/{schemaId}/instances", h.create)
 	mux.HandleFunc("GET /data/schemas/{schemaId}/instances/{entityId}", h.read)
 	mux.HandleFunc("PATCH /data/schemas/{schemaId}/instances/{entityId}", h.patch)

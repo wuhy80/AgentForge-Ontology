@@ -55,7 +55,7 @@ test('真实服务：分类、可重新发现的草稿、发布、精确查询�
   }
   await dialog.getByLabel('对象属性第3项总位数').fill('24')
   await dialog.getByLabel('对象属性第3项小数位').fill('4')
-  await dialog.locator('tbody tr').nth(3).getByLabel('允许空值').check()
+  await dialog.locator('.model-properties-table tbody tr').nth(3).getByLabel('允许空值').check()
   await dialog.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(dialog.getByText('草稿已保存。可以继续配置索引、预览存储计划或发布。')).toBeVisible()
   await dialog.getByRole('button', { name: '返回模型列表', exact: true }).click()

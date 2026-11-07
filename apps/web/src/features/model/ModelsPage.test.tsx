@@ -19,7 +19,8 @@ function client(initial = record()) {
     listGroups: vi.fn().mockResolvedValue(groups), getDraft: vi.fn().mockResolvedValue(initial),
     getCurrent: vi.fn().mockResolvedValue(initial), createCategory: vi.fn(), createGroup: vi.fn(),
     createDefinition: vi.fn(), saveDraft: vi.fn(), preview: vi.fn().mockResolvedValue({ operationId: 'preview', status: 'preview', statements: ['CREATE TABLE test (...)'] }),
-    publish: vi.fn(), getPublication: vi.fn(), listDataSources: vi.fn().mockResolvedValue([]), listSourceTables: vi.fn().mockResolvedValue([]), inspectSourceTable: vi.fn(),
+    publish: vi.fn(), getPublication: vi.fn(), listDataSources: vi.fn().mockResolvedValue([]), listSourceTables: vi.fn().mockResolvedValue([]), inspectSourceTable: vi.fn().mockResolvedValue({ columns: [], indexes: [] }),
+    getSchemaStorageMapping: vi.fn().mockResolvedValue({ schemaId: initial.definition.id, definitionETag: initial.etag, managed: !initial.definition.schema?.storageBinding, mode: 'schema_2_db', primary: { dataSourceName: '平台默认存储', driver: 'mysql', namespace: 'data', table: 'entities', keyColumn: 'id' }, properties: [] }),
   }
 }
 function mount(api: ReturnType<typeof client>, entries = [record()]) {
@@ -82,6 +83,7 @@ describe('模型工作流', () => {
     initial.definition.schema!.storageBinding = { dataSourceId: 'source-a', table: 'equipment', idColumn: 'id' }
     initial.definition.schema!.properties[0].mapping = { dataSourceId: 'source-a', column: 'equipment_name' }
     const api = client(initial)
+    api.listSourceTables.mockResolvedValue([{ namespace: 'business', name: 'equipment', type: 'table' }, { namespace: 'business', name: 'changed_table', type: 'table' }])
     api.inspectSourceTable.mockResolvedValue({ namespace: 'business', name: 'equipment', signature: 'snapshot', indexes: [], columns: [
       { name: 'id', databaseType: 'bigint', dataType: 'int64', nullable: false, primaryKey: true, generated: false, position: 1 },
       { name: 'equipment_name', databaseType: 'varchar(255)', dataType: 'string', nullable: true, primaryKey: false, generated: false, position: 2 },
@@ -99,7 +101,7 @@ describe('模型工作流', () => {
     api.inspectSourceTable.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
     await selectTab(editor, '基础信息')
     await userEvent.click(within(editor).getByRole('button', { name: '从主表读取属性' }))
-    fireEvent.change(within(editor).getByLabelText('主表名称'), { target: { value: 'changed_table' } })
+    await userEvent.selectOptions(within(editor).getByLabelText('主表选择'), JSON.stringify(['business', 'changed_table']))
     await act(async () => finish({ namespace: 'business', name: 'equipment', columns: [], indexes: [], signature: 'late' }))
     expect((within(editor).getByLabelText('主表名称') as HTMLInputElement).value).toBe('changed_table')
     expect((within(editor).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备名称')

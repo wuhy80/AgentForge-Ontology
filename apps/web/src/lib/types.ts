@@ -92,6 +92,30 @@ export interface SourceColumn {
 export interface SourceIndex { name: string; unique: boolean; primary: boolean; columns: string[]; predicate?: string }
 export interface SourceTable { namespace: string; name: string; columns: SourceColumn[]; indexes: SourceIndex[]; signature: string }
 export interface SourceTestResult { success: boolean; serverVersion: string }
+export interface StorageMappingTable {
+  dataSourceId?: string
+  dataSourceName: string
+  driver: string
+  namespace: string
+  table: string
+  keyColumn: string
+  tenantColumn?: string
+}
+export interface StoragePropertyMapping extends StorageMappingTable {
+  propertyId: string
+  propertyName: string
+  column: string
+  databaseType: string
+  exists: boolean
+}
+export interface SchemaStorageMapping {
+  schemaId: string
+  definitionETag: string
+  managed: boolean
+  mode: string
+  primary: StorageMappingTable
+  properties: StoragePropertyMapping[]
+}
 export interface EnumValue { code: string; label: string; deprecated?: boolean }
 export interface Enum { values: EnumValue[] }
 export interface Link {

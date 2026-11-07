@@ -31,6 +31,7 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `GET/POST /data/sources`、`GET/PUT /data/sources/{id}` | 管理员维护租户数据源；PUT 必须强 If-Match；`view=select` 提供模型作者可选摘要 |
 | `POST /data/sources/test`、`POST /data/sources/{id}/test` | 管理员测试未保存参数或已保存的加密凭据 |
 | `GET /data/sources/{id}/tables`、`GET /data/sources/{id}/tables/{table}` | 只读表、列及索引目录；可选 namespace 参数 |
+| `GET /data/schemas/{schemaId}/storage-mapping` | 按对象 `definition.edit` 授权读取当前生效的主表及逐属性物理映射，含实际目录的列类型、存在状态；不返回凭据或业务行 |
 | `POST /data/schemas/{schemaId}/instances` | 显式创建；必须提交幂等键 |
 | `GET /data/schemas/{schemaId}/instances/{entityId}` | 按当前行列授权读取 |
 | `PATCH`、`DELETE /data/schemas/{schemaId}/instances/{entityId}` | 必须携带最近读取结果的 `If-Match` |
