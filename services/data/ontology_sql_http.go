@@ -25,6 +25,8 @@ func (h *handler) registerOntologySQL(mux *http.ServeMux) {
 	mux.HandleFunc("POST /data/query/ontology-sql/analyze", noStore(h.analyzeOntologySQLHTTP))
 	mux.HandleFunc("POST /data/query/ontology-sql/complete", noStore(h.completeOntologySQLHTTP))
 	mux.HandleFunc("POST /data/query/ontology-sql/format", noStore(h.formatOntologySQLHTTP))
+	mux.HandleFunc("POST /data/query/ontology-sql/insert-field", noStore(h.insertOntologySQLFieldHTTP))
+	mux.HandleFunc("POST /data/query/ontology-sql/paths", noStore(h.queryPathsHTTP))
 	mux.HandleFunc("POST /data/query/ontology-sql", noStore(h.executeOntologySQLHTTP))
 }
 
@@ -139,6 +141,9 @@ func (h *handler) analyzeOntologySQL(r *http.Request, p c.Principal, req c.Ontol
 	out := sqlAnalysis(req, diagnostics)
 	if stmt == nil || len(diagnostics) > 0 {
 		return out, nil
+	}
+	if len(stmt.Joins) > 0 {
+		return h.analyzeRowOntologySQL(r, p, req, stmt)
 	}
 	current, err := h.resolveOntologySQLSource(r, p, stmt.SourceCategory, stmt.SourceSchema, req.DefaultCategoryID)
 	if err != nil {

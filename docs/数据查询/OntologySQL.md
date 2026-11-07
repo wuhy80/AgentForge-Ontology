@@ -1,6 +1,6 @@
 # OntologySQL：中文本体查询语言与统一查询计划
 
-状态：用户于2026-11-07确认按工作台方案开发。首批范围为单 Schema 只读文本、类型化参数、授权目录、诊断、补全和格式化，编译到现有 QuerySpec；本节首批语法按确认方案实施，后文 JOIN、聚合及关系文本继续是后续候选。实现与验证结果统一见[项目总览](../项目总览.md#当前实现与验证2026-11-06)。本文只维护文本语法、编译与诊断；页面、引导和补全交互见[查询工作台设计增量](可视化查询编辑器.md#ontologysql-工作台设计增量2026-11-07候选)，公共查询语义和执行边界唯一见 [DataSet](DataSet.md)，名称与身份规则见[组织与隔离](../组织与隔离.md)。
+状态：用户于2026-11-07确认按工作台方案开发。已实现只读文本、类型化参数、授权目录、诊断、补全、格式化及最多4条INNER JOIN LINK，统一编译到QuerySpec；完整目标中的LEFT、EXISTS、聚合、复杂关系文本仍为候选。实现与验证结果统一见[项目总览](../项目总览.md#当前实现与验证2026-11-06)。本文只维护文本语法、编译与诊断；页面、引导和补全交互见[查询工作台设计增量](可视化查询编辑器.md#ontologysql-工作台设计增量2026-11-07候选)，公共查询语义和执行边界唯一见 [DataSet](DataSet.md)，名称与身份规则见[组织与隔离](../组织与隔离.md)。
 
 ## 1. 方案选择
 
@@ -93,6 +93,7 @@ LIMIT 50;
 
 ```ebnf
 statement  = SELECT field { "," field } FROM source [ AS identifier ]
+             { JOIN LINK identifier ( "." identifier | VIA source DIRECTION ( OUT | IN ) ) AS identifier }
              [ WHERE expression ] [ ORDER BY field [ ASC | DESC ] ]
              [ LIMIT integer ] [ ";" ] EOF ;
 source     = identifier [ "." identifier ] ;
@@ -123,11 +124,34 @@ LIMIT 25;
 
 参数化前缀示例为 `WHERE STARTS_WITH("笔记"."标题", :标题前缀)`，参数面板独立填写字符串，用户无需在参数值中加单引号或 `%`。int64、decimal 的字面数字由服务端保留词法原值并按目标字段编码为十进制字符串；参数控件也保留字符串，不能经过 JavaScript Number。时间沿当前RFC3339及微秒约束，不擅自转成浏览器毫秒值。同名参数多次出现必须具有兼容类型；缺值可完成结构分析并提示待填写，执行必须完整绑定。空字符串、未填写和显式空值分别处理。
 
+### 当前INNER Link语法（2026-11-07）
+
+用户确认多模型路径辅助后，已补齐共享关联行计划、编译和执行闭环。实际支持以下两种写法，Link端点由定义确定，无需用户填写物理ON条件：
+
+```sql
+SELECT "设备"."设备编码", "工单"."编号", "产线"."编号"
+FROM "生产管理"."设备" AS "设备"
+JOIN LINK "设备"."工单" AS "工单"
+JOIN LINK "工单" VIA "生产管理"."工单产线" DIRECTION OUT AS "产线"
+WHERE "工单"."金额" >= :最低金额
+LIMIT 25;
+```
+
+短写的 `起点别名.方向入口` 仅在授权图内唯一时接受；歧义必须使用 `VIA 分类.Link主名 DIRECTION OUT/IN`。每个JOIN起点须已声明，目标须给不同别名，同类型可以通过新别名再次出现，支持反向和分支。未限定字段在当前所有角色内必须唯一；路径辅助会先按原作用域为已有未限定字段补别名，防止添加模型后改变原条件绑定。
+
+最多4条INNER Link、5个对象节点。单Schema查询继续允许已认证的跨来源投影，关联行只接受各对象主表属性；跨源/跨数据库、次表属性、LEFT、普通ON、both、关系属性、EXISTS和聚合明确拒绝。结果为独立关联行，保留一对多，不做隐式DISTINCT；稳定分页、授权和结果协议唯一见[DataSet关联行](DataSet.md#关联行查询增量2026-11-07)。以下完整关系导航及复杂语义示例继续标为候选，不因支持INNER而全部开放。
+
 ### Link 文本查询的分期
 
 第一阶段继续保留结果行“关联数据”入口，实际通过既有 `via` 查询；它支持从一个确定实例正向或反向读取终点实体，不能替代下面的全集 `JOIN LINK` 示例。`via` 的筛选、投影、排序只作用于返回端，并按终点身份去重；它不能保留任意根端投影、根端条件或多条路径产生的重复行。
 
 建议后续第二阶段单独定义“固定起点关系导航”的文本形态，要求有类型起点实例参数、明确方向和终点实体结果，再精确降低为 `via`。该形态的最终拼写待确认，不提前作为 `JOIN LINK` 的简写实现。若要开放本节后续的 `JOIN LINK`、相关 `EXISTS` 或聚合，应先扩展 DataSet 共用计划及结果模式，再同时落实编译、权限和分页；不能只扩展文本解析器。
+
+2026-11-07已落实“连续选择多个模型辅助生成多Link查询”，图搜索和路径采纳交互唯一维护在[查询编辑器](可视化查询编辑器.md#多模型与link路径辅助2026-11-07已实现)。当前INNER语法先于固定实例文本交付，依赖完整关联行计划及执行器，不借用固定起点 `via` 冒充多模型关系行。
+
+开放上述自动生成前，须先在DataSet共用计划中具备多别名扫描、显式Link展开、各作用域表达式、扁平投影及稳定路径行分页，并有区别于实体 `Instance[]` 的只读行结果描述。服务端同时完成Link和模型的查询授权发现、语法解析/中文绑定、参数类型与上下文检查、每个参与对象的行权限、关系权限、定义/映射gate及执行后重检；游标绑定完整路径、定义、权限和实际参数，不能继续沿用单一终点身份。能力声明只开放已认证的方向和存储组合，候选首批限定同数据源、同数据库的INNER关系，跨源和LEFT等另行认证。
+
+生成器输出的是引用中文名称及别名的OntologySQL草稿，服务端解析后才形成稳定ID的共同计划；名称变更、权限变化及关系映射失效仍可导致重新检查失败。无论通过确定图搜索还是可选AI提出路径，生成器都不能绕过编译执行能力、改写行数语义或直接下发底层厂商SQL。具体JOIN、去重与分页区别继续由下列章节及DataSet共同规则维护；本段不是新增HTTP协议或已实现能力声明。
 
 ## 4. Link 导航、多跳与前后关系
 
@@ -222,10 +246,17 @@ LIMIT 对应最终页大小；游标建议作为查询请求参数传递，沿�
 | 入口 | 首批协议 |
 | --- | --- |
 | `GET /data/query/context` | `categoryId/schemaId/search/cursor/limit` 可选过滤；limit默认30、最大50，返回 `models` 和可选 `nextCursor`。模型含分类、Schema稳定ID/中文名及授权字段；字段含类型、可空性、精度、`filterable/sortable`，不含物理映射或业务数据 |
-| `POST /data/query/ontology-sql/analyze` | 正文 `text/parameters/defaultCategoryId/requestId`，返回 `requestId/textHash/diagnostics/parameters/fields/ready`；完整可执行时含稳定ID的 `query`。缺参仍返回类型和出现范围，`provided=false/ready=false`，不读取业务行 |
+| `POST /data/query/ontology-sql/analyze` | 正文 `text/parameters/defaultCategoryId/requestId`，返回 `requestId/textHash/diagnostics/parameters/fields/ready`；完整可执行时含稳定ID的 `query`；关联查询还提供授权 `scope`，缺参时也可用于角色选择。缺参仍返回类型和出现范围，`provided=false/ready=false`，不读取业务行 |
 | `POST /data/query/ontology-sql/complete` | 同上并提交从0开始的UTF-16 `cursorOffset`；返回 `items`，每项含 `label/insertText/detail/kind/range`。容忍未完成语法，最多50项；仅使用授权模型与字段，WHERE/ORDER按实际能力过滤 |
 | `POST /data/query/ontology-sql/format` | 同一词法/语法前端格式化，返回 `text/diagnostics/requestId/textHash`；字符串、标识符、注释保留，不完整语句不通过删除片段修复 |
-| `POST /data/query/ontology-sql` | 正文与analyze相同；检查完整且参数齐全才执行，返回原QueryResult的 `data/fields/hasMore/nextCursor`，附加实际绑定的 `query/requestId/textHash`。后续页携带此query及游标提交既有 `/data/query`，继续重新授权 |
+| `POST /data/query/ontology-sql` | 正文与analyze相同；检查完整且参数齐全才执行，返回QueryResult的 `data/fields/hasMore/nextCursor`，关联查询另有 `rowMode/rows`，附加实际绑定的 `query/requestId/textHash`。后续页携带此query及游标提交既有 `/data/query`，继续重新授权 |
+
+路径及字段辅助均为POST只读编辑接口，使用同一会话/CSRF校验，响应 `no-store`：
+
+- `/data/query/ontology-sql/paths`：输入原请求及 `targetSchemaId`；返回 `requestId/textHash/candidates/diagnostics/truncated`。候选包含接入 `fromAlias`、每步 `linkId/name/category/direction/fromAlias/toAlias/target` 和完整新 `text`。从所有已声明角色查找全局最短授权路径，最多4条总JOIN、20个候选、500次边扩展；预算耗尽不返回任意部分候选。无路径、无权、原稿无效均保留原稿，不猜同名字段关联。
+- `/data/query/ontology-sql/insert-field`：输入原请求及 `schemaId/fieldId/alias/selectionFrom/selectionTo`；返回 `requestId/textHash/text/from/to/diagnostics`。多角色须明确alias，范围用UTF-16；完整解析绑定后安全添加SELECT并去重，保留筛选、排序及独立参数，注释/字面值等不安全位置不改稿。
+
+路径规划只读取当前授权定义，不访问业务行或预先验证物理目录；执行器重新核验来源启用状态、实际目录和发布gate。候选文本不持有额外权限，采纳后仍须重新分析；前端核对原文摘要和请求代次后才允许采纳。以上实际结构唯一见 [row_query.go](../../contracts/row_query.go)。
 
 `parameters` 是按名称传递的JSON标量对象；int64/decimal必须使用字符串，boolean使用JSON布尔值，文本/UUID/时间使用字符串，合法位置的空值使用JSON null。省略某个键表示未提供，空字符串是已提供的文本值；不把数组参数展开为IN集合。同名参数的类型、精度及全部使用位置必须兼容，未使用的实参明确拒绝。文本最多64KiB、8192个token、64个命名参数；投影和IN集合最多100项，筛选节点最多100、嵌套最多10层，LIMIT默认25、范围1..100。目录读取另有1000项扫描预算，要求缩小范围后重试。
 
@@ -233,7 +264,7 @@ LIMIT 对应最终页大小；游标建议作为查询请求参数传递，沿�
 
 目录以当前调用者身份读取Metadata公开目录，叠加 `instance.query` 与 `readFields` 生成，不用服务身份列目录。显式FROM的名称解析随后也检查定义可发现性及当前查询授权。格式化只处理调用者提交的文本，不解析隐藏目录；analyze、context和complete不查询业务表、样例或COUNT。物理目录、gate、实际来源及授权状态在执行时仍按共用执行器重新核验，分析通过不能代替运行时检查。
 
-以下继续描述完整方案；其中计划预览、多跳、聚合、持久缓存等为后续候选，不能从上表接口可用推断为已开放。
+以下继续描述完整方案；其中计划预览、复杂关系、聚合、持久缓存等为后续候选，不能从上表接口可用推断为已开放。
 
 建议 Data 服务内部增加文本前端，不新增独立查询服务或执行通道。编译步骤为：完整解析单条语句并保留源码位置 → 按可信租户及作用域绑定名称/ID → 检查类型、单位、参数及操作权限 → 降低为 QuerySpec → 执行统一能力/预算校验及优化 → 生成数据库 SQL 或受控批量计划。SDK/JSON 也通过同一校验器，外部提交的 IR 或已绑定对象同样不被直接信任。
 
@@ -263,7 +294,7 @@ SQL 文本解析和语义绑定可缓存，但绑定及执行计划须按租户�
 
 ## 8. 验收与待定事项
 
-以下覆盖完整目标；首批单Schema子集已有模块及真实MySQL/OPA验证，JOIN、聚合、多跳、缓存与性能继续待验收，具体结果见项目总览。
+以下覆盖完整目标；单Schema与有界INNER Link已有模块及真实数据库验证，复杂关系、聚合、缓存与性能继续待验收，具体结果见项目总览。
 
 | 编号 | 要求 | 验收方法 |
 | --- | --- | --- |
@@ -274,7 +305,7 @@ SQL 文本解析和语义绑定可缓存，但绑定及执行计划须按租户�
 | OSQL-05 | 只读、参数化及预算在所有入口成立 | 多语句/写语句/物理表访问拒绝，参数和名称不能注入 SQL；复杂文本及小页高扇出受控失败，无物理 SQL 兜底通道 |
 | OSQL-06 | 绑定身份、当前态和权限一致 | 改名、同名重建、原文重编译、缓存失效及参数变化不误绑/漏成员；依赖或权限失效明确拒绝，旧绑定不运行历史定义 |
 | OSQL-07 | 预览与性能结论有相同语义基线 | 预览不执行业务扫描，三种编写入口复用当前校验；分阶段报告解析/绑定/编译/执行成本，不将文档或单例等价当作三库性能通过 |
-| OSQL-08 | 首批文本与现有实体QuerySpec精确等价 | 比较基础SELECT、参数、NULL/集合、精确数值、默认/显式排序与分页；拒绝星号、列别名、字段间比较、JOIN/聚合及尾部多语句，不丢弃未支持片段 |
+| OSQL-08 | 实体与关联行文本分别降低为等价QuerySpec | 比较基础SELECT、参数、NULL/集合、精确数值及分页；INNER Link比较多角色、反向/自关联/分支、主表限制、路径候选及保留重复行；拒绝星号、列别名、字段间比较、普通JOIN/LEFT/聚合及尾部多语句，不丢弃未支持片段 |
 | OSQL-09 | 查询上下文、补全与源码诊断准确受控 | 不完整语句可补全；候选随分类、别名、字段类型/主表能力及当前权限变化，不泄露隐藏目录或扫描业务值；UTF-16范围覆盖中文/emoji/CRLF，旧响应被拒绝 |
 
-第一阶段单Schema文本、参数、诊断/补全、引导和可视化子集完整转换已按用户确认方案落实；实际验证以项目总览为准。第二阶段待明确固定起点关系文本，后续再扩共享计划的JOIN、EXISTS及聚合。待定：固定起点关系拼写、扁平行/聚合节点、三库能力、持久查询、缓存及性能目标。
+单Schema文本与最多4条INNER Link关联行已按用户确认方案落实，实际验证以项目总览为准。固定起点关系文本、EXISTS、聚合、复杂关系、三库能力、持久查询、缓存及性能目标继续待定。

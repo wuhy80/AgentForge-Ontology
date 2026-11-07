@@ -56,7 +56,7 @@ function literal(value: JsonValue, field: Property): string {
 }
 
 export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue: (value: JsonValue, field: Property, op: string) => string = literal): string {
-  if (query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询不属于可转换的单模型查询');
+  if (query.rows || query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询不属于可转换的单模型查询');
   const reference = (id?: string) => {
     const field = model.fields.find((item) => item.id === id);
     if (!field) throw new Error('查询包含当前不可见的属性，请重新选择');
@@ -105,7 +105,7 @@ export function queryToSQLDraft(query: QuerySpec, model: QueryContextModel): { t
 }
 
 export function queryToEditor(query: QuerySpec, model: QueryContextModel): QueryEditor {
-  if (query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询无法完整表示为当前的可视化单模型查询');
+  if (query.rows || query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询无法完整表示为当前的可视化单模型查询');
   let count = 0;
   function visit(expression: Expression, depth = 0): FilterNode {
     if (++count > 85 || depth > 6) throw new Error('条件数量或嵌套超过可视化编辑器的完整表达范围，请继续使用 OntologySQL');

@@ -43,6 +43,7 @@ type OntologySQLAnalysis struct {
 	Parameters  []SQLParameter  `json:"parameters"`
 	Fields      []Property      `json:"fields"`
 	Query       *QuerySpec      `json:"query,omitempty"`
+	Scope       *RowQuery       `json:"scope,omitempty"`
 	Ready       bool            `json:"ready"`
 }
 

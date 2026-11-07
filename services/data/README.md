@@ -37,7 +37,8 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `PATCH`、`DELETE /data/schemas/{schemaId}/instances/{entityId}` | 必须携带最近读取结果的 `If-Match` |
 | `POST /data/query` | 中文名称或稳定 ID 绑定、类型化筛选、投影、排序和签名游标 |
 | `GET /data/query/context` | 按当前目录及实例查询权限返回最小模型/字段能力，支持分类、模型、搜索及分页 |
-| `POST /data/query/ontology-sql/analyze`、`complete`、`format` | 单 Schema OntologySQL 检查、参数推断、UTF-16诊断、上下文补全及格式化；不扫描业务数据 |
+| `POST /data/query/ontology-sql/analyze`、`complete`、`format` | 单Schema及最多4条INNER Link的OntologySQL检查、参数推断、UTF-16诊断、上下文补全及格式化；不扫描业务数据 |
+| `POST /data/query/ontology-sql/paths`、`insert-field` | 只读授权路径候选及多角色字段插入，保留筛选与参数；不读取业务行 |
 | `POST /data/query/ontology-sql` | 编译为稳定ID的QuerySpec并进入同一执行器，返回原查询结果及实际绑定的query供续页 |
 | `POST /internal/publications/preview` | 只读结构预览；正文为 `contracts.PrepareRequest` |
 | `POST /internal/publications/prepare` | 持久关闭受影响 Schema 入口、等待已入场事务排空、执行并核验物理计划 |
@@ -56,6 +57,12 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 能力响应中 `operations` 表示默认存储；`mappedOperations` 为 `read/query`，`sourceDrivers` 为 `mysql/postgresql`，`mappedUpdates` 为 `nullable-fields-and-indexes`。`crossSourceProjection` 为真，`crossSourceConditions` 与 `crossSourceTransactions` 为假；客户端应结合 Schema 是否具有 `storageBinding` 决定可用操作。
 
 默认存储迁入专用来源使用[独立离线工具](../../tools/storage_relocation/README.md)，没有公开重绑接口，也不在启动或普通请求中执行。Data 负责校验来源与目标归属、整批关闭 gate 并排空已准入事务、复用映射 DDL 编译器复制及逐字段核验，最后由协调器在 Metadata 提交并核验后整批激活。源表保留，目标已有不同内容时拒绝覆盖；完整范围、预算与恢复要求统一见[默认存储迁入专用源](../../docs/发布与迁移.md#默认存储迁入专用源2026-11-07)。迁移不开放显式来源实例写入；当前[个人知识库](../../docs/应用场景/个人知识库.md#配置复核与专用来源迁移当前)已沿此路径迁入专属数据库，导入器以保存清单做只读核对。
+
+## 关联行查询
+
+`QuerySpec.rows` 与 OntologySQL `JOIN LINK` 共用同一执行器，最多4条INNER Link、5个对象节点；支持managed/junction/foreign_key、反向、分支、自关联别名。必须同数据源及同数据库，只允许各节点主表属性；不支持LEFT、任意ON、跨源、次表投影、关系属性或聚合。每节点租户/行列授权与每条Link的发现和查询授权进入完整SQL，之后排序及LIMIT；游标绑定全部定义/授权/来源与目录摘要。`rowMode=true` 返回独立 `rows/fields`，保留每次节点绑定，不能将row ID用于实例接口。实际协议和共同语义见[DataSet](../../docs/数据查询/DataSet.md#关联行查询增量2026-11-07)。
+
+`GET /data/capabilities` 新增 `rowQueries=true/maxRowJoins=4/queryPathPlanning=true`；`maxLinkHops=1` 表示既有固定实例via接口，并非INNER关联行上限。路径规划仅查授权元数据，使用候选不跳过运行时物理和权限校验。
 
 ## 正确性与限制
 

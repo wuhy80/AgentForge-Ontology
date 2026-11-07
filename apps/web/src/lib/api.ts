@@ -5,6 +5,7 @@ import type {
   DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SchemaStorageMapping,
   SchemaLink, LinkInstance,
   QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
+  QueryPathsRequest, QueryPathsResult, QueryFieldInsertionRequest, QueryFieldInsertionResult,
 } from './types'
 
 export class ApiError extends Error {
@@ -261,6 +262,12 @@ export class ApiClient {
   }
   queryOntologySQL(request: OntologySQLRequest, signal?: AbortSignal): Promise<OntologySQLResult> {
     return this.request('/api/data/query/ontology-sql', { method: 'POST', body: request, signal })
+  }
+  planOntologySQLPaths(request: QueryPathsRequest, signal?: AbortSignal): Promise<QueryPathsResult> {
+    return this.request('/api/data/query/ontology-sql/paths', { method: 'POST', body: request, signal })
+  }
+  insertOntologySQLField(request: QueryFieldInsertionRequest, signal?: AbortSignal): Promise<QueryFieldInsertionResult> {
+    return this.request('/api/data/query/ontology-sql/insert-field', { method: 'POST', body: request, signal })
   }
   listLinkInstances(linkId: string, direction: 'out' | 'in', instanceId: string, cursor?: string, signal?: AbortSignal): Promise<Page<LinkInstance>> {
     const params = new URLSearchParams({ direction, instanceId, limit: '100' })

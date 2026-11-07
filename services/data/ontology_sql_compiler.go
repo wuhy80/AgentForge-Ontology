@@ -14,6 +14,7 @@ type ontologySQLBinder struct {
 	analysis       c.OntologySQLAnalysis
 	parameterIndex map[string]int
 	missing        bool
+	rowScope       *ontologySQLRowScope
 	nodes          int
 }
 
@@ -24,6 +25,9 @@ func (b *ontologySQLBinder) fail(code, message string, at c.SQLRange) {
 }
 
 func (b *ontologySQLBinder) field(field ontologySQLField) (c.Property, bool) {
+	if b.rowScope != nil {
+		return b.rowField(field)
+	}
 	if field.Qualifier != "" && ontologySQLNameKey(field.Qualifier) != ontologySQLNameKey(b.statement.Alias) {
 		b.fail("unknown_qualifier", "字段限定名与 FROM 中的模型别名不一致", field.Range)
 		return c.Property{}, false

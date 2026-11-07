@@ -1,4 +1,4 @@
-import { StrictMode, forwardRef, useImperativeHandle } from 'react';
+import { StrictMode, forwardRef, useImperativeHandle, useRef } from 'react';
 import { createHash } from 'node:crypto';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,8 +10,14 @@ vi.mock('./OntologySQLEditor', () => ({ default: forwardRef(function TestEditor(
   text: string; onChange: (text: string) => void; onRun: () => void; onComposition: (value: boolean) => void;
   onComplete: (text: string, cursor: number, signal: AbortSignal) => Promise<unknown>;
 }, ref) {
-  useImperativeHandle(ref, () => ({ insert: (text: string) => props.onChange(props.text + text), locate: vi.fn(), complete: () => props.onComplete(props.text, props.text.length, new AbortController().signal), focus: vi.fn() }));
-  return <textarea aria-label="OntologySQL 编辑器" value={props.text} onChange={(event) => props.onChange(event.target.value)} onCompositionStart={() => props.onComposition(true)} onCompositionEnd={() => props.onComposition(false)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') props.onRun(); }} />;
+  const input = useRef<HTMLTextAreaElement>(null);
+  useImperativeHandle(ref, () => ({
+    insert: (text: string) => props.onChange(props.text + text),
+    getSelection: () => ({ from: input.current?.selectionStart ?? 0, to: input.current?.selectionEnd ?? 0 }),
+    applyEdit: (edit: { text: string }) => props.onChange(edit.text),
+    locate: vi.fn(), complete: () => props.onComplete(props.text, props.text.length, new AbortController().signal), focus: vi.fn(),
+  }));
+  return <textarea ref={input} aria-label="OntologySQL 编辑器" value={props.text} onChange={(event) => props.onChange(event.target.value)} onCompositionStart={() => props.onComposition(true)} onCompositionEnd={() => props.onComposition(false)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') props.onRun(); }} />;
 }) }));
 
 const field = { id: 'amount', name: '金额', dataType: 'decimal' as const, precision: 24, scale: 6, nullable: true, filterable: true, sortable: true };
@@ -29,6 +35,7 @@ function makeApi(overrides: Record<string, unknown> = {}) {
     queryOntologySQL: vi.fn().mockImplementation(async (request: OntologySQLRequest) => ({ ...result, query, requestId: request.requestId!, textHash: hash(request.text) })),
     completeOntologySQL: vi.fn().mockImplementation(async (request: OntologySQLRequest) => ({ requestId: request.requestId, textHash: hash(request.text), items: [] })),
     formatOntologySQL: vi.fn().mockImplementation(async (request: OntologySQLRequest) => ({ requestId: request.requestId, textHash: hash(request.text), text: request.text, diagnostics: [] })),
+    planOntologySQLPaths: vi.fn().mockImplementation(async (request: OntologySQLRequest) => ({ requestId: request.requestId, textHash: hash(request.text), candidates: [], diagnostics: [], truncated: false })),
     query: vi.fn().mockResolvedValue(result), getInstance: vi.fn().mockResolvedValue(result.data[0]), ...overrides,
   } as unknown as ApiClient;
 }
@@ -39,6 +46,66 @@ function page(api: ApiClient, extra: Partial<Parameters<typeof QueryPage>[0]> = 
 async function inputSQL(value = text) { const input = await screen.findByRole('textbox', { name: 'OntologySQL 编辑器' }); fireEvent.change(input, { target: { value } }); return input; }
 
 describe('OntologySQL workspace', () => {
+  it('单击模型只浏览，双击或键盘生成 SQL，替换需要确认并且可以撤销', async () => {
+    const other = { ...model, schemaId: 'customers', name: '客户' };
+    const api = makeApi({ queryContext: vi.fn().mockResolvedValue({ models: [model, other] }) });
+    render(page(api));
+    const input = await screen.findByRole('textbox', { name: 'OntologySQL 编辑器' }) as HTMLTextAreaElement;
+    const order = await screen.findByRole('button', { name: /订单.*1.*属性/ });
+    fireEvent.click(order);
+    expect(input.value).toBe('');
+    fireEvent.doubleClick(order);
+    expect(input.value).toContain('FROM "业务"."订单" AS "订单"');
+    const original = input.value;
+    const customer = screen.getByRole('button', { name: /客户.*1.*属性/ });
+    fireEvent.doubleClick(customer);
+    expect(input.value).toBe(original);
+    await screen.findByRole('region', { name: '关联路径选择' });
+    fireEvent.click(screen.getByRole('button', { name: '保留原稿' }));
+    expect(input.value).toBe(original);
+    fireEvent.keyDown(customer, { key: 'Enter', shiftKey: true });
+    await screen.findByRole('region', { name: '关联路径选择' });
+    fireEvent.click(screen.getByRole('button', { name: '改为单模型查询' }));
+    fireEvent.click(screen.getByRole('button', { name: '替换 SQL' }));
+    expect(input.value).toContain('FROM "业务"."客户" AS "客户"');
+    fireEvent.click(screen.getByRole('button', { name: '撤销生成或插入' }));
+    expect(input.value).toBe(original);
+    expect(api.queryOntologySQL).not.toHaveBeenCalled();
+    expect(api.query).not.toHaveBeenCalled();
+  });
+  it('双击字段按实际别名追加 SELECT，单击和重复插入不改稿，保留筛选', async () => {
+    const title = { id: 'title', name: '标题', dataType: 'text' as const, filterable: true, sortable: false };
+    const api = makeApi({ queryContext: vi.fn().mockResolvedValue({ models: [{ ...model, fields: [field, title] }] }) });
+    render(page(api));
+    const source = 'SELECT "o"."金额"\nFROM "业务"."订单" AS "o"\nWHERE "o"."金额" > 0\nLIMIT 25;';
+    const input = await inputSQL(source) as HTMLTextAreaElement;
+    const button = await screen.findByRole('button', { name: '插入字段 标题' });
+    input.setSelectionRange(source.length, source.length);
+    fireEvent.click(button);
+    expect(input.value).toBe(source);
+    fireEvent.doubleClick(button);
+    expect(input.value).toContain('SELECT "o"."金额", "o"."标题"');
+    expect(input.value).toContain('WHERE "o"."金额" > 0');
+    const inserted = input.value;
+    input.setSelectionRange(inserted.length, inserted.length);
+    fireEvent.keyDown(button, { key: 'Enter' });
+    expect(input.value).toBe(inserted);
+    expect(api.queryOntologySQL).not.toHaveBeenCalled();
+  });
+  it('字段快捷插入保留输入中的稿件，并拒绝插入其他模型的字段', async () => {
+    const api = makeApi(); render(page(api));
+    const source = 'SELECT "金额" FROM "客户" LIMIT 25;';
+    const input = await inputSQL(source) as HTMLTextAreaElement;
+    const button = await screen.findByRole('button', { name: '插入字段 金额' });
+    fireEvent.doubleClick(button);
+    expect(input.value).toBe(source);
+    expect(screen.getByRole('status').textContent).toMatch(/模型|FROM/);
+    fireEvent.compositionStart(input);
+    fireEvent.doubleClick(button);
+    expect(input.value).toBe(source);
+    fireEvent.compositionEnd(input);
+    expect(api.queryOntologySQL).not.toHaveBeenCalled();
+  });
   it('defaults to SQL, uses only the authorized catalog, and works through StrictMode effect replay', async () => {
     const api = makeApi(); render(<StrictMode>{page(api)}</StrictMode>);
     expect(screen.getByRole('tab', { name: 'OntologySQL' }).getAttribute('aria-selected')).toBe('true');

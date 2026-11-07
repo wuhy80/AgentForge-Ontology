@@ -200,13 +200,19 @@ export interface Order { field: string; direction: 'asc' | 'desc' }
 export interface QuerySpec {
   from: Source
   via?: LinkTraversal
+  rows?: RowQuery
   where?: Expression
   select: string[]
   orderBy?: Order[]
   page: { limit: number; cursor?: string }
 }
 export interface Instance { id: string; schemaId: string; values: Values; etag: string }
-export interface QueryResult { data: Instance[]; fields: Property[]; nextCursor?: string; hasMore: boolean }
+export interface RowQueryNode { id: string; schemaId: string; alias: string }
+export interface RowQueryJoin { from: string; to: string; linkId: string; direction: 'out' | 'in' }
+export interface RowQuery { nodes: RowQueryNode[]; joins: RowQueryJoin[] }
+export interface QueryRowEntity { nodeId: string; schemaId: string; instanceId: string }
+export interface QueryRow { id: string; values: Values; entities: QueryRowEntity[] }
+export interface QueryResult { data: Instance[]; fields: Property[]; rowMode?: boolean; rows?: QueryRow[]; nextCursor?: string; hasMore: boolean }
 export interface SQLRange { from: number; to: number; line: number; column: number }
 export interface SQLDiagnostic { code: string; message: string; severity: 'error' | 'warning'; range: SQLRange }
 export interface SQLParameter {
@@ -216,7 +222,7 @@ export interface OntologySQLRequest {
   text: string; parameters?: Record<string, JsonValue>; defaultCategoryId?: string; requestId?: string; cursorOffset?: number
 }
 export interface OntologySQLAnalysis {
-  requestId: string; textHash: string; diagnostics: SQLDiagnostic[]; parameters: SQLParameter[]; fields: Property[]; query?: QuerySpec; ready: boolean
+  requestId: string; textHash: string; diagnostics: SQLDiagnostic[]; parameters: SQLParameter[]; fields: Property[]; query?: QuerySpec; scope?: RowQuery; ready: boolean
 }
 export interface SQLCompletion { label: string; insertText: string; detail: string; kind: string; range: SQLRange }
 export interface OntologySQLCompletions { requestId: string; textHash: string; items: SQLCompletion[] }
@@ -225,6 +231,12 @@ export interface OntologySQLResult extends QueryResult { query: QuerySpec; reque
 export interface QueryContextField extends Property { filterable: boolean; sortable: boolean }
 export interface QueryContextModel { schemaId: string; categoryId: string; category: string; name: string; fields: QueryContextField[] }
 export interface QueryContext { models: QueryContextModel[]; nextCursor?: string }
+export interface QueryPathsRequest extends OntologySQLRequest { targetSchemaId: string }
+export interface QueryPathStep { linkId: string; name: string; category: string; direction: 'out' | 'in'; fromAlias: string; toAlias: string; target: QueryContextModel }
+export interface QueryPathCandidate { id: string; fromAlias: string; steps: QueryPathStep[]; text: string }
+export interface QueryPathsResult { requestId: string; textHash: string; candidates: QueryPathCandidate[]; diagnostics: SQLDiagnostic[]; truncated: boolean }
+export interface QueryFieldInsertionRequest extends OntologySQLRequest { schemaId: string; fieldId: string; alias?: string; selectionFrom: number; selectionTo: number }
+export interface QueryFieldInsertionResult { requestId: string; textHash: string; text: string; from: number; to: number; diagnostics: SQLDiagnostic[] }
 export interface MetadataCapabilities {
   definitions: Kind[]
   lifecycle: string[]
@@ -250,6 +262,9 @@ export interface DataCapabilities {
   maxSortFields: number
   links: boolean
   ontologySQL: boolean
+  rowQueries?: boolean
+  maxRowJoins?: number
+  queryPathPlanning?: boolean
   batch: boolean
   calculatedProperties: boolean
 }

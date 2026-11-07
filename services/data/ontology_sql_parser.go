@@ -227,12 +227,17 @@ type ontologySQLExpression struct {
 type ontologySQLStatement struct {
 	SourceCategory, SourceSchema, Alias string
 	SourceRange                         c.SQLRange
+	Joins                               []ontologySQLJoin
 	Projection                          []ontologySQLField
 	Where                               *ontologySQLExpression
 	Order                               *ontologySQLField
 	Direction                           string
 	Limit                               int
 	Tokens                              []ontologySQLToken
+}
+type ontologySQLJoin struct {
+	FromAlias, Entry, Category, Name, Direction, Alias string
+	Range                                              c.SQLRange
 }
 type ontologySQLParser struct {
 	tokens       []ontologySQLToken
@@ -435,6 +440,36 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 	if p.accept("AS") {
 		s.Alias = p.identifier().Text
 	}
+	for p.accept("JOIN") && len(p.diagnostics) == 0 {
+		join := ontologySQLJoin{Range: p.tokens[p.index-1].Range}
+		p.expect("LINK")
+		join.FromAlias = p.identifier().Text
+		if p.accept(".") {
+			join.Entry = p.identifier().Text
+		} else {
+			p.expect("VIA")
+			name := p.identifier()
+			join.Name = name.Text
+			if p.accept(".") {
+				join.Category, join.Name = join.Name, p.identifier().Text
+			}
+			p.expect("DIRECTION")
+			if p.accept("OUT") {
+				join.Direction = "out"
+			} else if p.accept("IN") {
+				join.Direction = "in"
+			} else {
+				p.fail("invalid_link_direction", "DIRECTION 需要 OUT 或 IN", p.peek().Range)
+			}
+		}
+		p.expect("AS")
+		alias := p.identifier()
+		join.Alias, join.Range.To = alias.Text, alias.Range.To
+		s.Joins = append(s.Joins, join)
+		if len(s.Joins) > 4 {
+			p.fail("budget_exceeded", "关系行查询最多支持 4 个 Link", join.Range)
+		}
+	}
 	if p.accept("WHERE") {
 		s.Where = p.expr(0)
 	}
@@ -459,7 +494,7 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 	}
 	p.accept(";")
 	if p.peek().Kind != "eof" {
-		p.fail("unsupported_syntax", "首批仅支持单模型 SELECT；不支持额外语句、JOIN、聚合、列别名或 OFFSET", p.peek().Range)
+		p.fail("unsupported_syntax", "仅支持单条 SELECT 与 INNER JOIN LINK；不支持任意键 JOIN、聚合、列别名或 OFFSET", p.peek().Range)
 	}
 	if len(p.diagnostics) > 0 {
 		return nil, p.diagnostics
@@ -504,7 +539,7 @@ func formatOntologySQL(text string) (string, []c.SQLDiagnostic) {
 			}
 			continue
 		}
-		if t.Kind == "word" && (t.Text == "FROM" || t.Text == "WHERE" || t.Text == "ORDER" || t.Text == "LIMIT") {
+		if t.Kind == "word" && (t.Text == "FROM" || t.Text == "JOIN" || t.Text == "WHERE" || t.Text == "ORDER" || t.Text == "LIMIT") {
 			newline()
 		}
 		value := t.Raw

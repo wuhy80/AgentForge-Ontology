@@ -203,6 +203,7 @@ type WriteRequest struct {
 type QuerySpec struct {
 	From    Source         `json:"from"`
 	Via     *LinkTraversal `json:"via,omitempty"`
+	Rows    *RowQuery      `json:"rows,omitempty"`
 	Where   *Expression    `json:"where,omitempty"`
 	Select  []string       `json:"select"`
 	OrderBy []Order        `json:"orderBy,omitempty"`
@@ -241,6 +242,8 @@ type Page struct {
 type QueryResult struct {
 	Data       []Instance `json:"data"`
 	Fields     []Property `json:"fields"`
+	RowMode    bool       `json:"rowMode,omitempty"`
+	Rows       []QueryRow `json:"rows,omitempty"`
 	NextCursor string     `json:"nextCursor,omitempty"`
 	HasMore    bool       `json:"hasMore"`
 }

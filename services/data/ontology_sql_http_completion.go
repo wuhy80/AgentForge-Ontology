@@ -311,6 +311,35 @@ func (h *handler) completeOntologySQL(r *http.Request, p c.Principal, req c.Onto
 	if len(prior) >= 2 && prior[len(prior)-1].Text == "." && prior[len(prior)-2].Kind == "identifier" {
 		qualifier = prior[len(prior)-2].Text
 	}
+	rowModels, rowAliases, err := h.completionRowScopes(r, p, req.Text, req.DefaultCategoryID)
+	if err != nil {
+		return nil, err
+	}
+	if len(rowModels) > 0 {
+		for index, candidate := range rowModels {
+			if qualifier != "" && nameKey(qualifier) != nameKey(rowAliases[index]) {
+				continue
+			}
+			if clause != "SELECT" && clause != "WHERE" && clause != "ORDER BY" {
+				continue
+			}
+			for _, field := range candidate.Fields {
+				if clause == "WHERE" && !field.Filterable || clause == "ORDER BY" && !field.Sortable {
+					continue
+				}
+				insertion := sqlIdentifierReference(rowAliases[index], field.Name)
+				if qualifier != "" {
+					insertion = sqlQuotedIdentifier(field.Name)
+				}
+				add(field.Name, insertion, rowAliases[index]+" · "+field.DataType, "field")
+			}
+		}
+		if qualifier != "" {
+			return items, nil
+		}
+		// Continue keyword completion below without adding the root a second time.
+		model = nil
+	}
 	if qualifier != "" && (model == nil || nameKey(qualifier) != nameKey(alias)) {
 		return items, nil
 	}
@@ -364,4 +393,61 @@ func (h *handler) completeOntologySQL(r *http.Request, p c.Principal, req c.Onto
 		}
 	}
 	return items, nil
+}
+
+// Build only a complete FROM/JOIN prefix. An unfinished projection or WHERE
+// must not stop qualified field completion, and incomplete joins do not guess.
+func (h *handler) completionRowScopes(r *http.Request, p c.Principal, text, categoryID string) ([]c.QueryContextModel, []string, error) {
+	tokens := completionTokens(text)
+	start, end, hasJoin := -1, len(text), false
+	for _, token := range tokens {
+		if token.Kind != "word" {
+			continue
+		}
+		if token.Text == "FROM" && start < 0 {
+			start, _ = sqlCursorByte(text, token.Range.From)
+			continue
+		}
+		if start < 0 {
+			continue
+		}
+		if token.Text == "JOIN" {
+			hasJoin = true
+		}
+		if token.Text == "WHERE" || token.Text == "ORDER" || token.Text == "LIMIT" {
+			end, _ = sqlCursorByte(text, token.Range.From)
+			break
+		}
+	}
+	if start < 0 || !hasJoin {
+		return nil, nil, nil
+	}
+	stmt, diagnostics := parseOntologySQL(`SELECT "completion" ` + text[start:end])
+	if len(diagnostics) > 0 || stmt == nil {
+		return nil, nil, nil
+	}
+	scope, err := h.rowSQLScope(r, p, stmt, categoryID)
+	if err != nil {
+		if hiddenSQLSource(err) {
+			return nil, nil, nil
+		}
+		if _, ok := err.(*ontologySQLBindingError); ok {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	models, aliases := []c.QueryContextModel{}, []string{}
+	for _, node := range scope.Nodes {
+		model := queryContextModel(node.Current.Definition, node.Decision, "")
+		fields := []c.QueryContextField{}
+		for _, field := range model.Fields {
+			property, ok := findProperty(node.Current.Definition.Schema, field.ID)
+			if ok && primarySQLProperty(node.Current.Definition, property) {
+				fields = append(fields, field)
+			}
+		}
+		model.Fields = fields
+		models, aliases = append(models, model), append(aliases, node.Alias)
+	}
+	return models, aliases, nil
 }

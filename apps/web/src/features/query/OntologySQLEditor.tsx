@@ -7,7 +7,13 @@ import { defaultHighlightStyle, StreamLanguage, syntaxHighlighting } from '@code
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
 import type { OntologySQLCompletions, SQLDiagnostic, SQLRange } from '../../lib/types';
 
-export type SQLEditorHandle = { insert: (text: string) => void; locate: (range: SQLRange) => void; complete: () => void; focus: () => void };
+export type SQLTextEdit = { text: string; from: number; to: number };
+export type SQLEditorHandle = {
+  insert: (text: string) => void;
+  getSelection: () => { from: number; to: number } | undefined;
+  applyEdit: (edit: SQLTextEdit) => void;
+  locate: (range: SQLRange) => void; complete: () => void; focus: () => void;
+};
 type Props = {
   text: string; diagnostics: SQLDiagnostic[]; onChange: (text: string) => void; onRun: () => void;
   onComposition: (composing: boolean) => void;
@@ -33,7 +39,7 @@ const language = StreamLanguage.define<{ comment: boolean }>({
     }
     if (stream.match(/^-?\d+(?:\.\d+)?/)) return 'number';
     if (stream.eat(':')) { stream.eatWhile(/[\p{L}\p{N}_]/u); return 'typeName'; }
-    if (stream.match(/^(?:SELECT|FROM|AS|WHERE|AND|OR|NOT|IS|NULL|IN|TRUE|FALSE|ORDER|BY|ASC|DESC|LIMIT|STARTS_WITH)\b/i)) return 'keyword';
+    if (stream.match(/^(?:SELECT|FROM|AS|WHERE|AND|OR|NOT|IS|NULL|IN|TRUE|FALSE|ORDER|BY|ASC|DESC|LIMIT|STARTS_WITH|JOIN|LINK|VIA|DIRECTION|OUT)\b/i)) return 'keyword';
     if (stream.match(/^[=<>!]+/)) return 'operator';
     stream.next(); return null;
   },
@@ -50,6 +56,21 @@ export const OntologySQLEditor = forwardRef<SQLEditorHandle, Props>(function Ont
       const view = editor.current;
       if (!view || composing.current || view.composing) return;
       view.dispatch(view.state.replaceSelection(text)); view.focus();
+    },
+    getSelection() {
+      const selection = editor.current?.state.selection.main;
+      return selection && { from: selection.from, to: selection.to };
+    },
+    applyEdit(edit) {
+      const view = editor.current;
+      if (!view || composing.current || view.composing) return;
+      closeCompletion(view);
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: edit.text },
+        selection: { anchor: edit.from, head: edit.to }, scrollIntoView: true,
+        userEvent: 'input',
+      });
+      view.focus();
     },
     locate(range) {
       const view = editor.current;
