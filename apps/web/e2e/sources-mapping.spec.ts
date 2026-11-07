@@ -94,6 +94,7 @@ test('数据源独立配置后，模型逐属性跨源映射并从数据库读�
   await page.getByRole('button', { name: '设备对象', exact: true }).click()
   const editor = page.getByRole('region', { name: '模型编辑', exact: true })
   await expect(page).toHaveURL(/#models\/equipment-model$/)
+  await editor.getByRole('tab', { name: '基础信息', exact: true }).click()
   await editor.getByLabel('主数据源', { exact: true }).selectOption('source-0')
   await editor.getByLabel('数据库命名空间', { exact: true }).fill('main')
   await editor.getByLabel('主表选择', { exact: true }).selectOption(JSON.stringify(['main', 'equipment']))

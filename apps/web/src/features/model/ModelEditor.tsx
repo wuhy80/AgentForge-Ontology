@@ -58,7 +58,7 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
   const [confirmReload, setConfirmReload] = useState(false)
   const [publication, setPublication] = useState(pending?.publication)
   const [preview, setPreview] = useState<Preview>()
-  const [tab, setTab] = useState<EditorTab>('basics')
+  const [tab, setTab] = useState<EditorTab>(initialRecord?.definition.schema ? 'properties' : 'basics')
   const tabId = useId()
   const dirty = JSON.stringify(definition) !== JSON.stringify(record?.definition ?? initialDefinition)
   const locked = !!(record?.hasCurrent || record?.status === 'active')
