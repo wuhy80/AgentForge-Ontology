@@ -52,6 +52,8 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 
 能力响应中 `operations` 表示默认存储；`mappedOperations` 为 `read/query`，`sourceDrivers` 为 `mysql/postgresql`，`mappedUpdates` 为 `nullable-fields-and-indexes`。`crossSourceProjection` 为真，`crossSourceConditions` 与 `crossSourceTransactions` 为假；客户端应结合 Schema 是否具有 `storageBinding` 决定可用操作。
 
+默认存储迁入专用来源使用[独立离线工具](../../tools/storage_relocation/README.md)，没有公开重绑接口，也不在启动或普通请求中执行。Data 负责校验来源与目标归属、整批关闭 gate 并排空已准入事务、复用映射 DDL 编译器复制及逐字段核验，最后由协调器在 Metadata 提交并核验后整批激活。源表保留，目标已有不同内容时拒绝覆盖；完整范围、预算与恢复要求统一见[默认存储迁入专用源](../../docs/发布与迁移.md#默认存储迁入专用源2026-11-07)。迁移不开放显式来源实例写入；当前[个人知识库](../../docs/应用场景/个人知识库.md#配置复核与专用来源迁移当前)已沿此路径迁入专属数据库，导入器以保存清单做只读核对。
+
 ## 正确性与限制
 
 Data 在同一事务内提交实例、创建幂等记录和 outbox，并在更新及删除时检查当前 ETag。幂等重试返回原创建结果，读取仍检查当前权限；同键不同意图拒绝。创建、修改同时检查可写字段和新行条件，修改还检查旧行条件。查询权限在 SQL 中先于排序和分页执行，不通过读取一页后删行实现行过滤。
@@ -85,3 +87,5 @@ go test ./...
 `longtext` 单元回归覆盖多字节边界、4 MiB 正文的数据库值编解码、原 `text` 65535 字节边界、空值/空字符串、8 MiB 请求及尾部空白超限、DDL 映射、索引/排序拒绝和能力声明。2026-11-07 的模块测试通过，未启用数据库环境变量；`TestMySQLLongTextRoundTripAtApplicationLimit` 为待显式运行的真实 MySQL 建列、物理核验及 4 MiB 往返测试。长正文响应容量和性能仍未验收，查询应按需投影正文并选用较小分页。
 
 2026-11-07新增数据源配置、AES-GCM身份绑定、授权拒绝及物理标识边界测试。已使用真实MySQL随机租户/随机表验证配置加密、HTTP连接与表列发现、主键和唯一/复合索引、跨租户隔离与专属目标并发冲突、ETag并发返回200/412、引用保护及停用拒绝；没有修改现有知识库定义或实例。`TestSourceCatalogRealDrivers` 与 `TestSourceHTTPConnectionAndCatalogRealDrivers` 可另外通过 `POSTGRES_SOURCE_TEST_DSN` 连接外部PostgreSQL验证，未设置时明确跳过。外部来源映射的结构执行和跨源读取结果仍须按实际运行的独立用例记录，不由连接测试代替。
+
+同日离线迁移的真实 MySQL 定向测试已通过，覆盖完整字段及空字符串/NULL/长正文/精确数值保留、源表不变、整批准备与激活、DDL 中断恢复，以及目标接管、数据漂移、托管 Link 依赖、来源变化、缩减清单和部分准备批次的拒绝。迁移 CLI 另验证同一 MySQL 实例上的 Metadata/Data 维护锁互不自阻塞；这些隔离用例不代表跨实例持续隔离、生产恢复或性能验收。

@@ -297,12 +297,12 @@ class ScannerTests(unittest.TestCase):
 class BlueprintTests(unittest.TestCase):
     def test_six_models_and_candidate_links_use_real_contract_without_runtime_claim(self):
         self.assertEqual(len(BLUEPRINT["schemas"]), 6)
-        self.assertEqual(len(BLUEPRINT["links"]), 6)
+        self.assertEqual(len(BLUEPRINT["links"]), 7)
         self.assertEqual({group["name"] for group in BLUEPRINT["groups"]}, {"内容资产", "知识组织", "引用溯源"})
         group_ids = {group["key"]: group["key"] + "-id" for group in BLUEPRINT["groups"]}
         schema_ids = {schema["key"]: schema["key"] + "-id" for schema in BLUEPRINT["schemas"]}
         inputs = definition_inputs("category-id", group_ids, schema_ids)
-        self.assertEqual(len(inputs), 12)
+        self.assertEqual(len(inputs), 13)
         self.assertTrue(all(entry["payload"]["categoryId"] == "category-id" for entry in inputs))
         self.assertTrue(all(not link["runtime_supported"] for link in BLUEPRINT["links"]))
         for schema in BLUEPRINT["schemas"]:

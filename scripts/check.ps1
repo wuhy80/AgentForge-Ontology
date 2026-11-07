@@ -1,7 +1,7 @@
 param([switch]$Integration, [switch]$SourceIntegration)
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path -Parent $PSScriptRoot
-$names=@('GOCACHE','GOWORK','MYSQL_TEST_DSN','POSTGRES_SOURCE_TEST_DSN','METADATA_TEST_DSN','IDENTITY_TEST_DSN','IDENTITY_TEST_OPA_URL','ONTOLOGY_TEST_METADATA_DSN','ONTOLOGY_TEST_DATA_DSN','ONTOLOGY_TEST_OPA_URL')
+$names=@('GOCACHE','GOWORK','MYSQL_TEST_DSN','POSTGRES_SOURCE_TEST_DSN','METADATA_TEST_DSN','IDENTITY_TEST_DSN','IDENTITY_TEST_OPA_URL','ONTOLOGY_TEST_METADATA_DSN','ONTOLOGY_TEST_DATA_DSN','ONTOLOGY_TEST_OPA_URL','STORAGE_RELOCATION_TEST_DSN')
 $prior=@{}
 foreach($name in $names){$prior[$name]=[Environment]::GetEnvironmentVariable($name,'Process')}
 try {
@@ -18,6 +18,7 @@ try {
         $env:METADATA_TEST_DSN=$env:ONTOLOGY_TEST_METADATA_DSN
         $env:IDENTITY_TEST_DSN=$env:ONTOLOGY_TEST_METADATA_DSN
         $env:IDENTITY_TEST_OPA_URL=$env:ONTOLOGY_TEST_OPA_URL
+        $env:STORAGE_RELOCATION_TEST_DSN=$env:ONTOLOGY_TEST_DATA_DSN
         $env:POSTGRES_SOURCE_TEST_DSN=$null
         if($SourceIntegration){
             if(-not $secrets.SourcePostgresPassword){throw 'Run scripts/start-dev.ps1 -DependenciesOnly -SourceDatabases first.'}
@@ -27,7 +28,7 @@ try {
     } else {
         foreach($name in $names|Where-Object{$_ -notin @('GOCACHE','GOWORK')}){[Environment]::SetEnvironmentVariable($name,$null,'Process')}
     }
-    foreach($module in @('contracts','libs/storage','libs/platform','services/metadata','services/data','tests/integration')){
+    foreach($module in @('contracts','libs/storage','libs/platform','services/metadata','services/data','tests/integration','tools/storage_relocation')){
         if($Integration){$env:MYSQL_TEST_DSN=if($module -eq 'services/data'){$env:ONTOLOGY_TEST_DATA_DSN}else{$env:ONTOLOGY_TEST_METADATA_DSN}}
         Push-Location(Join-Path $repoRoot $module)
         try {

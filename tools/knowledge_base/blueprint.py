@@ -21,7 +21,7 @@ def schema(key, group, name, description, fields):
     properties = deepcopy(COMMON)
     if key != "knowledge_base":
         properties.append(field("library_id", "所属知识库标识", "uuid", True))
-        description += " 所属知识库标识为普通 UUID 值，不提供外键约束或 Link 实例导航。"
+        description += " 所属知识库标识保存稳定对象 UUID；关系导航须另行配置并发布 Link 的数据库映射。"
     return {
         "key": key, "group": group, "name": name, "description": description,
         "schema": {"mode": "schema_2_db", "storageLayout": "single", "properties": properties + fields},
@@ -57,7 +57,7 @@ SCHEMAS = [
         field("raw_url", "原始URL", required=True), field("normalized_url", "规范化定位", required=True),
         field("title", "资源标题"), field("description", "资源说明", "longtext"), field("resource_type", "资源类型", "string", True),
     ]),
-    schema("references", "provenance", "引用记录", "逐条保存普通引用、嵌入、来源 URL 与标签关联；来源/目标 UUID 是普通属性，无外键或 Link 实例导航。目标 UUID 至多一项；歧义或范围外目标不填 UUID。行列与字符偏移均针对原 Markdown，行列从1开始，偏移从0开始；YAML派生条目以source_section及原文位置区分。", [
+    schema("references", "provenance", "引用记录", "逐条保存普通引用、嵌入、来源 URL 与标签关联；来源/目标 UUID 可通过显式 Link 外键映射导航。目标 UUID 至多一项；歧义或范围外目标不填 UUID。行列与字符偏移均针对原 Markdown，行列从1开始，偏移从0开始；YAML派生条目以source_section及原文位置区分。", [
         field("source_note_id", "来源笔记标识", "uuid", True),
         field("target_note_id", "目标笔记标识", "uuid"), field("target_resource_id", "目标外部资源标识", "uuid"),
         field("target_attachment_id", "目标附件标识", "uuid"), field("target_tag_id", "目标标签标识", "uuid"),
@@ -74,7 +74,7 @@ SCHEMAS = [
 
 def link(key, name, source, target, forward, reverse, cardinality):
     return {"key": key, "group": "provenance", "name": name,
-            "description": "候选关系定义；当前仅登记元数据，未实现 Link 实例读写与导航。",
+            "description": "关系定义；须显式配置并发布数据库外键或关联表映射后才能查询，工具不自动创建关系事实。",
             "source_schema": source, "target_schema": target, "forwardName": forward,
             "reverseName": reverse, "cardinality": cardinality, "onDelete": "restrict", "runtime_supported": False}
 
@@ -90,6 +90,7 @@ BLUEPRINT = {
         link("reference_note", "引用指向笔记", "references", "notes", "指向笔记", "被引用记录", "N:1"),
         link("reference_resource", "引用指向资源", "references", "resources", "指向资源", "被引用记录", "N:1"),
         link("reference_attachment", "引用指向附件", "references", "attachments", "指向附件", "被引用记录", "N:1"),
+        link("reference_tag", "引用指向标签", "references", "tags", "指向标签", "被引用记录", "N:1"),
     ],
 }
 

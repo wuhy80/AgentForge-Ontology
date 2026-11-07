@@ -1,6 +1,6 @@
 # 个人知识库工具
 
-本目录的离线层只读取显式选中的源库目录，生成六类对象及引用清单，不调用 API、不连接数据库、不修改或改写源文件。`blueprint.py` 维护“个人知识库”分类、内容资产/知识组织/引用溯源三个分组、六个 Schema 与六个候选 Link 的可复用蓝图；Link 仅登记定义，当前没有 Link 实例读写或导航。
+本目录的离线层只读取显式选中的源库目录，生成六类对象及引用清单，不调用 API、不连接数据库、不修改或改写源文件。`blueprint.py` 维护“个人知识库”分类、内容资产/知识组织/引用溯源三个分组、六个 Schema 与七个 Link 的可复用蓝图，包含“引用指向标签”。工具只维护关系定义，不自动配置数据库映射或写关系事实；平台的实际关系导航能力见 [Link](../../docs/模块/Link.md#当前关系数据库实现2026-11-07)。
 
 ## 只读扫描
 
@@ -44,7 +44,7 @@ python -m unittest tools.knowledge_base.test_scanner -v
 
 笔记 envelope 额外保留 `aliases`、`tags`、`source_values` 列表；这三个列表是扫描/解析信息，并非 Schema 的集合属性。每个标签值建立独立标签对象及逐条 `reference_kind=tag` 引用记录，来源 URL 和来源 WikiLink 也逐条记录。该方案可通过现有单 Schema 对象写入运行，不依赖 Link 事实服务。`associations` 是去重后的候选关系清单，不代表已写入关系。
 
-引用的 `bindings.source_note_id` 指向来源笔记来源键，已解析目标会有 `target_note_id`、`target_resource_id`、`target_attachment_id` 或 `target_tag_id` 中的一项。在线导入将这些来源键换成服务端 UUID，写入引用记录的普通属性；没有外键约束或自动反向 Link 导航。未知、范围外或歧义目标不填目标 UUID。
+引用的 `bindings.source_note_id` 指向来源笔记来源键，已解析目标会有 `target_note_id`、`target_resource_id`、`target_attachment_id` 或 `target_tag_id` 中的一项。在线导入将这些来源键换成服务端 UUID，写入引用记录的普通属性；这些列可由管理员显式配置为 Link 外键映射，工具不会自动增加外键约束或生效关系映射。未知、范围外或歧义目标不填目标 UUID。
 
 ## 引用解析边界
 
@@ -75,11 +75,14 @@ python -m tools.knowledge_base --vault D:/code/obsidian-vault --output .cache/kn
 # 本地开发账号文件仅由工具读取，密码不进入命令行或输出。
 python -m tools.knowledge_base --vault D:/code/obsidian-vault --credentials .cache/dev/admin.json --state .cache/knowledge-base/ontology-state.json --apply
 
-# 只构建/生效六个对象和六个关系定义，不写实例。
+# 只构建/生效六个对象和七个关系定义，不写实例；关系映射须另行显式配置。
 python -m tools.knowledge_base --vault D:/code/obsidian-vault --credentials .cache/dev/admin.json --state .cache/knowledge-base/ontology-state.json --apply --models-only
 
 # 登录并逐条回读比对已有实例，业务数据不写入。
 python -m tools.knowledge_base --vault D:/code/obsidian-vault --credentials .cache/dev/admin.json --state .cache/knowledge-base/ontology-state.json --verify
+
+# 使用已有扫描清单核对迁移后的资料：不访问源知识库、不修改同步状态。
+python -m tools.knowledge_base.apply --verify-manifest .cache/knowledge-base/ontology-scan.json --state .cache/knowledge-base/ontology-state.json --credentials .cache/dev/admin.json
 
 # 无数据库测试：扫描、冲突、幂等及发布中断恢复。
 python -m unittest discover -s tools/knowledge_base -t . -v
@@ -93,6 +96,10 @@ python -m unittest discover -s tools/knowledge_base -t . -v
 
 已有实例按 ETag 更新，系统独立修改与来源更新冲突时停止。完整扫描中确实缺失、且状态文件此前拥有的来源会标记不可用，不删除实例；同时发现笔记路径新增与消失时视为疑似重命名，先停止等待核对，不自动合并或换 UUID。当前尚无重命名映射界面或自动 Git 重命名同步。
 
-平台当前 Schema 结构发布后不可演化，遇到已有不兼容模型会停止，不修改它的字段。定义展示改名按状态中的稳定 ID 复用，现有模型草稿会保留。状态丢失时可按来源键恢复内容完全相同的实例；与现有内容不同时拒绝覆盖。一个知识库的多 scope 协调尚未实现，首批保持单一 scope，不同时运行重叠范围的多份状态。
+遇到已有不兼容模型时工具停止，不覆盖它的字段或来源绑定。已发布对象使用显式 `storageBinding` 和逐属性 `mapping` 时，可按原稳定 ID 只读核对；关系的端点、名称、基数和删除策略仍须与蓝图一致，已配置的关系存储映射原样复用。创建响应恢复仍严格核对物理绑定，不凭逻辑相似认领新草稿。定义展示改名按状态中的稳定 ID 复用，现有模型草稿会保留。状态丢失时可按来源键恢复内容完全相同的实例；与现有内容不同时拒绝覆盖。一个知识库的多 scope 协调尚未实现，首批保持单一 scope，不同时运行重叠范围的多份状态。
 
-成功导入后会逐项回读所有目标字段（包括完整原文与 YAML）并比对。Link 仅有定义，`linkFactsWritten=0`；标签和来源关联实际保存在引用记录普通 UUID 属性中，无数据库外键、Link 导航或跨模型联查。Markdown 目前通过实例详情查看原文，尚无专门阅读器、全文搜索或问答。
+显式来源的实例写入当前尚未开放。普通 `--apply` 会先读取现有模型，发现知识库使用显式来源后，在创建目录、定义或实例之前明确停止；即使来源内容没有改变，也不把只读核对报告成成功同步。`--models-only` 仍可显式维护模型定义，实际数据导入须等待对应来源写入能力。
+
+`--verify` 会重新扫描选中的只读源目录；`tools.knowledge_base.apply --verify-manifest` 则只读取原有完整扫描JSON和同步状态，核对工作台/租户、库标识、范围、当前模型结构和实例稳定ID，逐项比较全部来源字段，包括完整Markdown/YAML、精确数值和空值。系统同步时间不是来源字段，不参与来源内容比较；缺少响应字段、内容变化或身份不匹配均停止报告成功。此入口只登录、GET回读和注销，不创建模型、写实例或保存状态；结果明确返回 `readOnly=true`、`businessWrites=0`、`sourceRescanned=false`。
+
+成功导入后会逐项回读所有目标字段（包括完整原文与 YAML）并比对。工具的 `linkFactsWritten=0` 只表示本工具未写关系事实，不能用来推断管理员已配置映射的 Link 没有数据。标签与来源的原始关联仍保存在引用记录UUID属性中，数据库关系映射及来源表维护由显式配置/迁移负责。Markdown 可通过数据预览和实例详情查看原文，尚无专门阅读器、全文搜索或问答。
