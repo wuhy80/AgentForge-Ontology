@@ -175,7 +175,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p contrac
 	if err := h.authorize(r.Context(), p, "definition.read", "", ""); err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-only", "schemaModes": []string{"schema_2_db"}, "storageLayouts": []string{"single"}, "invocation": false, "delete": false, "disable": false, "schemaInheritance": false, "dbToSchema": false})
+	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-mapped-additions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "invocation": false, "delete": false, "disable": false, "schemaInheritance": false, "dbToSchema": true})
 	return nil
 }
 

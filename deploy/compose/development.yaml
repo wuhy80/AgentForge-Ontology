@@ -28,6 +28,20 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+  source-postgres:
+    image: postgres:17-alpine
+    profiles: ["sources"]
+    environment:
+      POSTGRES_USER: ontology
+      POSTGRES_DB: ontology_sources
+      POSTGRES_PASSWORD: ${ONTOLOGY_SOURCE_POSTGRES_PASSWORD:?required}
+    ports: ["127.0.0.1:25432:5432"]
+    volumes: ["source-postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ontology -d ontology_sources"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
   opa:
     image: openpolicyagent/opa:1.21.2-static
     command: ["run", "--server", "--addr=0.0.0.0:8181", "/policy/ontology.rego", "/policy/data.example.json"]
@@ -36,3 +50,4 @@ services:
 volumes:
   metadata-db:
   data-db:
+  source-postgres:

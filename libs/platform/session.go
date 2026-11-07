@@ -30,6 +30,19 @@ type SessionChecker interface {
 	CheckSession(context.Context, contracts.SessionCheck) (contracts.Session, error)
 }
 
+type sessionUserContextKey struct{}
+
+// WithSessionUser is only for trusted session middleware and in-process tests.
+// HTTP inputs never populate this context directly.
+func WithSessionUser(ctx context.Context, user contracts.User) context.Context {
+	return context.WithValue(ctx, sessionUserContextKey{}, user)
+}
+
+func SessionUser(r *http.Request) (contracts.User, bool) {
+	user, ok := r.Context().Value(sessionUserContextKey{}).(contracts.User)
+	return user, ok
+}
+
 var opaqueCredential = regexp.MustCompile(`^[A-Za-z0-9_-]{32,512}$`)
 
 // UnsafeMethod follows HTTP's safe-method definition. OPTIONS does not grant a
@@ -125,7 +138,8 @@ func ProtectSessionRoutes(serviceToken string, metadata bool, checker SessionChe
 			return
 		}
 		principal := contracts.Principal{Subject: session.User.ID, TenantID: session.User.TenantID, ExpiresAt: session.ExpiresAt}
-		app.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principal)))
+		ctx := WithSessionUser(r.Context(), session.User)
+		app.ServeHTTP(w, r.WithContext(WithPrincipal(ctx, principal)))
 	})
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", app)

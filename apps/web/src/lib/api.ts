@@ -2,6 +2,7 @@ import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
+  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult,
 } from './types'
 
 export class ApiError extends Error {
@@ -192,6 +193,31 @@ export class ApiClient {
   }
   createGroup(categoryId: string, name: string): Promise<Organization> {
     return this.request('/api/metadata/groups', { method: 'POST', body: { categoryId, name } })
+  }
+  async listDataSources(signal?: AbortSignal, selectable = false): Promise<DataSource[]> {
+    return (await this.request<Page<DataSource>>(`/api/data/sources${selectable ? '?view=select' : ''}`, { signal })).data
+  }
+  createDataSource(input: DataSourceInput): Promise<DataSource> {
+    return this.request('/api/data/sources', { method: 'POST', body: input })
+  }
+  updateDataSource(id: string, input: DataSourceInput, etag: string): Promise<DataSource> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag })
+  }
+  testDataSource(id: string): Promise<SourceTestResult> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}/test`, { method: 'POST' })
+  }
+  testDataSourceInput(input: DataSourceInput): Promise<SourceTestResult> {
+    return this.request('/api/data/sources/test', { method: 'POST', body: input })
+  }
+  async listSourceTables(id: string, namespace = '', signal?: AbortSignal): Promise<SourceTableInfo[]> {
+    const params = new URLSearchParams()
+    if (namespace) params.set('namespace', namespace)
+    return (await this.request<Page<SourceTableInfo>>(`/api/data/sources/${encodeURIComponent(id)}/tables?${params}`, { signal })).data
+  }
+  inspectSourceTable(id: string, table: string, namespace = '', signal?: AbortSignal): Promise<SourceTable> {
+    const params = new URLSearchParams()
+    if (namespace) params.set('namespace', namespace)
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}/tables/${encodeURIComponent(table)}?${params}`, { signal })
   }
   createDefinition(definition: DefinitionInput): Promise<DefinitionRecord> {
     return this.request('/api/metadata/definitions', { method: 'POST', body: definition })

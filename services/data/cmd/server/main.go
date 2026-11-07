@@ -44,7 +44,11 @@ func run() error {
 		return fmt.Errorf("须配置 ONTOLOGY_METADATA_URL")
 	}
 	metadataURL := os.Getenv("ONTOLOGY_METADATA_URL")
-	app := data.NewHandler(data.Config{Engine: e, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, MetadataURL: metadataURL, ServiceToken: service, CursorSecret: cursor})
+	sourceKey := os.Getenv("ONTOLOGY_DATA_SOURCE_KEY")
+	if sourceKey != "" && (len(sourceKey) < 32 || sourceKey == service || sourceKey == cursor) {
+		return fmt.Errorf("数据源加密密钥至少32字节，且必须独立于服务及游标密钥")
+	}
+	app := data.NewHandler(data.Config{Engine: e, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, MetadataURL: metadataURL, ServiceToken: service, CursorSecret: cursor, DataSourceKey: sourceKey})
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18081"

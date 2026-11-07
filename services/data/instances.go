@@ -216,6 +216,10 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if current.Definition.Schema.StorageBinding != nil {
+		writeError(w, problem(422, "mapped_writes_unsupported", "外部映射对象暂只开放读取；跨数据源写入、幂等与outbox事务尚未开放"))
+		return
+	}
 	var out c.Instance
 	replayed := false
 	err = h.cfg.Engine.WithTx(r.Context(), func(tx *sql.Tx) error {
@@ -296,10 +300,6 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if !uuidPattern.MatchString(r.PathValue("entityId")) {
-		writeError(w, problem(404, "not_found", "实例不存在或不可访问"))
-		return
-	}
 	current, err := h.current(r.Context(), p.TenantID, r.PathValue("schemaId"))
 	if err != nil {
 		writeError(w, err)
@@ -312,6 +312,28 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 	dec, err := h.authorize(r.Context(), p, "instance.read", current.Definition.ID)
 	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if current.Definition.Schema.StorageBinding != nil {
+		query := c.QuerySpec{From: c.Source{SchemaID: current.Definition.ID}, Page: c.Page{Limit: 1}}
+		for _, property := range projection(current.Definition.Schema, dec.ReadFields) {
+			query.Select = append(query.Select, property.ID)
+		}
+		result, err := h.queryMapped(r.Context(), p, current, dec, query, r.PathValue("entityId"), "instance.read")
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if len(result.Data) != 1 {
+			writeError(w, problem(404, "not_found", "实例不存在或不可访问"))
+			return
+		}
+		w.Header().Set("ETag", `"`+result.Data[0].ETag+`"`)
+		writeJSON(w, 200, result.Data[0])
+		return
+	}
+	if !uuidPattern.MatchString(r.PathValue("entityId")) {
+		writeError(w, problem(404, "not_found", "实例不存在或不可访问"))
 		return
 	}
 	var out c.Instance
@@ -342,6 +364,23 @@ func (h *handler) change(w http.ResponseWriter, r *http.Request, deleting bool) 
 		writeError(w, err)
 		return
 	}
+	current, err := h.current(r.Context(), p.TenantID, r.PathValue("schemaId"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if current.Definition.Schema != nil && current.Definition.Schema.StorageBinding != nil {
+		operation := "instance.patch"
+		if deleting {
+			operation = "instance.delete"
+		}
+		if _, err := h.authorize(r.Context(), p, operation, current.Definition.ID); err != nil {
+			writeError(w, err)
+			return
+		}
+		writeError(w, problem(422, "mapped_writes_unsupported", "外部映射对象暂只开放读取；跨数据源写入与outbox事务尚未开放"))
+		return
+	}
 	etag := bareETag(r.Header.Get("If-Match"))
 	if !uuidPattern.MatchString(etag) {
 		writeError(w, problem(428, "precondition_required", "更新或删除需要读取时返回的 If-Match"))
@@ -361,11 +400,6 @@ func (h *handler) change(w http.ResponseWriter, r *http.Request, deleting bool) 
 			writeError(w, problem(422, "invalid_patch", "PATCH 需要非空 values，不接受创建幂等键"))
 			return
 		}
-	}
-	current, err := h.current(r.Context(), p.TenantID, r.PathValue("schemaId"))
-	if err != nil {
-		writeError(w, err)
-		return
 	}
 	if err = validateSchema(current.Definition); err != nil {
 		writeError(w, err)
@@ -475,6 +509,15 @@ func (h *handler) query(w http.ResponseWriter, r *http.Request) {
 	dec, err := h.authorize(r.Context(), p, "instance.query", current.Definition.ID)
 	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if current.Definition.Schema != nil && current.Definition.Schema.StorageBinding != nil {
+		result, err := h.queryMapped(r.Context(), p, current, dec, req, "", "instance.query")
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, 200, result)
 		return
 	}
 	compiled, err := compileQuery(current.Definition, current.ETag, p, dec, req, h.cfg.CursorSecret)

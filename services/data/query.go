@@ -22,9 +22,18 @@ func fieldAllowed(fields []string, id string) bool {
 }
 
 type expressionCompiler struct {
-	schema  *c.Schema
-	allowed []string
-	nodes   int
+	schema    *c.Schema
+	allowed   []string
+	nodes     int
+	column    func(c.Property) (string, error)
+	parameter func(c.Property) string
+}
+
+func (b *expressionCompiler) placeholder(property c.Property) string {
+	if b.parameter != nil {
+		return b.parameter(property)
+	}
+	return parameter(property)
 }
 
 // MySQL can coerce DECIMAL versus a string parameter to DOUBLE. Explicitly
@@ -78,6 +87,13 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 		return "", nil, problem(403, "forbidden_field", "不允许使用该属性查询")
 	}
 	col := quote(columnName(p.ID))
+	if b.column != nil {
+		var err error
+		col, err = b.column(p)
+		if err != nil {
+			return "", nil, err
+		}
+	}
 	if e.Op == "isNull" || e.Op == "isNotNull" {
 		if len(e.Value) > 0 {
 			return bad()
@@ -101,7 +117,7 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 				return "", nil, err
 			}
 			args = append(args, v)
-			marks = append(marks, parameter(p))
+			marks = append(marks, b.placeholder(p))
 		}
 		op := " IN "
 		if e.Op == "notIn" {
@@ -132,7 +148,7 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 	if p.DataType == "boolean" && e.Op != "eq" && e.Op != "ne" {
 		return bad()
 	}
-	return col + " " + op + " " + parameter(p), []any{v}, nil
+	return col + " " + op + " " + b.placeholder(p), []any{v}, nil
 }
 
 type pageCursor struct {
@@ -161,6 +177,10 @@ func signCursor(secret string, p pageCursor) (string, error) {
 }
 
 func parseCursor(secret, token string) (pageCursor, error) {
+	return parseBoundCursor(secret, token, true)
+}
+
+func parseBoundCursor(secret, token string, uuidOnly bool) (pageCursor, error) {
 	var p pageCursor
 	bad := func() (pageCursor, error) {
 		return p, problem(422, "invalid_cursor", "游标已失效或不属于本次查询")
@@ -185,7 +205,7 @@ func parseCursor(secret, token string) (pageCursor, error) {
 	if !hmac.Equal(sig, mac.Sum(nil)) {
 		return bad()
 	}
-	if json.Unmarshal(b, &p) != nil || p.Expires < time.Now().Unix() || !uuidPattern.MatchString(p.LastID) {
+	if json.Unmarshal(b, &p) != nil || p.Expires < time.Now().Unix() || p.LastID == "" || len(p.LastID) > 1024 || (uuidOnly && !uuidPattern.MatchString(p.LastID)) {
 		return bad()
 	}
 	return p, nil

@@ -44,7 +44,7 @@ go run ./cmd/server
 | 方法和路径 | 用途 |
 | --- | --- |
 | `GET /healthz`、`GET /readyz` | 存活与数据库就绪探针 |
-| `GET /metadata/capabilities` | 当前开放能力与限制 |
+| `GET /metadata/capabilities` | 当前开放能力与限制；Schema双向模式及 `display-and-mapped-additions` 更新边界 |
 | `POST /metadata/auth/login`、`GET /metadata/auth/session`、`POST /metadata/auth/logout` | 账号登录、恢复当前会话及服务端注销 |
 | `PUT /metadata/auth/password` | 核对当前密码、修改密码并旋转会话 |
 | `/metadata/admin/users`、`/metadata/admin/roles` | 当前租户的用户、启停、密码重置及角色管理 |
@@ -57,7 +57,7 @@ go run ./cmd/server
 | `GET /metadata/definitions` | 默认分页读取已生效定义；`view=draft` 发现未发布草稿，支持 categoryId、kind |
 | `GET /metadata/definitions/{id}` | 读取当前定义；只有草稿的对象返回404 |
 | `GET/PUT /metadata/definitions/{id}/draft` | 读取/保存草稿；PUT 必须带强 If-Match |
-| `POST /metadata/definitions/{id}/preview` | 预览草稿，缺少草稿时预览当前；不创建发布操作或占用发布状态 |
+| `POST /metadata/definitions/{id}/preview` | 预览草稿，缺少草稿时预览当前；显式来源会读取实时目录、验证映射并编译对应计划，不创建发布操作、修改源库或占用发布状态 |
 | `POST /metadata/definitions/{id}/publish` | 按草稿强 If-Match 生效，或恢复同一持久操作 |
 | `GET /metadata/publications/{id}` | 核对操作状态及恢复进度 |
 | `GET /metadata/resolve?category=分类名&name=定义名&kind=schema` | 中文名称解析；kind 可选 |
@@ -69,6 +69,8 @@ go run ./cmd/server
 
 属性协议支持独立的 `longtext` 类型，单字段上限为 4 MiB 解码后 UTF-8 字节，`text` 仍为 65535 字节；Metadata 校验两类文本默认值并拒绝其索引，Data 的实际存储和请求预算见 [Data 服务](../data/README.md)。Metadata 定义与身份管理 JSON 请求体仍为 1 MiB，因此定义中默认值和权限行条件还受管理请求总预算约束；正文应通过 Data 实例接口读写。既有属性从 `text` 改为 `longtext` 仍触发结构变更拒绝，不能通过草稿保存或展示修改绕过迁移边界。
 
+Schema 的 `storageBinding` 声明主数据源、命名空间、表、稳定标识列及可选租户列；每个属性的 `mapping` 声明来源和物理列，跨表/跨源另外声明唯一关联键。Metadata 归一继承的绑定信息、保持稳定字段ID，并拒绝同来源列重复、关联键不一致及跨来源索引；Data 在预览、发布和执行时重新校验实际目录、类型、租户范围及唯一键。连接配置与密码仅由Data持有，定义中不保存凭据，来源配置协议见[数据源](../../docs/数据源.md)，模型语义统一见[Schema](../../docs/模块/Schema.md#2-建模方向与预览)。
+
 定义目录的 `view` 只接受 `current` 或 `draft`，未提供时保持读取当前态。草稿视图只返回实际有草稿的对象，包括从未生效的定义和生效后重新编辑的草稿；结果 `status` 为 `draft`，内容与 ETag 均来自该草稿。草稿目录同时检查全局及逐对象的 `definition.edit` 授权，当前目录保持 `definition.read` 授权；无权对象不会成为续页标记。目录仅用于当前身份可管理内容的发现，不将拥有当前定义读取权限等同于拥有草稿编辑权限。
 
 ## 测试与当前限制
@@ -79,4 +81,4 @@ go run ./cmd/server
 
 发布操作身份独立于候选内容摘要：A→B→A 的最后一步创建新操作，只有候选已与当前内容相同时才清理相同草稿并幂等返回已有成功操作。并发重试按持久阶段推进，较早网络请求的迟到失败不能覆盖已提交或成功状态。
 
-当前定义生命周期为草稿与生效态；定义停用、删除、移动、结构性迁移及运行调用尚未开放。已生效定义只接受保留绑定身份的展示元数据修改，实例存储能力由 Data 再次认证。outbox 当前仅持久记录，没有消费者。发布故障须通过同一接口和已保存的并发凭证显式恢复；跨服务自动恢复及进行中操作的即时撤权尚未验收。
+当前定义生命周期为草稿与生效态；定义停用、删除、移动、破坏性结构迁移及运行调用尚未开放。无显式来源绑定的已生效定义仍只接受保留身份的展示修改；显式来源模型额外允许保留已有绑定、类型与约束的可空属性及索引追加，由Data继续校验实时来源。`schema_2_db`以Schema生成安全追加计划，`db_2_schema`以数据库目录为准验证已有列，不反向更改源结构。模式、主绑定、已有属性物理映射、类型与约束不能借追加接口改写。外部源当前支持读取及跨来源投影，实例组合写入明确拒绝；PostgreSQL数据源不表示Metadata平台存储已支持PostgreSQL。outbox 当前仅持久记录，没有消费者。发布故障须通过同一接口和已保存的并发凭证显式恢复；跨服务自动恢复及进行中操作的即时撤权尚未验收。

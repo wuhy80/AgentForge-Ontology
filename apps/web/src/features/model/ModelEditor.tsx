@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { AlertCircle, ArrowRight, Check, FileCode2, LoaderCircle, Plus, RefreshCw, Save, Send, Trash2 } from 'lucide-react'
-import { Dialog } from '../../components/Dialog'
+import { AlertCircle, ArrowLeft, ArrowRight, Check, FileCode2, LoaderCircle, Plus, RefreshCw, Save, Send, Trash2 } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { Callable, Definition, DefinitionRecord, Index, Kind, Link, Organization, Preview, Publication } from '../../lib/types'
 import { PropertyEditor } from './PropertyEditor'
+import { SchemaStorageEditor } from './SchemaStorageEditor'
 import { activeEntries, cloneDefinition, kindDescriptions, kindLabels, MAX_SCHEMA_INDEXES, MAX_SCHEMA_PROPERTIES, newDefinition, validateDefinition } from './model-helpers'
 
 export interface PendingPublication {
@@ -11,7 +11,7 @@ export interface PendingPublication {
   publication: Publication
 }
 
-export function ModelEditor({ api, categoryId, categories, entries, initialRecord, initialKind, pending, onClose, onOrganizations, onSaved, onPending, onPublished, active = true }: {
+export function ModelEditor({ api, categoryId, categories, entries, initialRecord, initialKind, pending, onClose, onOrganizations, onSources, onSaved, onPending, onPublished, onNavigationGuard, active = true }: {
   api: ApiClient
   categoryId: string
   categories: Organization[]
@@ -21,9 +21,11 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
   pending?: PendingPublication
   onClose: () => void
   onOrganizations: () => void
+  onSources?: () => void
   onSaved: (record: DefinitionRecord) => Promise<void>
   onPending: (pending: PendingPublication) => void
   onPublished: (record: DefinitionRecord) => Promise<void>
+  onNavigationGuard?: (guard?: () => boolean) => void
   active?: boolean
 }) {
   const [record, setRecord] = useState(initialRecord)
@@ -49,6 +51,26 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
   const currentSchemas = activeEntries(entries, 'schema')
   const currentEnums = activeEntries(entries, 'enum')
   const currentFunctions = activeEntries(entries, 'function')
+  const allowAppend = locked && !!definition.schema?.storageBinding && definition.schema.mode === 'schema_2_db'
+
+  useEffect(() => {
+    if (!active) return
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty && !busy) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    const guard = () => {
+      if (busy) return false
+      if (!dirty || uncertain) return true
+      if (!window.confirm('还有未保存的模型修改，离开后将丢失。确定离开？')) return false
+      setDefinition(cloneDefinition(record?.definition ?? initialDefinition))
+      return true
+    }
+    onNavigationGuard?.(guard)
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => { onNavigationGuard?.(); window.removeEventListener('beforeunload', beforeUnload) }
+  }, [active, dirty, busy, uncertain, record, initialDefinition, onNavigationGuard])
 
   useEffect(() => {
     if (!active) { setGroupsLoading(false); return }
@@ -137,16 +159,17 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
     update({ schema: { ...definition.schema!, indexes: (definition.schema!.indexes ?? []).map((index, offset) => offset === position ? { ...index, ...patch } : index) } })
   }
 
-  return <Dialog title={record ? definition.name || '编辑定义' : `新建${kindLabels[definition.kind]}`} description={kindDescriptions[definition.kind]} onClose={requestClose} wide>
+  return <section className="model-editor-page" aria-label="模型编辑">
+    <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" onClick={requestClose} disabled={!!busy}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑定义' : `新建${kindLabels[definition.kind]}`}</h1><p className="muted">{kindDescriptions[definition.kind]}</p></div></div>
     <div className="model-editor">
       <div className="model-editor-meta"><span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}</div>
-      {locked && <div className="notice model-lock-notice">此定义已生效。可修改名称、描述和显示标签；数据结构与绑定保持锁定。</div>}
-      {uncertain && <div className="notice notice-error" role="status"><strong>发布结果待确认</strong><p>编辑已暂停。使用同一份已保存内容继续恢复；关闭窗口后可从模型页的待恢复记录重新进入。</p><span className="muted">阶段：{publication?.status === 'activation_pending' ? '已提交，等待激活' : publication?.status === 'prepare_failed' ? '准备未完成' : '等待确认'}</span></div>}
+      {locked && <div className="notice model-lock-notice">{allowAppend ? '此定义已生效。现有结构与来源绑定保持锁定，可新增允许空值的属性，预览并发布后安全增加目标列。' : '此定义已生效。可修改名称、描述和显示标签；数据结构与绑定保持锁定。'}</div>}
+      {uncertain && <div className="notice notice-error" role="status"><strong>发布结果待确认</strong><p>编辑已暂停。使用同一份已保存内容继续恢复；返回列表后可从模型页的待恢复记录重新进入。</p><span className="muted">阶段：{publication?.status === 'activation_pending' ? '已提交，等待激活' : publication?.status === 'prepare_failed' ? '准备未完成' : '等待确认'}</span></div>}
       {error && <div className="notice notice-error" role="alert"><AlertCircle size={16} /><span>{error}</span></div>}
       {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
       {conflict && <div className="notice model-conflict"><p>服务器内容已改变，本地编辑仍然保留。载入最新内容会放弃当前未保存的修改。</p><button type="button" className="button subtle" disabled={!!busy} onClick={() => setConfirmReload(true)}><RefreshCw size={15} />载入最新内容</button></div>}
       {confirmReload && <div className="notice notice-error"><p>确定放弃本地编辑并载入服务器最新内容？</p><div className="model-inline-actions"><button type="button" className="button primary" onClick={() => void reload()}>确认载入</button><button type="button" className="button subtle" onClick={() => setConfirmReload(false)}>保留本地编辑</button></div></div>}
-      {confirmClose && <div className="notice notice-error" role="alert"><p>还有未保存的修改。关闭后这些修改将丢失。</p><div className="model-inline-actions"><button type="button" className="button subtle" onClick={() => setConfirmClose(false)}>继续编辑</button><button type="button" className="button" onClick={onClose}>放弃修改并关闭</button></div></div>}
+      {confirmClose && <div className="notice notice-error" role="alert"><p>还有未保存的修改。返回列表后这些修改将丢失。</p><div className="model-inline-actions"><button type="button" className="button subtle" onClick={() => setConfirmClose(false)}>继续编辑</button><button type="button" className="button" onClick={onClose}>放弃修改并返回</button></div></div>}
       <fieldset disabled={disabled} className="model-fieldset">
         <div className="form-grid model-basics">
           <label>业务名称<input className="field" autoFocus value={definition.name} maxLength={128} onChange={(event) => update({ name: event.target.value })} placeholder="例如：生产设备" /></label>
@@ -158,7 +181,8 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
         {groupError && <div className="notice notice-error">{groupError}</div>}
         {!record && (!category || !groupsLoading && !groupError && !groups.length) && <div className="notice"><p>{category ? '当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。' : '请先在顶部选择当前分类，或前往「分类与分组」创建分类和分组。'}</p><button type="button" className="button subtle" onClick={onOrganizations}>前往分类与分组<ArrowRight size={15} /></button></div>}
         {definition.schema && <>
-          <PropertyEditor title="对象属性" properties={definition.schema.properties} locked={locked} enums={currentEnums} allowEnumBinding={false} maxProperties={MAX_SCHEMA_PROPERTIES} onChange={(properties) => update({ schema: { ...definition.schema!, properties, indexes: (definition.schema!.indexes ?? []).filter((index) => index.fieldIds.every((id) => properties.some((property) => property.id === id))) } })} />
+          <SchemaStorageEditor api={api} schema={definition.schema} locked={locked} active={active} onSources={onSources} onChange={(schema) => update({ schema })} />
+          <PropertyEditor title="对象属性" properties={definition.schema.properties} locked={locked} allowAppend={allowAppend} enums={currentEnums} allowEnumBinding={false} maxProperties={MAX_SCHEMA_PROPERTIES} onChange={(properties) => update({ schema: { ...definition.schema!, properties, indexes: (definition.schema!.indexes ?? []).filter((index) => index.fieldIds.every((id) => properties.some((property) => property.id === id))) } })} />
           <section><div className="model-section-heading"><div><h3>索引</h3><p className="muted">最多 {MAX_SCHEMA_INDEXES} 个普通或唯一索引，每个索引最多组合两个属性。长文本和超长文本不支持索引。</p></div>{!locked && <button type="button" className="button subtle" disabled={!definition.schema.properties.some((property) => property.id && property.dataType !== 'text' && property.dataType !== 'longtext') || (definition.schema.indexes?.length ?? 0) >= MAX_SCHEMA_INDEXES} onClick={() => update({ schema: { ...definition.schema!, indexes: [...definition.schema!.indexes ?? [], { id: '', name: '', unique: false, fieldIds: [] }] } })}><Plus size={15} />添加索引</button>}</div>
             {definition.schema.properties.some((property) => !property.id) && <div className="notice model-index-hint">新增属性需先保存草稿，再在此选择属性建立索引。</div>}
             {(definition.schema.indexes ?? []).length === 0 && <div className="model-inline-empty">尚未设置索引。</div>}
@@ -187,7 +211,7 @@ export function ModelEditor({ api, categoryId, categories, entries, initialRecor
         })()}
       </fieldset>
       {preview && <section className="model-preview"><div className="model-section-heading"><div><h3><FileCode2 size={17} />存储计划预览</h3><p className="muted">预览不会执行 SQL，也不会占用发布状态。</p></div></div>{preview.statements?.length ? <pre>{preview.statements.join('\n\n')}</pre> : <p className="model-inline-empty">此变更没有需要执行的存储语句。</p>}</section>}
-      <div className="model-editor-footer"><span className="muted">{dirty ? '先保存草稿，再预览或发布。' : record?.status === 'active' ? '当前内容已生效，可再次确认或恢复发布。' : '草稿已保存，发布后对业务生效。'}</span><div className="model-inline-actions"><button type="button" className="button subtle" onClick={requestClose} disabled={!!busy}>关闭</button><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle className="model-spin" size={16} /> : <FileCode2 size={16} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle className="model-spin" size={16} /> : <Save size={16} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle className="model-spin" size={16} /> : uncertain ? <RefreshCw size={16} /> : <Send size={16} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}<ArrowRight size={15} /></button></div></div>
+      <div className="model-editor-footer"><span className="muted">{dirty ? '先保存草稿，再预览或发布。' : record?.status === 'active' ? '当前内容已生效，可再次确认或恢复发布。' : '草稿已保存，发布后对业务生效。'}</span><div className="model-inline-actions"><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle className="model-spin" size={16} /> : <FileCode2 size={16} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle className="model-spin" size={16} /> : <Save size={16} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle className="model-spin" size={16} /> : uncertain ? <RefreshCw size={16} /> : <Send size={16} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}<ArrowRight size={15} /></button></div></div>
     </div>
-  </Dialog>
+  </section>
 }

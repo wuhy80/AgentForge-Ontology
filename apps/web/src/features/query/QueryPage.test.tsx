@@ -21,6 +21,27 @@ function deferred<T>() {
 }
 
 describe('query request lifecycle', () => {
+  it('映射对象可投影其他来源字段，仅主表属性可筛选排序，实例详情不提供写入入口', async () => {
+    const primary = { ...amount, mapping: { dataSourceId: 'mysql-source', column: 'amount' } };
+    const external = { id: 'status', name: '外部状态', dataType: 'string' as const, nullable: true, mapping: { dataSourceId: 'pg-source', namespace: 'public', table: 'states', column: 'status', keyColumn: 'order_id' } };
+    const mapped: DefinitionRecord = { ...schema, definition: { ...schema.definition, schema: { ...schema.definition.schema!, mode: 'db_2_schema', storageBinding: { dataSourceId: 'mysql-source', table: 'orders', idColumn: 'id' }, properties: [primary, external] } } };
+    const query = vi.fn().mockResolvedValue({ ...result, fields: [primary, external], data: [{ ...instance, values: { ...instance.values, status: 'ready' } }] });
+    const getInstance = vi.fn().mockResolvedValue({ ...instance, values: { ...instance.values, status: 'ready' } });
+    const api = { query, getInstance } as unknown as ApiClient;
+    render(<QueryPage categoryId="category" api={api} schemas={[mapped]} onModel={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: '新建实例' })).toBeNull();
+    expect(within(screen.getByLabelText('排序字段')).queryByRole('option', { name: '外部状态' })).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: '外部状态' }));
+    fireEvent.click(screen.getByRole('button', { name: '运行查询' }));
+    await screen.findByText('ready');
+    expect(query.mock.calls[0][0].select).toEqual(['status']);
+    fireEvent.click(screen.getByRole('button', { name: '查看' }));
+    const detail = await screen.findByRole('dialog');
+    await within(detail).findByText('ready');
+    expect(within(detail).queryByRole('button', { name: '编辑实例' })).toBeNull();
+    expect(within(detail).queryByRole('button', { name: '删除实例' })).toBeNull();
+  });
+
   it('applies a repeated navigation request even when its target schema ID is unchanged', () => {
     const api = { query: vi.fn() } as unknown as ApiClient;
     const other: DefinitionRecord = { ...schema, definition: { ...schema.definition, id: 'schema-b', name: '客户' } };

@@ -33,9 +33,10 @@ export function ValueInput({ property, value, onChange, disabled, id }: {
 
 export function InstanceDialog({ api, schema, instanceId, createIntents, onClose, onChanged, onForbidden }: Props) {
   const properties = schema.definition.schema?.properties ?? [];
+  const readOnly = !!schema.definition.schema?.storageBinding;
   const [record, setRecord] = useState<Instance>();
   const [drafts, setDrafts] = useState<FieldDrafts>(() => initialDrafts(properties));
-  const [editing, setEditing] = useState(!instanceId);
+  const [editing, setEditing] = useState(!instanceId && !readOnly);
   const [loading, setLoading] = useState(Boolean(instanceId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -208,13 +209,13 @@ export function InstanceDialog({ api, schema, instanceId, createIntents, onClose
               <button className="button subtle" type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>保留实例</button></div>
           </div>}
           <div className="query-dialog-footer">
-            <div>{record && !editing && !confirmDelete && <button type="button" className="button subtle query-danger-text" disabled={busy} onClick={() => { setConfirmDelete(true); setSuccess(''); }}><Trash2 size={16} />删除实例</button>}</div>
+            <div>{record && !readOnly && !editing && !confirmDelete && <button type="button" className="button subtle query-danger-text" disabled={busy} onClick={() => { setConfirmDelete(true); setSuccess(''); }}><Trash2 size={16} />删除实例</button>}{readOnly && <span className="muted">映射实例仅供读取</span>}</div>
             <div className="query-actions">
               {record && editing ? <button type="button" className="button" onClick={resetEdit} disabled={busy}>放弃修改</button>
                 : <button type="button" className="button" onClick={onClose} disabled={busy}>关闭</button>}
               {editing ? <button className="button primary" type="submit" disabled={busy}>
                 {busy ? <LoaderCircle className="query-spin" size={16} /> : <Save size={16} />}{busy ? '正在提交…' : record ? '保存修改' : '创建实例'}
-              </button> : record && !confirmDelete && <button className="button primary" type="button" disabled={busy} onClick={() => { setEditing(true); setDrafts(initialDrafts(properties, record.values)); setSuccess(''); }}><Pencil size={16} />编辑实例</button>}
+              </button> : record && !readOnly && !confirmDelete && <button className="button primary" type="button" disabled={busy} onClick={() => { setEditing(true); setDrafts(initialDrafts(properties, record.values)); setSuccess(''); }}><Pencil size={16} />编辑实例</button>}
             </div>
           </div>
         </form>}

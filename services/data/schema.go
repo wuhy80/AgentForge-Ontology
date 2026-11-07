@@ -40,6 +40,9 @@ func validateSchema(d c.Definition) error {
 	if d.Kind != c.KindSchema || d.Schema == nil {
 		return problem(422, "unsupported", "该定义不是可存储 Schema")
 	}
+	if d.Schema.StorageBinding != nil {
+		return validateMappedDefinition(d)
+	}
 	s := d.Schema
 	if s.Mode != "schema_2_db" || s.StorageLayout != "single" {
 		return problem(422, "unsupported", "首批仅支持 schema_2_db / single")

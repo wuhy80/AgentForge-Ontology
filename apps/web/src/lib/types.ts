@@ -5,6 +5,21 @@ export type Values = Record<string, JsonValue>
 export type Kind = 'schema' | 'enum' | 'link' | 'action' | 'function'
 export type DataType = 'string' | 'text' | 'longtext' | 'uuid' | 'int64' | 'decimal' | 'boolean' | 'timestamp'
 
+export interface StorageBinding {
+  dataSourceId: string
+  namespace?: string
+  table: string
+  idColumn?: string
+  tenantColumn?: string
+}
+export interface PropertyMapping {
+  dataSourceId: string
+  namespace?: string
+  table?: string
+  column: string
+  keyColumn?: string
+  tenantColumn?: string
+}
 export interface Property {
   id: string
   name: string
@@ -16,6 +31,7 @@ export interface Property {
   scale?: number
   enumId?: string
   default?: JsonValue
+  mapping?: PropertyMapping
 }
 export interface Index {
   id: string
@@ -28,7 +44,54 @@ export interface Schema {
   storageLayout: string
   properties: Property[]
   indexes?: Index[]
+  storageBinding?: StorageBinding
 }
+
+export type DataSourceDriver = 'mysql' | 'postgresql'
+export type SourceTLSMode = 'disable' | 'require' | 'verify-full'
+export interface DataSource {
+  id: string
+  tenantId: string
+  name: string
+  driver: DataSourceDriver
+  database: string
+  enabled: boolean
+  tenantIsolation: 'column' | 'dedicated'
+  etag: string
+  host?: string
+  port?: number
+  username?: string
+  tlsMode?: SourceTLSMode
+  passwordSet?: boolean
+}
+export interface DataSourceInput {
+  name: string
+  driver: DataSourceDriver
+  host: string
+  port: number
+  database: string
+  username: string
+  password?: string
+  tlsMode: SourceTLSMode
+  enabled: boolean
+  tenantIsolation: 'column' | 'dedicated'
+}
+export interface SourceTableInfo { namespace: string; name: string; type: string }
+export interface SourceColumn {
+  name: string
+  databaseType: string
+  dataType: DataType | string
+  nullable: boolean
+  primaryKey: boolean
+  generated: boolean
+  precision?: number
+  scale?: number
+  maxLength?: number
+  position: number
+}
+export interface SourceIndex { name: string; unique: boolean; primary: boolean; columns: string[]; predicate?: string }
+export interface SourceTable { namespace: string; name: string; columns: SourceColumn[]; indexes: SourceIndex[]; signature: string }
+export interface SourceTestResult { success: boolean; serverVersion: string }
 export interface EnumValue { code: string; label: string; deprecated?: boolean }
 export interface Enum { values: EnumValue[] }
 export interface Link {

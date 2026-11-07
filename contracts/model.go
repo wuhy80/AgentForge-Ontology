@@ -34,10 +34,33 @@ type Definition struct {
 }
 
 type Schema struct {
-	Mode          string     `json:"mode"`
-	StorageLayout string     `json:"storageLayout"`
-	Properties    []Property `json:"properties"`
-	Indexes       []Index    `json:"indexes,omitempty"`
+	Mode           string          `json:"mode"`
+	StorageLayout  string          `json:"storageLayout"`
+	StorageBinding *StorageBinding `json:"storageBinding,omitempty"`
+	Properties     []Property      `json:"properties"`
+	Indexes        []Index         `json:"indexes,omitempty"`
+}
+
+// StorageBinding identifies the primary table that determines entity identity.
+// Additional property sources must join its IDColumn through a unique key.
+type StorageBinding struct {
+	DataSourceID string `json:"dataSourceId"`
+	Namespace    string `json:"namespace,omitempty"`
+	Table        string `json:"table"`
+	IDColumn     string `json:"idColumn,omitempty"`
+	TenantColumn string `json:"tenantColumn,omitempty"`
+}
+
+// PropertyMapping binds a field to one physical column. An omitted table uses
+// the primary table; secondary tables require a unique KeyColumn. Credentials
+// and arbitrary SQL are never part of a definition.
+type PropertyMapping struct {
+	DataSourceID string `json:"dataSourceId"`
+	Namespace    string `json:"namespace,omitempty"`
+	Table        string `json:"table,omitempty"`
+	Column       string `json:"column"`
+	KeyColumn    string `json:"keyColumn,omitempty"`
+	TenantColumn string `json:"tenantColumn,omitempty"`
 }
 
 type Property struct {
@@ -45,14 +68,15 @@ type Property struct {
 	Name string `json:"name"`
 	// DataType supports string, text, longtext, uuid, int64, decimal, boolean,
 	// and timestamp. Text byte budgets are defined in limits.go.
-	DataType  string          `json:"dataType"`
-	Required  bool            `json:"required,omitempty"`
-	Nullable  bool            `json:"nullable,omitempty"`
-	ReadOnly  bool            `json:"readOnly,omitempty"`
-	Precision int             `json:"precision,omitempty"`
-	Scale     int             `json:"scale,omitempty"`
-	EnumID    string          `json:"enumId,omitempty"`
-	Default   json.RawMessage `json:"default,omitempty"`
+	DataType  string           `json:"dataType"`
+	Required  bool             `json:"required,omitempty"`
+	Nullable  bool             `json:"nullable,omitempty"`
+	ReadOnly  bool             `json:"readOnly,omitempty"`
+	Precision int              `json:"precision,omitempty"`
+	Scale     int              `json:"scale,omitempty"`
+	EnumID    string           `json:"enumId,omitempty"`
+	Default   json.RawMessage  `json:"default,omitempty"`
+	Mapping   *PropertyMapping `json:"mapping,omitempty"`
 }
 
 type Index struct {

@@ -1,4 +1,4 @@
-param([switch]$DependenciesOnly)
+param([switch]$DependenciesOnly, [switch]$SourceDatabases)
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $devRoot = Join-Path $repoRoot '.cache/dev'
@@ -17,18 +17,29 @@ if (-not (Test-Path -LiteralPath $secretFile)) {
         AuthSecret = New-LocalSecret
         ServiceToken = New-LocalSecret
         CursorSecret = New-LocalSecret
+        DataSourceKey = New-LocalSecret
+        SourcePostgresPassword = New-LocalSecret
     } | ConvertTo-Json | Set-Content -LiteralPath $secretFile -Encoding UTF8
 }
 $secrets = Get-Content -LiteralPath $secretFile -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $secrets.PSObject.Properties['DataSourceKey']) {
+    $secrets | Add-Member -NotePropertyName DataSourceKey -NotePropertyValue (New-LocalSecret)
+    $secrets | ConvertTo-Json | Set-Content -LiteralPath $secretFile -Encoding UTF8
+}
+if (-not $secrets.PSObject.Properties['SourcePostgresPassword']) {
+    $secrets | Add-Member -NotePropertyName SourcePostgresPassword -NotePropertyValue (New-LocalSecret)
+    $secrets | ConvertTo-Json | Set-Content -LiteralPath $secretFile -Encoding UTF8
+}
 foreach ($entry in $secrets.PSObject.Properties) {
     if ($entry.Value -notmatch '^[a-f0-9]{48,128}$') { throw "Invalid local secret: $($entry.Name)" }
 }
 $composeEnv = Join-Path $devRoot 'compose.env'
-@("ONTOLOGY_MYSQL_ROOT_PASSWORD=$($secrets.MySQLRootPassword)", "ONTOLOGY_MYSQL_PASSWORD=$($secrets.MySQLPassword)") | Set-Content -LiteralPath $composeEnv -Encoding ASCII
+@("ONTOLOGY_MYSQL_ROOT_PASSWORD=$($secrets.MySQLRootPassword)", "ONTOLOGY_MYSQL_PASSWORD=$($secrets.MySQLPassword)", "ONTOLOGY_SOURCE_POSTGRES_PASSWORD=$($secrets.SourcePostgresPassword)") | Set-Content -LiteralPath $composeEnv -Encoding ASCII
 $compose = Join-Path $repoRoot 'deploy/compose/development.yaml'
-& docker compose --env-file $composeEnv -f $compose up -d --wait --wait-timeout 90
+$composeProfiles = if ($SourceDatabases) { @('--profile', 'sources') } else { @() }
+& docker compose --env-file $composeEnv -f $compose @composeProfiles up -d --wait --wait-timeout 90
 if ($LASTEXITCODE -ne 0) { throw 'Development dependencies did not become ready. Start Docker Desktop and inspect docker compose logs.' }
-if ($DependenciesOnly) { Write-Output 'Development MySQL and OPA are ready.'; return }
+if ($DependenciesOnly) { Write-Output 'Selected development dependencies are ready.'; return }
 
 $adminFile = Join-Path $devRoot 'admin.json'
 if (-not (Test-Path -LiteralPath $adminFile)) {
@@ -36,7 +47,7 @@ if (-not (Test-Path -LiteralPath $adminFile)) {
 }
 $initialAdmin = Get-Content -LiteralPath $adminFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
-$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD')
+$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD')
 $savedEnvironment = @{}
 foreach ($name in $envNames) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -45,6 +56,7 @@ try {
     $env:ONTOLOGY_AUTH_SECRET = $secrets.AuthSecret
     $env:ONTOLOGY_SERVICE_TOKEN = $secrets.ServiceToken
     $env:ONTOLOGY_CURSOR_SECRET = $secrets.CursorSecret
+    $env:ONTOLOGY_DATA_SOURCE_KEY = $secrets.DataSourceKey
     $env:ONTOLOGY_OPA_URL = 'http://127.0.0.1:28181'
     $env:ONTOLOGY_METADATA_URL = 'http://127.0.0.1:18080'
     $env:ONTOLOGY_DATA_URL = 'http://127.0.0.1:18081'

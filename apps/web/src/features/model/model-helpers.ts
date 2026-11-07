@@ -41,6 +41,26 @@ export function validateDefinition(definition: Definition): string | undefined {
   if (!definition.name.trim()) return '请填写业务名称。'
   if (!definition.categoryId || !definition.groupId) return '请选择分类和分组。'
   if (definition.schema) {
+    const schema = definition.schema
+    const binding = schema.storageBinding
+    if (schema.mode !== 'schema_2_db' && schema.mode !== 'db_2_schema') return '请选择已支持的建模方向。'
+    if (schema.mode === 'db_2_schema' && !binding) return '数据库为准的模型必须绑定数据源与主表。'
+    if (binding) {
+      if (!binding.dataSourceId || !binding.table.trim() || !binding.idColumn?.trim()) return '请完整配置主数据源、主表名称和对象主键列。'
+      const sources = new Set([`${binding.dataSourceId}/${binding.namespace ?? ''}/${binding.table}`])
+      for (const property of schema.properties) {
+        const mapping = property.mapping
+        if (!mapping?.dataSourceId || !mapping.column.trim()) return `请配置属性“${property.name || '未命名属性'}”的数据源与映射列。`
+        const sameSource = mapping.dataSourceId === binding.dataSourceId
+        const sameTable = sameSource && (!mapping.table || mapping.table === binding.table) && (!mapping.namespace || mapping.namespace === binding.namespace)
+        if (!sameTable) {
+          if (!mapping.table?.trim() || !mapping.keyColumn?.trim()) return `属性“${property.name || '未命名属性'}”的其他来源须填写来源表与唯一关联键列。`
+          if (!property.nullable) return `跨来源属性“${property.name || '未命名属性'}”必须允许空值。`
+        }
+        sources.add(`${mapping.dataSourceId}/${mapping.namespace ?? (sameSource ? binding.namespace ?? '' : '')}/${mapping.table || binding.table}`)
+      }
+      if (sources.size > 8) return '一个对象最多绑定 8 张来源表。'
+    } else if (schema.properties.some((property) => property.mapping)) return '属性映射需要先配置对象的主数据源与主表。'
     if (definition.schema.properties.length === 0) return '对象模型至少需要一个属性。'
     if (definition.schema.properties.length > MAX_SCHEMA_PROPERTIES) return `对象模型最多支持 ${MAX_SCHEMA_PROPERTIES} 个属性。`
     if ((definition.schema.indexes?.length ?? 0) > MAX_SCHEMA_INDEXES) return `对象模型最多支持 ${MAX_SCHEMA_INDEXES} 个索引。`

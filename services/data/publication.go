@@ -34,6 +34,15 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, result)
 		return
 	}
+	if req.Definition.Schema != nil && req.Definition.Schema.StorageBinding != nil {
+		result, err := h.previewMapped(r.Context(), req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, 200, result)
+		return
+	}
 	statement, err := ddl(req.Definition)
 	if err != nil {
 		writeError(w, err)
@@ -89,6 +98,15 @@ func (h *handler) prepare(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Definition.Kind != c.KindSchema {
 		writeJSON(w, 200, c.PrepareResult{OperationID: req.OperationID, Status: "prepared"})
+		return
+	}
+	if req.Definition.Schema != nil && req.Definition.Schema.StorageBinding != nil {
+		result, err := h.prepareMapped(r.Context(), req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, 200, result)
 		return
 	}
 	statement, err := ddl(req.Definition)

@@ -28,22 +28,24 @@ import { DialogScope } from './components/Dialog'
 import { Dialog } from './components/Dialog'
 import { AdminPage } from './features/admin/AdminPage'
 import { OrganizationsPage } from './features/organizations/OrganizationsPage'
+import { SourcesPage } from './features/sources/SourcesPage'
 
-type View = 'overview' | 'organizations' | 'models' | 'query' | 'admin'
+type View = 'overview' | 'organizations' | 'sources' | 'models' | 'query' | 'admin'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
 type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
 const nav = [
   { id: 'overview' as const, name: '工作空间', subtitle: '概览', icon: LayoutDashboard },
   { id: 'organizations' as const, name: '分类与分组', subtitle: '维护业务目录', icon: FolderTree },
+  { id: 'sources' as const, name: '数据源配置', subtitle: '管理数据库连接', icon: Database },
   { id: 'models' as const, name: '模型管理', subtitle: '定义业务世界', icon: Layers3 },
   { id: 'query' as const, name: '数据探索', subtitle: '让数据回答问题', icon: Search },
   { id: 'admin' as const, name: '用户与权限', subtitle: '管理成员和访问范围', icon: Users },
 ]
 
-function currentView(): View {
-  const hash = window.location.hash.slice(1)
-  return hash === 'organizations' || hash === 'models' || hash === 'query' || hash === 'admin' ? hash : 'overview'
+function currentView(route = window.location.hash.slice(1)): View {
+  const hash = route.split(/[/?]/)[0]
+  return hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' ? hash : 'overview'
 }
 
 function Brand({ light = false }: { light?: boolean }) {
@@ -269,7 +271,12 @@ export function App() {
 }
 
 function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnecting }: { session: Session; onDisconnect: () => Promise<void>; onAccountUpdated: (account: AccountSession) => void; notice: string; disconnecting: boolean }) {
-  const [view, setView] = useState<View>(currentView)
+  const [route, setRoute] = useState(() => window.location.hash.slice(1))
+  const view = currentView(route)
+  const routeRef = useRef(route)
+  routeRef.current = route
+  const navigationGuard = useRef<(() => boolean) | undefined>(undefined)
+  const registerNavigationGuard = useCallback((guard?: () => boolean) => { navigationGuard.current = guard }, [])
   const categoryStorageKey = `ontology.category.${encodeURIComponent(session.identity.tenantId)}.${encodeURIComponent(session.account.user.id)}`
   const [selectedCategoryId, setSelectedCategoryId] = useState(() => {
     try { return sessionStorage.getItem(categoryStorageKey) ?? '' } catch { return '' }
@@ -353,20 +360,43 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
     }
   }, [refresh])
   useEffect(() => {
-    const update = () => setView(currentView())
+    const update = () => {
+      const next = window.location.hash.slice(1)
+      if (next === routeRef.current) return
+      if (navigationGuard.current && !navigationGuard.current()) {
+        window.history.replaceState(null, '', `#${routeRef.current}`)
+        return
+      }
+      setRoute(next)
+    }
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
   }, [])
-  const navigate = (next: View) => {
-    setView(next)
-    window.location.hash = next
+  const navigateModel = (path: string, replace = false) => {
+    routeRef.current = path
+    setRoute(path)
+    if (replace) window.history.replaceState(null, '', `#${path}`)
+    else window.location.hash = path
+  }
+  const navigate = (next: View, preserveEditor = false) => {
+    if (!preserveEditor && navigationGuard.current && !navigationGuard.current()) return
+    navigateModel(next)
   }
   const selectCategory = (id: string) => {
     if (id === selectedCategoryId) return
+    if (navigationGuard.current && !navigationGuard.current()) return
     setSelectedCategoryId(id)
     setInitialSchemaId(undefined)
     setSelectionRequest((value) => value + 1)
+    if (view === 'models' && route.startsWith('models/')) navigateModel('models', true)
   }
+  useEffect(() => {
+    if (!loaded || !route.startsWith('models/') || route.startsWith('models/new')) return
+    let id: string
+    try { id = decodeURIComponent(route.slice(7).split('?')[0]) } catch { return }
+    const definition = entries.find((entry) => entry.definition.id === id)?.definition
+    if (definition && categories.some((category) => category.id === definition.categoryId)) setSelectedCategoryId(definition.categoryId)
+  }, [loaded, route, entries, categories])
   const query = (schemaId: string) => {
     setInitialSchemaId(schemaId)
     setSelectionRequest((value) => value + 1)
@@ -400,9 +430,10 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
         </div>
         <div className="nav-label">工作台</div>
         <nav aria-label="工作台导航">
-          {nav.filter((item) => item.id !== 'admin' || session.account.user.administrator).map((item) => (
+          {nav.filter((item) => !['admin', 'sources'].includes(item.id) || session.account.user.administrator).map((item) => (
             <a
               href={`#${item.id}`}
+              onClick={(event) => { event.preventDefault(); navigate(item.id) }}
               key={item.id}
               className={`nav-item ${view === item.id ? 'active' : ''}`}
               aria-label={item.name}
@@ -471,7 +502,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
               className="icon-button"
               aria-label="退出工作空间"
               title="退出工作空间"
-              onClick={onDisconnect}
+              onClick={() => { if (!navigationGuard.current || navigationGuard.current()) void onDisconnect() }}
               disabled={disconnecting}
             >
               <LogOut size={17} />
@@ -527,6 +558,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                   entries={scopedEntries}
                   session={session}
                   onModels={() => navigate('models')}
+                  onModel={(id) => navigateModel(`models/${encodeURIComponent(id)}`)}
                   onOrganizations={() => navigate('organizations')}
                   onQuery={query}
                 />
@@ -541,15 +573,22 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                   <ModelsPage
                     api={session.api}
                     active={view === 'models'}
+                    route={route}
+                    onNavigate={navigateModel}
+                    onNavigationGuard={registerNavigationGuard}
                     categories={categories}
                     categoryId={categoryId}
                     entries={entries}
                     draftDirectoryDenied={draftDirectoryDenied}
                     onRefresh={refresh}
                     onQuery={query}
-                    onOrganizations={() => navigate('organizations')}
+                    onOrganizations={() => navigate('organizations', true)}
+                    onSources={session.account.user.administrator ? () => navigate('sources', true) : undefined}
                   />
                 </DialogScope>
+              </section>
+              <section hidden={view !== 'sources'}>
+                <SourcesPage api={session.api} administrator={session.account.user.administrator} active={view === 'sources'} />
               </section>
               <section hidden={view !== 'query'}>
                 <DialogScope active={view === 'query'}>
@@ -614,6 +653,7 @@ function Overview({
   entries,
   session,
   onModels,
+  onModel,
   onOrganizations,
   onQuery,
 }: {
@@ -623,6 +663,7 @@ function Overview({
   entries: DefinitionRecord[]
   session: Session
   onModels: () => void
+  onModel: (id: string) => void
   onOrganizations: () => void
   onQuery: (id: string) => void
 }) {
@@ -739,7 +780,7 @@ function Overview({
                         <span className={`definition-glyph kind-${entry.definition.kind}`}>
                           <Box size={16} />
                         </span>
-                        <button type="button" className="table-name" onClick={onModels}>
+                        <button type="button" className="table-name" onClick={() => onModel(entry.definition.id)}>
                           {entry.definition.name}
                         </button>
                       </td>

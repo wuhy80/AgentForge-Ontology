@@ -19,7 +19,7 @@ function client(initial = record()) {
     listGroups: vi.fn().mockResolvedValue(groups), getDraft: vi.fn().mockResolvedValue(initial),
     getCurrent: vi.fn().mockResolvedValue(initial), createCategory: vi.fn(), createGroup: vi.fn(),
     createDefinition: vi.fn(), saveDraft: vi.fn(), preview: vi.fn().mockResolvedValue({ operationId: 'preview', status: 'preview', statements: ['CREATE TABLE test (...)'] }),
-    publish: vi.fn(), getPublication: vi.fn(),
+    publish: vi.fn(), getPublication: vi.fn(), listDataSources: vi.fn().mockResolvedValue([]), listSourceTables: vi.fn().mockResolvedValue([]), inspectSourceTable: vi.fn(),
   }
 }
 function mount(api: ReturnType<typeof client>, entries = [record()]) {
@@ -29,10 +29,99 @@ function mount(api: ReturnType<typeof client>, entries = [record()]) {
 }
 async function edit() {
   await userEvent.click(screen.getByRole('button', { name: '编辑' }))
-  return screen.findByRole('dialog')
+  return screen.findByRole('region', { name: '模型编辑' })
 }
 
 describe('模型工作流', () => {
+  it('模型地址直接读取独立编辑页，返回列表更新路由', async () => {
+    const api = client()
+    const onNavigate = vi.fn()
+    render(<ModelsPage api={api as unknown as ApiClient} categoryId="category" categories={categories} entries={[record()]} onRefresh={vi.fn().mockResolvedValue(undefined)} onQuery={vi.fn()} onOrganizations={vi.fn()} route="models/equipment" onNavigate={onNavigate} />)
+    const editor = await screen.findByRole('region', { name: '模型编辑' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('table', { name: '按分组排列的业务模型' })).toBeNull()
+    expect(api.getDraft).toHaveBeenCalledWith('equipment')
+    await userEvent.click(within(editor).getByRole('button', { name: '返回模型列表' }))
+    expect(onNavigate).toHaveBeenCalledWith('models')
+  })
+
+  it('跨数据源属性保存完整关联映射并要求允许空值', async () => {
+    const initial = record()
+    initial.definition.schema!.storageBinding = { dataSourceId: 'source-a', table: 'equipment', idColumn: 'id' }
+    initial.definition.schema!.properties[0].mapping = { dataSourceId: 'source-a', column: 'name' }
+    const api = client(initial)
+    api.listDataSources.mockResolvedValue([
+      { id: 'source-a', tenantId: 'tenant', name: '设备库', driver: 'mysql', database: 'equipment', enabled: true, etag: 'a', tenantIsolation: 'dedicated' },
+      { id: 'source-b', tenantId: 'tenant', name: '资产库', driver: 'postgresql', database: 'assets', enabled: true, etag: 'b', tenantIsolation: 'column' },
+    ])
+    api.saveDraft.mockImplementation(async (_id, definition) => ({ ...initial, definition, etag: 'saved-2' }))
+    mount(api, [initial])
+    const editor = await edit()
+    await within(within(editor).getByLabelText('属性1数据源')).findByRole('option', { name: '资产库 · PostgreSQL' })
+    fireEvent.change(within(editor).getByLabelText('属性1数据源'), { target: { value: 'source-b' } })
+    fireEvent.change(within(editor).getByLabelText('属性1命名空间'), { target: { value: 'public' } })
+    fireEvent.change(within(editor).getByLabelText('属性1来源表'), { target: { value: 'asset_details' } })
+    fireEvent.change(within(editor).getByLabelText('属性1映射列'), { target: { value: 'asset_name' } })
+    fireEvent.change(within(editor).getByLabelText('属性1关联键列'), { target: { value: 'equipment_id' } })
+    fireEvent.change(within(editor).getByLabelText('属性1租户列'), { target: { value: 'tenant_id' } })
+    await userEvent.click(within(editor).getByRole('button', { name: '保存草稿' }))
+    await within(editor).findByText('跨来源属性“设备名称”必须允许空值。')
+    expect(api.saveDraft).not.toHaveBeenCalled()
+    await userEvent.click(within(editor).getByRole('checkbox', { name: '允许空值' }))
+    await userEvent.click(within(editor).getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('equipment', expect.objectContaining({ schema: expect.objectContaining({ properties: [expect.objectContaining({ id: 'name', nullable: true, mapping: { dataSourceId: 'source-b', namespace: 'public', table: 'asset_details', column: 'asset_name', keyColumn: 'equipment_id', tenantColumn: 'tenant_id' } })] }) }), 'saved-1'))
+  })
+
+  it('反向读取源列保留已有属性ID和中文名，迟到的目录结果不覆盖新绑定', async () => {
+    const initial = record()
+    initial.definition.schema!.mode = 'db_2_schema'
+    initial.definition.schema!.storageBinding = { dataSourceId: 'source-a', table: 'equipment', idColumn: 'id' }
+    initial.definition.schema!.properties[0].mapping = { dataSourceId: 'source-a', column: 'equipment_name' }
+    const api = client(initial)
+    api.inspectSourceTable.mockResolvedValue({ namespace: 'business', name: 'equipment', signature: 'snapshot', indexes: [], columns: [
+      { name: 'id', databaseType: 'bigint', dataType: 'int64', nullable: false, primaryKey: true, generated: false, position: 1 },
+      { name: 'equipment_name', databaseType: 'varchar(255)', dataType: 'string', nullable: true, primaryKey: false, generated: false, position: 2 },
+    ] })
+    api.saveDraft.mockImplementation(async (_id, definition) => ({ ...initial, definition, etag: 'saved-2' }))
+    mount(api, [initial])
+    const editor = await edit()
+    await userEvent.click(within(editor).getByRole('button', { name: '从主表读取属性' }))
+    await within(editor).findByText(/已载入 1 个主表属性/)
+    expect((within(editor).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备名称')
+    await userEvent.click(within(editor).getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('equipment', expect.objectContaining({ schema: expect.objectContaining({ properties: [expect.objectContaining({ id: 'name', name: '设备名称', mapping: expect.objectContaining({ column: 'equipment_name' }) })] }) }), 'saved-1'))
+    let finish!: (value: unknown) => void
+    api.inspectSourceTable.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    await userEvent.click(within(editor).getByRole('button', { name: '从主表读取属性' }))
+    fireEvent.change(within(editor).getByLabelText('主表名称'), { target: { value: 'changed_table' } })
+    await act(async () => finish({ namespace: 'business', name: 'equipment', columns: [], indexes: [], signature: 'late' }))
+    expect((within(editor).getByLabelText('主表名称') as HTMLInputElement).value).toBe('changed_table')
+    expect((within(editor).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备名称')
+    api.inspectSourceTable.mockResolvedValueOnce({ namespace: 'business', name: 'changed_table', signature: 'generated', indexes: [], columns: [
+      { name: 'id', databaseType: 'bigint', dataType: 'int64', nullable: false, primaryKey: true, generated: true, position: 1 },
+      { name: 'derived_name', databaseType: 'varchar(255)', dataType: 'string', nullable: false, primaryKey: false, generated: true, position: 2 },
+    ] })
+    await userEvent.click(within(editor).getByRole('button', { name: '从主表读取属性' }))
+    await within(editor).findByText(/derived_name（生成列暂未支持）/)
+    expect((within(editor).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备名称')
+  })
+
+  it('已生效的正向绑定允许增加可空属性，已有属性和映射保持锁定', async () => {
+    const initial = record('active')
+    initial.definition.schema!.storageBinding = { dataSourceId: 'source-a', table: 'equipment', idColumn: 'id' }
+    initial.definition.schema!.properties[0].mapping = { dataSourceId: 'source-a', column: 'name' }
+    const api = client(initial)
+    mount(api, [initial])
+    const editor = await edit()
+    expect((within(editor).getByLabelText('对象属性第1项类型') as HTMLSelectElement).disabled).toBe(true)
+    expect((within(editor).getByLabelText('属性1数据源') as HTMLSelectElement).disabled).toBe(true)
+    await userEvent.click(within(editor).getByRole('button', { name: '添加属性' }))
+    expect((within(editor).getByLabelText('对象属性第2项类型') as HTMLSelectElement).disabled).toBe(false)
+    expect((within(editor).getAllByRole('checkbox', { name: '允许空值' })[1] as HTMLInputElement).checked).toBe(true)
+    expect((within(editor).getAllByRole('checkbox', { name: '允许空值' })[1] as HTMLInputElement).disabled).toBe(true)
+    expect(within(editor).queryByRole('button', { name: '删除对象属性第1项' })).toBeNull()
+  })
+
   it('新建定义固定绑定顶部当前分类，仅允许该分类的分组', async () => {
     const secondCategory = { id: 'quality', tenantId: 'tenant', name: '质量管理' }
     const secondGroup = { id: 'quality-group', tenantId: 'tenant', categoryId: 'quality', name: '质检资料' }
@@ -42,7 +131,7 @@ describe('模型工作流', () => {
     expect(screen.queryByLabelText('按分类筛选')).toBeNull()
     expect(screen.queryByRole('button', { name: '管理分类' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('region', { name: '模型编辑' })
     const category = within(dialog).getByLabelText('分类') as HTMLInputElement
     expect(category.value).toBe('质量管理')
     expect(category.readOnly).toBe(true)
@@ -73,7 +162,7 @@ describe('模型工作流', () => {
     expect(api.listGroups).not.toHaveBeenCalled()
     view.rerender(<ModelsPage {...props} categoryId="category" />)
     await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('region', { name: '模型编辑' })
     await within(dialog).findByText('当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。')
     await userEvent.type(within(dialog).getByLabelText('业务名称'), '尚无分组')
     expect((within(dialog).getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true)
@@ -92,7 +181,7 @@ describe('模型工作流', () => {
     expect(screen.queryByRole('button', { name: '检验报告' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: '关系0' }))
     await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('region', { name: '模型编辑' })
     expect(within(within(dialog).getByLabelText('来源模型')).getByRole('option', { name: '质量管理 / 检验报告' })).toBeTruthy()
   })
 
@@ -103,7 +192,7 @@ describe('模型工作流', () => {
     const props = { api: api as unknown as ApiClient, categoryId: 'category', categories, entries: [], onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn(), onOrganizations }
     const view = render(<ModelsPage {...props} active />)
     await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('region', { name: '模型编辑' })
     await within(dialog).findByText('当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。')
     await userEvent.type(within(dialog).getByLabelText('业务名称'), '待完成的设备模型')
     await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '设备编码')
@@ -134,14 +223,14 @@ describe('模型工作流', () => {
     await userEvent.click(screen.getByRole('button', { name: '编辑' }))
     view.rerender(<ModelsPage {...props} categoryId="quality" />)
     await act(async () => finishRead(record()))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull()
     expect((screen.getByLabelText('搜索业务模型') as HTMLInputElement).value).toBe('')
     expect(screen.queryByRole('button', { name: '生产设备' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('region', { name: '模型编辑' })
     expect((within(dialog).getByLabelText('分类') as HTMLInputElement).value).toBe('质量管理')
     view.rerender(<ModelsPage {...props} categoryId="category" />)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull()
   })
 
   it('未确认发布按分类保留，切回原分类后仍可恢复', async () => {
@@ -154,11 +243,11 @@ describe('模型工作流', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
     await within(dialog).findByText('发布结果待确认')
     view.rerender(<ModelsPage {...props} categoryId="quality" />)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull()
     expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
     view.rerender(<ModelsPage {...props} categoryId="category" />)
     await userEvent.click(screen.getByRole('button', { name: /生产设备.*等待激活.*恢复发布/ }))
-    expect(within(await screen.findByRole('dialog')).getByRole('button', { name: /继续恢复发布/ })).toBeTruthy()
+    expect(within(await screen.findByRole('region', { name: '模型编辑' })).getByRole('button', { name: /继续恢复发布/ })).toBeTruthy()
   })
 
   it('切换分类后迟到的发布结果仅保留原分类恢复意图', async () => {
@@ -172,7 +261,7 @@ describe('模型工作流', () => {
     await waitFor(() => expect(api.publish).toHaveBeenCalledTimes(1))
     view.rerender(<ModelsPage {...props} categoryId="quality" />)
     await act(async () => rejectPublication(new ApiError(503, 'prepare_failed', '等待恢复', { id: 'operation', tenantId: 'tenant', definitionId: 'equipment', status: 'prepare_failed' })))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull()
     expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
     view.rerender(<ModelsPage {...props} categoryId="category" />)
     expect(screen.getByRole('button', { name: /生产设备.*等待确认.*恢复发布/ })).toBeTruthy()
@@ -186,7 +275,7 @@ describe('模型工作流', () => {
     mount(api)
     await userEvent.click(screen.getByRole('button', { name: '编辑' }))
     await screen.findByText('定义不属于当前分类，请切换顶部分类后重新打开。')
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull()
   })
 
   it('未保存编辑不能发布，保存后以服务器返回的新 etag 发布', async () => {
@@ -215,10 +304,10 @@ describe('模型工作流', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
     await within(dialog).findByText('发布结果待确认')
     expect((within(dialog).getByLabelText('业务名称') as HTMLInputElement).closest('fieldset')?.disabled).toBe(true)
-    await userEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: '返回模型列表' }))
+    expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /生产设备.*等待激活.*恢复发布/ }))
-    dialog = await screen.findByRole('dialog')
+    dialog = await screen.findByRole('region', { name: '模型编辑' })
     await userEvent.click(within(dialog).getByRole('button', { name: /继续恢复发布/ }))
     await within(dialog).findByText('发布成功，当前定义已生效。')
     expect(api.publish.mock.calls).toEqual([['equipment', 'saved-1'], ['equipment', 'saved-1']])
@@ -254,7 +343,7 @@ describe('模型工作流', () => {
     const api = client()
     mount(api, [])
     await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('region', { name: '模型编辑' })
     await userEvent.type(within(dialog).getByLabelText('业务名称'), '车间')
     await waitFor(() => expect(within(dialog).getByRole('option', { name: '基础资料' })).toBeTruthy())
     fireEvent.change(within(dialog).getByLabelText('分组'), { target: { value: 'group' } })
@@ -282,7 +371,7 @@ describe('模型工作流', () => {
     const api = client(initial)
     mount(api, [initial, enumeration])
     await userEvent.click(screen.getByRole('button', { name: '生产设备' }))
-    const dialog = await screen.findByRole('dialog')
+    const dialog = await screen.findByRole('region', { name: '模型编辑' })
     expect((within(dialog).getByRole('button', { name: '添加属性' }) as HTMLButtonElement).disabled).toBe(true)
     expect((within(dialog).getByRole('button', { name: '添加索引' }) as HTMLButtonElement).disabled).toBe(true)
     expect(within(dialog).queryByLabelText('对象属性第1项枚举')).toBeNull()
@@ -301,7 +390,7 @@ describe('模型工作流', () => {
     api.saveDraft.mockResolvedValue(saved)
     await userEvent.click(within(dialog).getByRole('button', { name: '保存草稿' }))
     await within(dialog).findByText('草稿已保存。可以继续配置索引、预览存储计划或发布。')
-    await userEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '返回模型列表' }))
     const external = record('draft', 'external'); external.definition.name = '其他协作者的新名称'
     view.rerender(<ModelsPage {...props} entries={[external]} />)
     expect(screen.getByRole('button', { name: '其他协作者的新名称' })).toBeTruthy()
@@ -321,7 +410,7 @@ describe('模型工作流', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '保存草稿' }))
     await within(dialog).findByText('草稿已保存，目录刷新失败；可稍后刷新目录。')
     view.rerender(<ModelsPage {...props} entries={[]} />)
-    await userEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '返回模型列表' }))
     expect(screen.queryByRole('button', { name: '仍保存在服务器的草稿' })).toBeNull()
     expect(screen.getByText('从第一个业务对象开始')).toBeTruthy()
   })
@@ -338,11 +427,11 @@ describe('模型工作流', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
     await within(dialog).findByText('发布结果待确认')
     view.rerender(<ModelsPage {...props} entries={[]} draftDirectoryDenied />)
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull())
     expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
     expect(screen.queryByText('生产设备')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
-    expect((within(await screen.findByRole('dialog')).getByLabelText('业务名称') as HTMLInputElement).value).toBe('')
+    expect((within(await screen.findByRole('region', { name: '模型编辑' })).getByLabelText('业务名称') as HTMLInputElement).value).toBe('')
   })
 
   it('重开待恢复记录先重新验证草稿授权，403 时清除旧缓存', async () => {
@@ -352,12 +441,12 @@ describe('模型工作流', () => {
     const dialog = await edit()
     await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
     await within(dialog).findByText('发布结果待确认')
-    await userEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '返回模型列表' }))
     api.getDraft.mockRejectedValue(new ApiError(403, 'forbidden', '无权读取此草稿'))
     await userEvent.click(screen.getByRole('button', { name: /生产设备.*等待确认.*恢复发布/ }))
     await screen.findByText('无权读取此草稿')
     expect(api.getDraft).toHaveBeenCalledTimes(2)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull()
     expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
   })
 
@@ -369,11 +458,11 @@ describe('模型工作流', () => {
     let dialog = await edit()
     await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
     await within(dialog).findByText('发布结果待确认')
-    await userEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '返回模型列表' }))
     api.getDraft.mockRejectedValue(new ApiError(404, 'not_found', '没有草稿'))
     api.getCurrent.mockResolvedValue(record('active'))
     await userEvent.click(screen.getByRole('button', { name: /生产设备.*等待激活.*恢复发布/ }))
-    dialog = await screen.findByRole('dialog')
+    dialog = await screen.findByRole('region', { name: '模型编辑' })
     expect(api.getCurrent).toHaveBeenCalledWith('equipment')
     await userEvent.click(within(dialog).getByRole('button', { name: /继续恢复发布/ }))
     await within(dialog).findByText('发布成功，当前定义已生效。')
@@ -387,12 +476,12 @@ describe('模型工作流', () => {
     const dialog = await edit()
     await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
     await within(dialog).findByText('发布结果待确认')
-    await userEvent.click(within(dialog).getByRole('button', { name: '关闭' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: '返回模型列表' }))
     api.getDraft.mockRejectedValue(new ApiError(404, 'not_found', '没有草稿'))
     api.getCurrent.mockResolvedValue(record('active', 'different-current'))
     await userEvent.click(screen.getByRole('button', { name: /生产设备.*等待确认.*恢复发布/ }))
     await screen.findByText(/待恢复内容已改变，已清除旧草稿缓存/)
-    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull()
     expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
   })
 
@@ -407,7 +496,7 @@ describe('模型工作流', () => {
     await within(dialog).findByText('发布结果待确认')
     const current = record('active', 'public-current')
     view.rerender(<ModelsPage {...props} entries={[current]} />)
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull())
     expect(screen.queryByText('仅编辑者可见的草稿')).toBeNull()
     expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
     expect(screen.getByRole('button', { name: '生产设备' })).toBeTruthy()
@@ -424,7 +513,7 @@ describe('模型工作流', () => {
     await waitFor(() => expect(api.publish).toHaveBeenCalledTimes(1))
     view.rerender(<ModelsPage {...props} entries={[]} draftDirectoryDenied />)
     rejectPublication(new ApiError(503, 'prepare_failed', '等待恢复', { id: 'operation', tenantId: 'tenant', definitionId: 'equipment', status: 'prepare_failed' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('region', { name: '模型编辑' })).toBeNull())
     expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
   })
 })

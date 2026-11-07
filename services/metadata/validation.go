@@ -54,13 +54,22 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 			return invalidBody()
 		}
 		s := d.Schema
+		if s.Mode == "schema_to_db" {
+			s.Mode = "schema_2_db"
+		}
+		if s.Mode == "db_to_schema" {
+			s.Mode = "db_2_schema"
+		}
 		if s.StorageLayout == "" {
 			s.StorageLayout = "single"
 		}
-		if s.Mode != "schema_2_db" || s.StorageLayout != "single" {
-			return problem(422, "unsupported_capability", "首批仅支持schema_2_db与single布局")
+		if (s.Mode != "schema_2_db" && s.Mode != "db_2_schema") || s.StorageLayout != "single" {
+			return problem(422, "unsupported_capability", "支持schema_2_db或db_2_schema与single布局")
 		}
 		if err := validateProperties(s.Properties, assignIDs); err != nil {
+			return err
+		}
+		if err := canonicalStorageMappings(s); err != nil {
 			return err
 		}
 		if len(s.Properties) == 0 || len(s.Properties) > 128 {
@@ -159,6 +168,13 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		}
 		if err := validateProperties(c.Output, assignIDs); err != nil {
 			return err
+		}
+		for _, ps := range [][]contracts.Property{c.Input, c.Output} {
+			for _, property := range ps {
+				if property.Mapping != nil {
+					return problem(422, "invalid_mapping", "函数或动作参数不能配置存储列映射")
+				}
+			}
 		}
 		if c.SideEffects != "none" && c.SideEffects != "dataWrite" && c.SideEffects != "externalWrite" {
 			return problem(400, "invalid_side_effects", "必须显式声明none、dataWrite或externalWrite")
@@ -274,6 +290,9 @@ func compatibleUpdate(old, next contracts.Definition) error {
 	}
 	a, b := withoutDisplayMetadata(old), withoutDisplayMetadata(next)
 	if !reflect.DeepEqual(a, b) {
+		if compatibleMappedAddition(a, b) {
+			return nil
+		}
 		return problem(422, "migration_required", "首批只开放名称、描述和标签等展示变更；结构变化需要迁移能力")
 	}
 	return nil

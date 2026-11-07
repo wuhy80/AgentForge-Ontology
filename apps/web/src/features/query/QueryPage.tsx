@@ -29,7 +29,7 @@ export function QueryPage({ api, categoryId, schemas, categories = [], initialSc
   const selected = availableSchemas.find((item) => item.definition.id === selectedId)
     ?? availableSchemas.find((item) => item.definition.id === initialSchemaId)
     ?? availableSchemas[0];
-  const supported = selected?.definition.schema?.mode === 'schema_2_db' && selected.definition.schema.storageLayout === 'single';
+  const supported = ['schema_2_db', 'db_2_schema'].includes(selected?.definition.schema?.mode ?? '') && selected?.definition.schema?.storageLayout === 'single';
   let createIntents: Map<string, string> | undefined;
   if (selected) {
     createIntents = intentSession.current.schemas.get(selected.definition.id);
@@ -40,7 +40,7 @@ export function QueryPage({ api, categoryId, schemas, categories = [], initialSc
   }
   return <div className="query-page">
     <div className="query-page-heading"><div><div className="query-eyebrow">DATA EXPLORER</div><h1>探索业务数据</h1><p className="muted">从生效模型出发，构建查询并管理真实业务实例。</p></div>
-      <span className="badge query-live-badge"><span />MySQL 数据服务</span>
+      <span className="badge query-live-badge"><span />{selected?.definition.schema?.storageBinding ? '映射数据源' : 'MySQL 数据服务'}</span>
     </div>
     {!availableSchemas.length ? <div className="card empty-state query-first-empty"><Database size={38} /><h2>{categoryId ? '当前分类暂无生效模型' : '请先选择当前分类'}</h2><p className="muted">{categoryId ? '在当前分类发布 Schema 后，可在这里选择字段、筛选数据和新建实例。' : '从顶部选择业务分类，再探索该分类中的数据。'}</p><button type="button" className="button primary" onClick={onModel}>前往模型管理<ArrowRight size={16} /></button></div>
       : <>
@@ -106,6 +106,12 @@ function GroupEditor({ group, properties, onChange, onRemove, depth = 0 }: {
 type Executed = { result: QueryResult; spec: QuerySpec; page: number };
 function QueryWorkspace({ api, schema, createIntents }: { api: ApiClient; schema: DefinitionRecord; createIntents: Map<string, string> }) {
   const properties = schema.definition.schema!.properties;
+  const binding = schema.definition.schema!.storageBinding;
+  const readOnly = !!binding;
+  const filterProperties = binding ? properties.filter((property) => {
+    const mapping = property.mapping;
+    return mapping?.dataSourceId === binding.dataSourceId && (!mapping.table || mapping.table === binding.table) && (!mapping.namespace || mapping.namespace === binding.namespace);
+  }) : properties;
   const [editor, setEditor] = useState<QueryEditor>(() => ({ filter: newGroup(), select: [], sort: '', direction: 'asc', limit: '25' }));
   const [executed, setExecuted] = useState<Executed>();
   const [stale, setStale] = useState(false);
@@ -204,7 +210,8 @@ function QueryWorkspace({ api, schema, createIntents }: { api: ApiClient; schema
       <div className="query-section-heading"><div><Filter size={18} /><h2>构建查询</h2></div><span className="muted">更改配置后，点击运行应用</span></div>
       <div className="query-builder-content">
         <section className="query-filter-section"><div className="query-step-title"><span>01</span><h3>筛选条件</h3></div>
-          <GroupEditor group={editor.filter} properties={properties} onChange={(filter) => change({ filter })} />
+          {filterProperties.length > 0 ? <GroupEditor group={editor.filter} properties={filterProperties} onChange={(filter) => change({ filter })} /> : <p className="muted">主表尚未映射可筛选属性。</p>}
+          {readOnly && <p className="muted">筛选和排序使用主表属性；其他来源的属性可选择返回。</p>}
         </section>
         <div className="query-settings-grid"><section><div className="query-step-title"><span>02</span><h3>返回字段</h3><small className="muted">已选 {selectedCount} 项</small></div>
           <div className="query-column-actions"><button type="button" className="button subtle" onClick={() => change({ select: properties.map((property) => property.id) })}>全选</button><button type="button" className="button subtle" onClick={() => change({ select: [] })}>清空</button></div>
@@ -214,7 +221,7 @@ function QueryWorkspace({ api, schema, createIntents }: { api: ApiClient; schema
           </label>)}</div>
         </section><section><div className="query-step-title"><span>03</span><h3>排序与分页</h3></div>
           <div className="query-sort-settings"><div className="field"><label htmlFor="query-sort">排序字段</label><select id="query-sort" value={editor.sort} onChange={(event) => change({ sort: event.target.value })}>
-            <option value="">实例 ID（默认）</option>{properties.filter((property) => property.dataType !== 'text' && property.dataType !== 'longtext').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
+            <option value="">实例 ID（默认）</option>{filterProperties.filter((property) => property.dataType !== 'text' && property.dataType !== 'longtext').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
           </select></div><div className="form-grid"><div className="field"><label htmlFor="query-direction">排序方向</label><select id="query-direction" value={editor.direction} disabled={!editor.sort} onChange={(event) => change({ direction: event.target.value as 'asc' | 'desc' })}><option value="asc">升序</option><option value="desc">降序</option></select></div>
             <div className="field"><label htmlFor="query-limit">每页条数</label><input id="query-limit" type="number" min="1" max="100" step="1" value={editor.limit} onChange={(event) => change({ limit: event.target.value })} /></div></div>
             <p className="muted query-sort-hint"><ArrowDownWideNarrow size={14} />结果由服务端排序和分页，每页最多 100 条。</p>
@@ -230,7 +237,7 @@ function QueryWorkspace({ api, schema, createIntents }: { api: ApiClient; schema
     {notice && <div className="notice query-status" role="status">{notice}</div>}
     <section className="card query-results" aria-label="查询结果" aria-busy={busy}>
       <div className="query-section-heading"><div><Rows3 size={18} /><h2>查询结果</h2>{result && <span className="badge">本页 {result.data.length} 条</span>}</div>
-        <button className="button" type="button" onClick={() => setDialog({})}><Plus size={16} />新建实例</button>
+        {readOnly ? <span className="muted">来源映射 · 只读实例</span> : <button className="button" type="button" onClick={() => setDialog({})}><Plus size={16} />新建实例</button>}
       </div>
       {stale && result && <div className="query-stale" role="status"><span className="query-stale-dot" />结果已过期：配置或数据已改变，请重新运行查询。<span>续页已停用</span></div>}
       {!result ? <div className="empty-state query-result-empty"><div className="query-empty-icon"><Database size={27} /></div><h3>{busy ? '正在读取数据' : '准备好后，运行第一次查询'}</h3><p className="muted">{busy ? '你可以取消本次请求并继续调整条件。' : '勾选返回字段，按需添加条件。这里将展示服务端返回的真实结果。'}</p></div>

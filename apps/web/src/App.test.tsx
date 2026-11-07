@@ -21,6 +21,7 @@ vi.mock('./features/model/ModelsPage', () => ({ ModelsPage: ({ categoryId }: { c
 vi.mock('./features/query/QueryPage', () => ({ QueryPage: ({ categoryId, schemas }: { categoryId: string; schemas: { definition: { id: string } }[] }) => <p data-testid="query-category">{categoryId}:{schemas.map((item) => item.definition.id).join(',')}</p> }))
 vi.mock('./features/admin/AdminPage', () => ({ AdminPage: () => <p>用户管理页面</p> }))
 vi.mock('./features/organizations/OrganizationsPage', () => ({ OrganizationsPage: ({ categoryId }: { categoryId: string }) => <p data-testid="organization-category">{categoryId || '暂无分类'}</p> }))
+vi.mock('./features/sources/SourcesPage', () => ({ SourcesPage: () => <p>数据源配置页面</p> }))
 
 const session = { user: { id: 'user-id', tenantId: 'demo-tenant', username: 'admin', displayName: '管理员', administrator: true, enabled: true, roleIds: [], etag: 'user-etag' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'csrf-test' }
 beforeEach(() => {
