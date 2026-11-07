@@ -24,10 +24,10 @@ describe('query request lifecycle', () => {
   it('applies a repeated navigation request even when its target schema ID is unchanged', () => {
     const api = { query: vi.fn() } as unknown as ApiClient;
     const other: DefinitionRecord = { ...schema, definition: { ...schema.definition, id: 'schema-b', name: '客户' } };
-    const { rerender } = render(<QueryPage api={api} schemas={[schema, other]} initialSchemaId="schema-a" selectionRequest={1} onModel={vi.fn()} />);
+    const { rerender } = render(<QueryPage categoryId="category" api={api} schemas={[schema, other]} initialSchemaId="schema-a" selectionRequest={1} onModel={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('查询模型'), { target: { value: 'schema-b' } });
     expect((screen.getByLabelText('查询模型') as HTMLSelectElement).value).toBe('schema-b');
-    rerender(<QueryPage api={api} schemas={[schema, other]} initialSchemaId="schema-a" selectionRequest={2} onModel={vi.fn()} />);
+    rerender(<QueryPage categoryId="category" api={api} schemas={[schema, other]} initialSchemaId="schema-a" selectionRequest={2} onModel={vi.fn()} />);
     expect((screen.getByLabelText('查询模型') as HTMLSelectElement).value).toBe('schema-a');
   });
 
@@ -35,7 +35,7 @@ describe('query request lifecycle', () => {
     const first = deferred<QueryResult>(), second = deferred<QueryResult>(), third = deferred<QueryResult>(), fourth = deferred<QueryResult>();
     const query = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockReturnValueOnce(third.promise).mockReturnValueOnce(fourth.promise);
     const api = { query } as unknown as ApiClient;
-    render(<QueryPage api={api} schemas={[schema]} onModel={vi.fn()} />);
+    render(<QueryPage categoryId="category" api={api} schemas={[schema]} onModel={vi.fn()} />);
     fireEvent.click(screen.getByRole('checkbox', { name: '金额' }));
     fireEvent.click(screen.getByRole('button', { name: '运行查询' }));
     const firstSignal = query.mock.calls[0][1] as AbortSignal;
@@ -66,7 +66,7 @@ describe('query request lifecycle', () => {
     const query = vi.fn().mockReturnValue(pending.promise);
     const api = { query } as unknown as ApiClient;
     const other: DefinitionRecord = { ...schema, definition: { ...schema.definition, id: 'schema-b', name: '客户' } };
-    const { rerender } = render(<QueryPage api={api} schemas={[schema, other]} onModel={vi.fn()} />);
+    const { rerender } = render(<QueryPage categoryId="category" api={api} schemas={[schema, other]} onModel={vi.fn()} />);
     fireEvent.click(screen.getByRole('checkbox', { name: '金额' }));
     fireEvent.click(screen.getByRole('button', { name: '运行查询' }));
     const signal = query.mock.calls[0][1] as AbortSignal;
@@ -74,7 +74,7 @@ describe('query request lifecycle', () => {
     expect(signal.aborted).toBe(true);
     await act(async () => pending.resolve(result));
     expect(screen.queryByText(instance.id)).toBeNull();
-    rerender(<QueryPage api={{ query: vi.fn() } as unknown as ApiClient} schemas={[schema, other]} onModel={vi.fn()} />);
+    rerender(<QueryPage categoryId="category" api={{ query: vi.fn() } as unknown as ApiClient} schemas={[schema, other]} onModel={vi.fn()} />);
     expect(screen.queryByText(instance.id)).toBeNull();
     expect((screen.getByRole('checkbox', { name: '金额' }) as HTMLInputElement).checked).toBe(false);
   });
@@ -84,7 +84,7 @@ describe('query request lifecycle', () => {
       .mockRejectedValueOnce(new ApiError(0, 'network_error', '网络中断'))
       .mockRejectedValueOnce(new ApiError(422, 'invalid_cursor', '游标已失效'))
       .mockResolvedValueOnce({ ...result, hasMore: false, nextCursor: undefined });
-    render(<QueryPage api={{ query } as unknown as ApiClient} schemas={[schema]} onModel={vi.fn()} />);
+    render(<QueryPage categoryId="category" api={{ query } as unknown as ApiClient} schemas={[schema]} onModel={vi.fn()} />);
     fireEvent.click(screen.getByRole('checkbox', { name: '金额' }));
     fireEvent.click(screen.getByRole('button', { name: '运行查询' }));
     await screen.findByText(instance.values.amount as string);
@@ -101,7 +101,7 @@ describe('query request lifecycle', () => {
 
   it('clears previously read results when a later request is denied', async () => {
     const query = vi.fn().mockResolvedValueOnce(result).mockRejectedValueOnce(new ApiError(403, 'forbidden', '无权读取此模型'));
-    render(<QueryPage api={{ query } as unknown as ApiClient} schemas={[schema]} onModel={vi.fn()} />);
+    render(<QueryPage categoryId="category" api={{ query } as unknown as ApiClient} schemas={[schema]} onModel={vi.fn()} />);
     fireEvent.click(screen.getByRole('checkbox', { name: '金额' }));
     fireEvent.click(screen.getByRole('button', { name: '运行查询' }));
     await screen.findByText(instance.values.amount as string);
@@ -111,12 +111,86 @@ describe('query request lifecycle', () => {
     expect(screen.queryByText(instance.id)).toBeNull();
   });
 
-  it('disambiguates equal model names with category names when available', () => {
+  it('only shows models in the current category and retains their category labels', () => {
     const other = { ...schema, definition: { ...schema.definition, id: 'schema-b', categoryId: 'other-category' } };
-    render(<QueryPage api={{ query: vi.fn() } as unknown as ApiClient} schemas={[schema, other]}
-      categories={[{ id: 'category', tenantId: 'tenant', name: '销售' }, { id: 'other-category', tenantId: 'tenant', name: '采购' }]} onModel={vi.fn()} />);
+    const categories = [{ id: 'category', tenantId: 'tenant', name: '销售' }, { id: 'other-category', tenantId: 'tenant', name: '采购' }];
+    const api = { query: vi.fn() } as unknown as ApiClient;
+    const { rerender } = render(<QueryPage categoryId="category" api={api} schemas={[schema, other]} initialSchemaId={other.definition.id} categories={categories} onModel={vi.fn()} />);
     expect(screen.getByRole('option', { name: '销售 / 订单' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: '采购 / 订单' })).toBeNull();
+    expect((screen.getByLabelText('查询模型') as HTMLSelectElement).value).toBe(schema.definition.id);
+    rerender(<QueryPage categoryId="other-category" api={api} schemas={[schema, other]} categories={categories} onModel={vi.fn()} />);
     expect(screen.getByRole('option', { name: '采购 / 订单' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: '销售 / 订单' })).toBeNull();
+  });
+
+  it('does not expose an out-of-category model when the selected category is empty or missing', () => {
+    const query = vi.fn(), onModel = vi.fn(), api = { query } as unknown as ApiClient;
+    const { rerender } = render(<QueryPage categoryId="empty-category" api={api} schemas={[schema]} initialSchemaId={schema.definition.id} onModel={onModel} />);
+    expect(screen.getByText('当前分类暂无生效模型')).toBeTruthy();
+    expect(screen.queryByLabelText('查询模型')).toBeNull();
+    expect(screen.queryByRole('button', { name: '新建实例' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '前往模型管理' }));
+    expect(onModel).toHaveBeenCalledTimes(1);
+    rerender(<QueryPage categoryId="" api={api} schemas={[schema]} onModel={onModel} />);
+    expect(screen.getByText('请先选择当前分类')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '运行查询' })).toBeNull();
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('resets the local model selection on category changes while accepting only in-category navigation targets', () => {
+    const api = { query: vi.fn() } as unknown as ApiClient;
+    const sameCategory = { ...schema, definition: { ...schema.definition, id: 'schema-second', name: '订单明细' } };
+    const otherCategory = { ...schema, definition: { ...schema.definition, id: 'schema-other', categoryId: 'other-category', name: '客户' } };
+    const schemas = [schema, sameCategory, otherCategory];
+    const { rerender } = render(<QueryPage categoryId="category" api={api} schemas={schemas} onModel={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('查询模型'), { target: { value: sameCategory.definition.id } });
+    expect((screen.getByLabelText('查询模型') as HTMLSelectElement).value).toBe(sameCategory.definition.id);
+    rerender(<QueryPage categoryId="other-category" api={api} schemas={schemas} initialSchemaId={sameCategory.definition.id} selectionRequest={1} onModel={vi.fn()} />);
+    expect((screen.getByLabelText('查询模型') as HTMLSelectElement).value).toBe(otherCategory.definition.id);
+    rerender(<QueryPage categoryId="category" api={api} schemas={schemas} onModel={vi.fn()} />);
+    expect((screen.getByLabelText('查询模型') as HTMLSelectElement).value).toBe(schema.definition.id);
+    rerender(<QueryPage categoryId="category" api={api} schemas={schemas} initialSchemaId={sameCategory.definition.id} selectionRequest={2} onModel={vi.fn()} />);
+    expect((screen.getByLabelText('查询模型') as HTMLSelectElement).value).toBe(sameCategory.definition.id);
+  });
+
+  it('applies an in-category navigation target once its directory finishes loading', () => {
+    const api = { query: vi.fn() } as unknown as ApiClient;
+    const target = { ...schema, definition: { ...schema.definition, id: 'schema-target', name: '订单明细' } };
+    const { rerender } = render(<QueryPage categoryId="category" api={api} schemas={[]} initialSchemaId={target.definition.id} selectionRequest={1} onModel={vi.fn()} />);
+    expect(screen.queryByLabelText('查询模型')).toBeNull();
+    rerender(<QueryPage categoryId="category" api={api} schemas={[schema, target]} initialSchemaId={target.definition.id} selectionRequest={1} onModel={vi.fn()} />);
+    expect((screen.getByLabelText('查询模型') as HTMLSelectElement).value).toBe(target.definition.id);
+  });
+
+  it('aborts a prior category request and clears filters, results, cursors and instance dialogs on category changes', async () => {
+    const pending = deferred<QueryResult>();
+    const query = vi.fn().mockResolvedValueOnce(result).mockReturnValueOnce(pending.promise).mockResolvedValueOnce({ ...result, data: [], hasMore: false, nextCursor: undefined });
+    const api = { query } as unknown as ApiClient;
+    const other: DefinitionRecord = { ...schema, definition: { ...schema.definition, id: 'schema-b', categoryId: 'other-category', name: '客户' } };
+    const { rerender } = render(<QueryPage categoryId="category" api={api} schemas={[schema, other]} onModel={vi.fn()} />);
+    fireEvent.click(screen.getByRole('checkbox', { name: '金额' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加条件' }));
+    fireEvent.change(screen.getByLabelText('比较值'), { target: { value: '1.000001' } });
+    fireEvent.click(screen.getByRole('button', { name: '运行查询' }));
+    await screen.findByText(instance.values.amount as string);
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    const signal = query.mock.calls[1][1] as AbortSignal;
+    fireEvent.click(screen.getByRole('button', { name: '新建实例' }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    rerender(<QueryPage categoryId="other-category" api={api} schemas={[schema, other]} onModel={vi.fn()} />);
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.queryByText(instance.values.amount as string)).toBeNull();
+    expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
+    expect(screen.queryByLabelText('比较值')).toBeNull();
+    expect((screen.getByRole('checkbox', { name: '金额' }) as HTMLInputElement).checked).toBe(false);
+    await act(async () => pending.resolve(result));
+    expect(screen.queryByText(instance.id)).toBeNull();
+    fireEvent.click(screen.getByRole('checkbox', { name: '金额' }));
+    fireEvent.click(screen.getByRole('button', { name: '运行查询' }));
+    await screen.findByText('没有匹配的数据');
+    expect(query.mock.calls[2][0]).toEqual({ from: { schemaId: other.definition.id }, select: ['amount'], page: { limit: 25 } });
   });
 });
 
@@ -132,6 +206,23 @@ describe('instance mutations', () => {
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '关闭' }));
   }
 
+  it('retains uncertain creation intents across category switches without retaining instance dialogs', async () => {
+    const createInstance = vi.fn().mockRejectedValueOnce(new ApiError(0, 'network_error', '连接中断')).mockResolvedValueOnce(instance);
+    const api = { createInstance } as unknown as ApiClient;
+    const other: DefinitionRecord = { ...schema, definition: { ...schema.definition, id: 'schema-b', categoryId: 'other-category', name: '客户' } };
+    const { rerender } = render(<QueryPage categoryId="category" api={api} schemas={[schema, other]} onModel={vi.fn()} />);
+    await submitCreate();
+    await screen.findByText('连接中断');
+    const firstKey = createInstance.mock.calls[0][2];
+    rerender(<QueryPage categoryId="other-category" api={api} schemas={[schema, other]} onModel={vi.fn()} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    rerender(<QueryPage categoryId="category" api={api} schemas={[schema, other]} onModel={vi.fn()} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await submitCreate();
+    await screen.findByRole('button', { name: '编辑实例' });
+    expect(createInstance.mock.calls[1][2]).toBe(firstKey);
+  });
+
   it('retains uncertain creation intents across schema switches, isolates schemas and releases confirmed intents', async () => {
     const createInstance = vi.fn()
       .mockRejectedValueOnce(new ApiError(0, 'network_error', '连接中断'))
@@ -139,7 +230,7 @@ describe('instance mutations', () => {
       .mockResolvedValueOnce(instance).mockResolvedValueOnce(instance);
     const api = { createInstance } as unknown as ApiClient;
     const other: DefinitionRecord = { ...schema, definition: { ...schema.definition, id: 'schema-b', name: '客户' } };
-    render(<QueryPage api={api} schemas={[schema, other]} onModel={vi.fn()} />);
+    render(<QueryPage categoryId="category" api={api} schemas={[schema, other]} onModel={vi.fn()} />);
     await submitCreate();
     await screen.findByText('连接中断');
     const firstKey = createInstance.mock.calls[0][2];
@@ -162,22 +253,22 @@ describe('instance mutations', () => {
   it('retains an uncertain intent after an ETag refresh and clears it when the API session changes', async () => {
     const createInstance = vi.fn().mockRejectedValue(new ApiError(0, 'network_error', '连接中断'));
     const api = { createInstance } as unknown as ApiClient;
-    const { rerender } = render(<QueryPage api={api} schemas={[schema]} onModel={vi.fn()} />);
+    const { rerender } = render(<QueryPage categoryId="category" api={api} schemas={[schema]} onModel={vi.fn()} />);
     await submitCreate();
     await screen.findByText('连接中断');
     const firstKey = createInstance.mock.calls[0][2];
     closeInstance();
     const updated: DefinitionRecord = { ...schema, etag: 'renamed-etag', definition: { ...schema.definition, name: '订单明细' } };
-    rerender(<QueryPage api={api} schemas={[updated]} onModel={vi.fn()} />);
+    rerender(<QueryPage categoryId="category" api={api} schemas={[updated]} onModel={vi.fn()} />);
     await submitCreate();
     await screen.findByText('连接中断');
     expect(createInstance.mock.calls[1][2]).toBe(firstKey);
     const nextCreate = vi.fn().mockRejectedValue(new ApiError(0, 'network_error', '连接中断'));
-    rerender(<QueryPage api={{ createInstance: nextCreate } as unknown as ApiClient} schemas={[updated]} onModel={vi.fn()} />);
+    rerender(<QueryPage categoryId="category" api={{ createInstance: nextCreate } as unknown as ApiClient} schemas={[updated]} onModel={vi.fn()} />);
     await submitCreate();
     await screen.findByText('连接中断');
     expect(nextCreate.mock.calls[0][2]).not.toBe(firstKey);
-    rerender(<QueryPage api={api} schemas={[updated]} onModel={vi.fn()} />);
+    rerender(<QueryPage categoryId="category" api={api} schemas={[updated]} onModel={vi.fn()} />);
     await submitCreate();
     await screen.findByText('连接中断');
     expect(createInstance.mock.calls[2][2]).not.toBe(firstKey);

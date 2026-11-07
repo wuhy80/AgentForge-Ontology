@@ -14,16 +14,21 @@ function clientKey(api: ApiClient) {
   return clients.get(api);
 }
 
-type Props = { api: ApiClient; schemas: DefinitionRecord[]; categories?: Organization[]; initialSchemaId?: string; selectionRequest?: number; onModel: () => void };
+type Props = { api: ApiClient; categoryId: string; schemas: DefinitionRecord[]; categories?: Organization[]; initialSchemaId?: string; selectionRequest?: number; onModel: () => void };
 
-export function QueryPage({ api, schemas, categories = [], initialSchemaId, selectionRequest, onModel }: Props) {
+export function QueryPage({ api, categoryId, schemas, categories = [], initialSchemaId, selectionRequest, onModel }: Props) {
   const [selectedId, setSelectedId] = useState(initialSchemaId ?? '');
   const intentSession = useRef({ api, schemas: new Map<string, Map<string, string>>() });
   if (intentSession.current.api !== api) {
     intentSession.current = { api, schemas: new Map() };
   }
-  useEffect(() => { if (initialSchemaId) setSelectedId(initialSchemaId); }, [initialSchemaId, selectionRequest]);
-  const selected = schemas.find((item) => item.definition.id === selectedId) ?? schemas[0];
+  const availableSchemas = categoryId ? schemas.filter((item) => item.definition.kind === 'schema' && item.definition.categoryId === categoryId) : [];
+  useEffect(() => {
+    setSelectedId('');
+  }, [categoryId, initialSchemaId, selectionRequest]);
+  const selected = availableSchemas.find((item) => item.definition.id === selectedId)
+    ?? availableSchemas.find((item) => item.definition.id === initialSchemaId)
+    ?? availableSchemas[0];
   const supported = selected?.definition.schema?.mode === 'schema_2_db' && selected.definition.schema.storageLayout === 'single';
   let createIntents: Map<string, string> | undefined;
   if (selected) {
@@ -37,18 +42,18 @@ export function QueryPage({ api, schemas, categories = [], initialSchemaId, sele
     <div className="query-page-heading"><div><div className="query-eyebrow">DATA EXPLORER</div><h1>探索业务数据</h1><p className="muted">从生效模型出发，构建查询并管理真实业务实例。</p></div>
       <span className="badge query-live-badge"><span />MySQL 数据服务</span>
     </div>
-    {!schemas.length ? <div className="card empty-state query-first-empty"><Database size={38} /><h2>从一个生效模型开始</h2><p className="muted">发布 Schema 后，可在这里选择字段、筛选数据和新建实例。</p><button type="button" className="button primary" onClick={onModel}>前往模型管理<ArrowRight size={16} /></button></div>
+    {!availableSchemas.length ? <div className="card empty-state query-first-empty"><Database size={38} /><h2>{categoryId ? '当前分类暂无生效模型' : '请先选择当前分类'}</h2><p className="muted">{categoryId ? '在当前分类发布 Schema 后，可在这里选择字段、筛选数据和新建实例。' : '从顶部选择业务分类，再探索该分类中的数据。'}</p><button type="button" className="button primary" onClick={onModel}>前往模型管理<ArrowRight size={16} /></button></div>
       : <>
         <div className="card query-source"><div className="query-source-icon"><Layers size={22} /></div><div className="field query-schema-select"><label htmlFor="query-schema">查询模型</label>
           <select id="query-schema" value={selected?.definition.id ?? ''} onChange={(event) => setSelectedId(event.target.value)}>
-            {schemas.map((item) => {
+            {availableSchemas.map((item) => {
               const category = categories.find((entry) => entry.id === item.definition.categoryId);
               return <option key={item.definition.id} value={item.definition.id}>{category ? `${category.name} / ` : ''}{item.definition.name}</option>;
             })}
           </select></div><div className="query-source-description"><span className="badge">当前生效</span><p className="muted">{selected?.definition.description || '单模型查询 · 字段与条件使用稳定标识绑定'}</p></div>
           <button type="button" className="button subtle" onClick={onModel}>查看模型<ChevronRight size={16} /></button>
         </div>
-        {selected && supported ? <QueryWorkspace key={`${clientKey(api)}:${selected.definition.id}:${selected.etag}`} api={api} schema={selected} createIntents={createIntents!} />
+        {selected && supported ? <QueryWorkspace key={`${categoryId}:${clientKey(api)}:${selected.definition.id}:${selected.etag}`} api={api} schema={selected} createIntents={createIntents!} />
           : <div className="card empty-state"><Database size={30} /><h2>此模型暂不支持数据操作</h2><p className="muted">当前数据服务支持 schema_2_db 与 single 布局。请在模型管理中查看定义。</p><button type="button" className="button" onClick={onModel}>查看模型</button></div>}
       </>}
   </div>;

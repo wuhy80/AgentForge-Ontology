@@ -11,21 +11,24 @@ export interface PendingPublication {
   publication: Publication
 }
 
-export function ModelEditor({ api, categories, entries, initialRecord, initialKind, pending, onClose, onSaved, onPending, onPublished }: {
+export function ModelEditor({ api, categoryId, categories, entries, initialRecord, initialKind, pending, onClose, onOrganizations, onSaved, onPending, onPublished, active = true }: {
   api: ApiClient
+  categoryId: string
   categories: Organization[]
   entries: DefinitionRecord[]
   initialRecord?: DefinitionRecord
   initialKind: Kind
   pending?: PendingPublication
   onClose: () => void
+  onOrganizations: () => void
   onSaved: (record: DefinitionRecord) => Promise<void>
   onPending: (pending: PendingPublication) => void
   onPublished: (record: DefinitionRecord) => Promise<void>
+  active?: boolean
 }) {
   const [record, setRecord] = useState(initialRecord)
-  const [definition, setDefinition] = useState(() => initialRecord ? cloneDefinition(initialRecord.definition) : newDefinition(initialKind, categories[0]?.id))
-  const [initialDefinition] = useState(() => initialRecord ? cloneDefinition(initialRecord.definition) : newDefinition(initialKind, categories[0]?.id))
+  const [definition, setDefinition] = useState(() => initialRecord ? cloneDefinition(initialRecord.definition) : newDefinition(initialKind, categoryId))
+  const [initialDefinition] = useState(() => initialRecord ? cloneDefinition(initialRecord.definition) : newDefinition(initialKind, categoryId))
   const [groups, setGroups] = useState<Organization[]>([])
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupError, setGroupError] = useState('')
@@ -41,20 +44,25 @@ export function ModelEditor({ api, categories, entries, initialRecord, initialKi
   const locked = !!(record?.hasCurrent || record?.status === 'active')
   const uncertain = !!publication && !['succeeded', 'rejected'].includes(publication.status)
   const disabled = !!busy || uncertain
+  const category = categories.find((item) => item.id === categoryId)
+  const bindingReady = !!category && definition.categoryId === categoryId && (!!record || !groupsLoading && groups.some((group) => group.id === definition.groupId))
   const currentSchemas = activeEntries(entries, 'schema')
   const currentEnums = activeEntries(entries, 'enum')
   const currentFunctions = activeEntries(entries, 'function')
 
   useEffect(() => {
-    if (!definition.categoryId) { setGroups([]); return }
+    if (!active) { setGroupsLoading(false); return }
+    if (!categoryId) { setGroups([]); setGroupsLoading(false); setGroupError(''); return }
     const controller = new AbortController()
     setGroups([]); setGroupsLoading(true)
     setGroupError('')
-    api.listGroups(definition.categoryId, controller.signal).then(setGroups).catch((cause: unknown) => {
+    api.listGroups(categoryId, controller.signal).then((items) => {
+      if (!controller.signal.aborted) setGroups(items.filter((group) => group.categoryId === categoryId))
+    }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setGroupError(cause instanceof Error ? cause.message : '分组读取失败')
     }).finally(() => { if (!controller.signal.aborted) setGroupsLoading(false) })
     return () => controller.abort()
-  }, [api, definition.categoryId])
+  }, [api, categoryId, active])
 
   function update(patch: Partial<Definition>) { setDefinition((value) => ({ ...value, ...patch })); setMessage(''); setPreview(undefined) }
   function requestClose() {
@@ -67,6 +75,7 @@ export function ModelEditor({ api, categories, entries, initialRecord, initialKi
     if (cause instanceof ApiError && cause.status === 412) setConflict(true)
   }
   async function save() {
+    if (!bindingReady) { setError('请先选择当前分类下的分组；如目录尚未建立，请前往「分类与分组」。'); return }
     const invalid = validateDefinition(definition)
     if (invalid) { setError(invalid); return }
     setBusy('save'); setError(''); setMessage('')
@@ -141,13 +150,13 @@ export function ModelEditor({ api, categories, entries, initialRecord, initialKi
       <fieldset disabled={disabled} className="model-fieldset">
         <div className="form-grid model-basics">
           <label>业务名称<input className="field" autoFocus value={definition.name} maxLength={128} onChange={(event) => update({ name: event.target.value })} placeholder="例如：生产设备" /></label>
-          <label>类型<select className="field" disabled={!!record} value={definition.kind} onChange={(event) => setDefinition(newDefinition(event.target.value as Kind, definition.categoryId, definition.groupId))}>{Object.entries(kindLabels).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select></label>
-          <label>分类<select className="field" disabled={!!record} value={definition.categoryId} onChange={(event) => update({ categoryId: event.target.value, groupId: '' })}><option value="">选择分类</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-          <label>分组<select className="field" disabled={!!record || groupsLoading} value={definition.groupId} onChange={(event) => update({ groupId: event.target.value })}><option value="">{groupsLoading ? '正在读取分组…' : '选择分组'}</option>{definition.groupId && !groups.some((group) => group.id === definition.groupId) && <option value={definition.groupId}>当前分组</option>}{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+          <label>类型<select className="field" disabled={!!record} value={definition.kind} onChange={(event) => setDefinition(newDefinition(event.target.value as Kind, categoryId, definition.groupId))}>{Object.entries(kindLabels).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select></label>
+          <label>分类<input className="field" readOnly value={category?.name ?? '未选择分类'} /></label>
+          <label>分组<select className="field" disabled={!!record || groupsLoading || !category} value={definition.groupId} onChange={(event) => update({ groupId: event.target.value })}><option value="">{groupsLoading ? '正在读取分组…' : '选择分组'}</option>{record && definition.groupId && !groups.some((group) => group.id === definition.groupId) && <option value={definition.groupId}>当前分组</option>}{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
           <label className="model-span-full">描述<textarea className="field" rows={2} value={definition.description ?? ''} onChange={(event) => update({ description: event.target.value })} placeholder="说明这一业务定义的用途与边界" /></label>
         </div>
         {groupError && <div className="notice notice-error">{groupError}</div>}
-        {!groupsLoading && !groups.length && !record && <p className="muted">请先在模型目录的「管理分类」中为当前分类创建分组。</p>}
+        {!record && (!category || !groupsLoading && !groupError && !groups.length) && <div className="notice"><p>{category ? '当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。' : '请先在顶部选择当前分类，或前往「分类与分组」创建分类和分组。'}</p><button type="button" className="button subtle" onClick={onOrganizations}>前往分类与分组<ArrowRight size={15} /></button></div>}
         {definition.schema && <>
           <PropertyEditor title="对象属性" properties={definition.schema.properties} locked={locked} enums={currentEnums} allowEnumBinding={false} maxProperties={MAX_SCHEMA_PROPERTIES} onChange={(properties) => update({ schema: { ...definition.schema!, properties, indexes: (definition.schema!.indexes ?? []).filter((index) => index.fieldIds.every((id) => properties.some((property) => property.id === id))) } })} />
           <section><div className="model-section-heading"><div><h3>索引</h3><p className="muted">最多 {MAX_SCHEMA_INDEXES} 个普通或唯一索引，每个索引最多组合两个属性。</p></div>{!locked && <button type="button" className="button subtle" disabled={!definition.schema.properties.some((property) => property.id) || (definition.schema.indexes?.length ?? 0) >= MAX_SCHEMA_INDEXES} onClick={() => update({ schema: { ...definition.schema!, indexes: [...definition.schema!.indexes ?? [], { id: '', name: '', unique: false, fieldIds: [] }] } })}><Plus size={15} />添加索引</button>}</div>
@@ -178,7 +187,7 @@ export function ModelEditor({ api, categories, entries, initialRecord, initialKi
         })()}
       </fieldset>
       {preview && <section className="model-preview"><div className="model-section-heading"><div><h3><FileCode2 size={17} />存储计划预览</h3><p className="muted">预览不会执行 SQL，也不会占用发布状态。</p></div></div>{preview.statements?.length ? <pre>{preview.statements.join('\n\n')}</pre> : <p className="model-inline-empty">此变更没有需要执行的存储语句。</p>}</section>}
-      <div className="model-editor-footer"><span className="muted">{dirty ? '先保存草稿，再预览或发布。' : record?.status === 'active' ? '当前内容已生效，可再次确认或恢复发布。' : '草稿已保存，发布后对业务生效。'}</span><div className="model-inline-actions"><button type="button" className="button subtle" onClick={requestClose} disabled={!!busy}>关闭</button><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle className="model-spin" size={16} /> : <FileCode2 size={16} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle className="model-spin" size={16} /> : <Save size={16} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle className="model-spin" size={16} /> : uncertain ? <RefreshCw size={16} /> : <Send size={16} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}<ArrowRight size={15} /></button></div></div>
+      <div className="model-editor-footer"><span className="muted">{dirty ? '先保存草稿，再预览或发布。' : record?.status === 'active' ? '当前内容已生效，可再次确认或恢复发布。' : '草稿已保存，发布后对业务生效。'}</span><div className="model-inline-actions"><button type="button" className="button subtle" onClick={requestClose} disabled={!!busy}>关闭</button><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle className="model-spin" size={16} /> : <FileCode2 size={16} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle className="model-spin" size={16} /> : <Save size={16} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle className="model-spin" size={16} /> : uncertain ? <RefreshCw size={16} /> : <Send size={16} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}<ArrowRight size={15} /></button></div></div>
     </div>
   </Dialog>
 }

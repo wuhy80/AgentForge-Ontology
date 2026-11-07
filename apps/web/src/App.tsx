@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Database,
   FileEdit,
+  FolderTree,
   GitBranch,
   Layers3,
   LayoutDashboard,
@@ -26,13 +27,15 @@ import { QueryPage } from './features/query/QueryPage'
 import { DialogScope } from './components/Dialog'
 import { Dialog } from './components/Dialog'
 import { AdminPage } from './features/admin/AdminPage'
+import { OrganizationsPage } from './features/organizations/OrganizationsPage'
 
-type View = 'overview' | 'models' | 'query' | 'admin'
+type View = 'overview' | 'organizations' | 'models' | 'query' | 'admin'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
 type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
 const nav = [
   { id: 'overview' as const, name: '工作空间', subtitle: '概览', icon: LayoutDashboard },
+  { id: 'organizations' as const, name: '分类与分组', subtitle: '维护业务目录', icon: FolderTree },
   { id: 'models' as const, name: '模型管理', subtitle: '定义业务世界', icon: Layers3 },
   { id: 'query' as const, name: '数据探索', subtitle: '让数据回答问题', icon: Search },
   { id: 'admin' as const, name: '用户与权限', subtitle: '管理成员和访问范围', icon: Users },
@@ -40,7 +43,7 @@ const nav = [
 
 function currentView(): View {
   const hash = window.location.hash.slice(1)
-  return hash === 'models' || hash === 'query' || hash === 'admin' ? hash : 'overview'
+  return hash === 'organizations' || hash === 'models' || hash === 'query' || hash === 'admin' ? hash : 'overview'
 }
 
 function Brand({ light = false }: { light?: boolean }) {
@@ -267,6 +270,10 @@ export function App() {
 
 function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnecting }: { session: Session; onDisconnect: () => Promise<void>; onAccountUpdated: (account: AccountSession) => void; notice: string; disconnecting: boolean }) {
   const [view, setView] = useState<View>(currentView)
+  const categoryStorageKey = `ontology.category.${encodeURIComponent(session.identity.tenantId)}.${encodeURIComponent(session.account.user.id)}`
+  const [selectedCategoryId, setSelectedCategoryId] = useState(() => {
+    try { return sessionStorage.getItem(categoryStorageKey) ?? '' } catch { return '' }
+  })
   const [categories, setCategories] = useState<Organization[]>([])
   const [current, setCurrent] = useState<DefinitionRecord[]>([])
   const [entries, setEntries] = useState<DefinitionRecord[]>([])
@@ -288,25 +295,28 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
     setLoading(true)
     setError('')
     try {
-      const [nextCategories, nextCurrent, draftDirectory] = await Promise.all([
+      const [categoryResult, currentResult, draftResult] = await Promise.allSettled([
         session.api.listCategories(active.signal),
         session.api.listDefinitions({ view: 'current' }, active.signal),
-        session.api
-          .listDefinitions({ view: 'draft' }, active.signal)
-          .then((records) => ({ records, denied: false }))
-          .catch((failure) => {
-            if (failure instanceof ApiError && failure.status === 403) return { records: [], denied: true }
-            throw failure
-          }),
+        session.api.listDefinitions({ view: 'draft' }, active.signal),
       ])
       if (sequence !== requests.current || active.signal.aborted) return
+      if (categoryResult.status === 'rejected') throw categoryResult.reason
+      const nextCategories = categoryResult.value
+      const nextCurrent = currentResult.status === 'fulfilled' ? currentResult.value : []
+      const drafts = draftResult.status === 'fulfilled' ? draftResult.value : []
+      const directoryFailure = currentResult.status === 'rejected' ? currentResult.reason
+        : draftResult.status === 'rejected' && !(draftResult.reason instanceof ApiError && draftResult.reason.status === 403) ? draftResult.reason : undefined
+      if (directoryFailure) setError(directoryFailure instanceof Error ? directoryFailure.message : '模型目录读取失败，请重试')
       const merged = new Map(
         nextCurrent.map((record) => [record.definition.id, { ...record, hasCurrent: true }]),
       )
-      for (const record of draftDirectory.records)
+      for (const record of drafts)
         merged.set(record.definition.id, { ...record, hasCurrent: merged.has(record.definition.id) })
-      setDraftDirectoryDenied(draftDirectory.denied)
+      setDraftDirectoryDenied(draftResult.status === 'rejected')
       setCategories(nextCategories)
+      setSelectedCategoryId((previous) => nextCategories.some((category) => category.id === previous)
+        ? previous : nextCategories[0]?.id ?? '')
       setCurrent(nextCurrent)
       setEntries(
         Array.from(merged.values()).sort((left, right) =>
@@ -320,6 +330,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
       setEntries([])
       setDraftDirectoryDenied(true)
       setError(failure instanceof Error ? failure.message : '无法加载工作空间，请重试')
+      throw failure
     } finally {
       if (sequence === requests.current && !active.signal.aborted) {
         setLoading(false)
@@ -327,8 +338,15 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
       }
     }
   }, [session.api])
+  // A stored preference is usable only after the current authorized directory
+  // confirms it. This is a UI context, never an authorization claim.
+  const categoryId = categories.some((category) => category.id === selectedCategoryId) ? selectedCategoryId : ''
   useEffect(() => {
-    void refresh()
+    if (!categoryId) return
+    try { sessionStorage.setItem(categoryStorageKey, categoryId) } catch { /* Selection still works when browser storage is unavailable. */ }
+  }, [categoryId, categoryStorageKey])
+  useEffect(() => {
+    void refresh().catch(() => {})
     return () => {
       ++requests.current
       controller.current?.abort()
@@ -343,12 +361,20 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
     setView(next)
     window.location.hash = next
   }
+  const selectCategory = (id: string) => {
+    if (id === selectedCategoryId) return
+    setSelectedCategoryId(id)
+    setInitialSchemaId(undefined)
+    setSelectionRequest((value) => value + 1)
+  }
   const query = (schemaId: string) => {
     setInitialSchemaId(schemaId)
     setSelectionRequest((value) => value + 1)
     navigate('query')
   }
-  const schemas = current.filter((record) => record.definition.kind === 'schema')
+  const scopedCurrent = current.filter((record) => record.definition.categoryId === categoryId)
+  const scopedEntries = entries.filter((record) => record.definition.categoryId === categoryId)
+  const schemas = scopedCurrent.filter((record) => record.definition.kind === 'schema')
   const title = nav.find((item) => item.id === view)!.name
   return (
     <div className="app-layout">
@@ -426,6 +452,13 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
             {loading && loaded && <LoaderCircle size={13} className="spin" aria-label="正在刷新" />}
           </div>
           <div className="topbar-right">
+            <label className="workspace-category">
+              <span>当前分类</span>
+              <select aria-label="当前分类" value={categoryId} onChange={(event) => selectCategory(event.target.value)} disabled={!categories.length || loading}>
+                {!categoryId && <option value="">{loading ? '正在读取分类…' : '暂无可用分类'}</option>}
+                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+              </select>
+            </label>
             <span className="connection-status">
               <span className="live-dot" /> 已连接
             </span>
@@ -456,7 +489,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
               </div>
               <ol>
                 <li>
-                  <strong>组织模型</strong>创建分类与分组，再定义对象的属性。
+                  <strong>组织模型</strong>在“分类与分组”维护目录，顶部选择当前分类后定义对象。
                 </li>
                 <li>
                   <strong>检查并生效</strong>保存草稿，预览结构后应用定义。
@@ -474,7 +507,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
           {error && (
             <div className="notice notice-error workspace-error" role="alert">
               <span>{error}</span>
-              <button type="button" className="button subtle" onClick={() => void refresh()}>
+              <button type="button" className="button subtle" onClick={() => void refresh().catch(() => {})}>
                 重新加载
               </button>
             </div>
@@ -489,22 +522,32 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
               <section hidden={view !== 'overview'}>
                 <Overview
                   categories={categories}
-                  current={current}
-                  entries={entries}
+                  categoryId={categoryId}
+                  current={scopedCurrent}
+                  entries={scopedEntries}
                   session={session}
                   onModels={() => navigate('models')}
+                  onOrganizations={() => navigate('organizations')}
                   onQuery={query}
                 />
+              </section>
+              <section hidden={view !== 'organizations'}>
+                <DialogScope active={view === 'organizations'}>
+                  <OrganizationsPage api={session.api} categories={categories} categoryId={categoryId} onSelectCategory={selectCategory} onRefresh={refresh} />
+                </DialogScope>
               </section>
               <section hidden={view !== 'models'}>
                 <DialogScope active={view === 'models'}>
                   <ModelsPage
                     api={session.api}
+                    active={view === 'models'}
                     categories={categories}
+                    categoryId={categoryId}
                     entries={entries}
                     draftDirectoryDenied={draftDirectoryDenied}
                     onRefresh={refresh}
                     onQuery={query}
+                    onOrganizations={() => navigate('organizations')}
                   />
                 </DialogScope>
               </section>
@@ -514,6 +557,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                     api={session.api}
                     schemas={schemas}
                     categories={categories}
+                    categoryId={categoryId}
                     initialSchemaId={initialSchemaId}
                     selectionRequest={selectionRequest}
                     onModel={() => navigate('models')}
@@ -565,21 +609,26 @@ function ChangePassword({ api, onClose, onUpdated }: { api: ApiClient; onClose: 
 
 function Overview({
   categories,
+  categoryId,
   current,
   entries,
   session,
   onModels,
+  onOrganizations,
   onQuery,
 }: {
   categories: Organization[]
+  categoryId: string
   current: DefinitionRecord[]
   entries: DefinitionRecord[]
   session: Session
   onModels: () => void
+  onOrganizations: () => void
   onQuery: (id: string) => void
 }) {
   const schemas = current.filter((entry) => entry.definition.kind === 'schema')
   const drafts = entries.filter((entry) => entry.status === 'draft')
+  const categoryName = categories.find((category) => category.id === categoryId)?.name
   const stats = [
     { name: '已生效定义', value: current.length, hint: '当前可用的业务模型', icon: Layers3, color: 'green' },
     { name: '对象类型', value: schemas.length, hint: '连接模型与业务实例', icon: Box, color: 'blue' },
@@ -591,9 +640,9 @@ function Overview({
       color: 'amber',
     },
     {
-      name: '业务分类',
-      value: categories.length,
-      hint: '按业务领域组织模型',
+      name: '当前分类定义',
+      value: entries.length,
+      hint: categoryName ?? '请先创建业务分类',
       icon: Workflow,
       color: 'purple',
     },
@@ -604,7 +653,7 @@ function Overview({
         <div>
           <span className="eyebrow">YOUR ONTOLOGY, CONNECTED</span>
           <h1>工作空间概览</h1>
-          <p>从清晰的业务定义，到可以探索的数据。</p>
+          <p>{categoryName ? `${categoryName} · 从清晰的业务定义，到可以探索的数据。` : '在“分类与分组”创建目录，开始组织业务模型。'}</p>
         </div>
         <button type="button" className="button primary" onClick={onModels}>
           <Layers3 size={16} /> 管理模型 <ArrowRight size={16} />
@@ -663,10 +712,10 @@ function Overview({
               <span className="empty-icon">
                 <Layers3 size={28} />
               </span>
-              <h3>从第一个业务对象开始</h3>
-              <p>创建分类、分组和对象类型，为数据赋予含义。</p>
-              <button type="button" className="button primary" onClick={onModels}>
-                开始建模 <ArrowRight size={15} />
+              <h3>{categoryId ? '从第一个业务对象开始' : '先建立业务目录'}</h3>
+              <p>{categoryId ? '在当前分类下选择分组并创建对象类型，为数据赋予含义。' : '在统一管理页创建分类与分组，再开始建模。'}</p>
+              <button type="button" className="button primary" onClick={categoryId ? onModels : onOrganizations}>
+                {categoryId ? '开始建模' : '管理分类与分组'} <ArrowRight size={15} />
               </button>
             </div>
           ) : (
@@ -727,7 +776,7 @@ function Overview({
           )}
           <div className="directory-footer">
             <span>
-              <ShieldCheck size={14} /> 当前租户内的可访问定义
+              <ShieldCheck size={14} /> 当前分类内的可访问定义
             </span>
             <span>稳定身份 · 单份当前态</span>
           </div>

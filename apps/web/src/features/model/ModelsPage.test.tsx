@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiClient, ApiError } from '../../lib/api'
 import type { DefinitionRecord, Publication } from '../../lib/types'
@@ -24,7 +24,7 @@ function client(initial = record()) {
 }
 function mount(api: ReturnType<typeof client>, entries = [record()]) {
   const refresh = vi.fn().mockResolvedValue(undefined)
-  render(<ModelsPage api={api as unknown as ApiClient} categories={categories} entries={entries} onRefresh={refresh} onQuery={vi.fn()} />)
+  render(<ModelsPage api={api as unknown as ApiClient} categoryId='category' categories={categories} entries={entries} onRefresh={refresh} onQuery={vi.fn()} onOrganizations={vi.fn()} />)
   return refresh
 }
 async function edit() {
@@ -33,6 +33,162 @@ async function edit() {
 }
 
 describe('模型工作流', () => {
+  it('新建定义固定绑定顶部当前分类，仅允许该分类的分组', async () => {
+    const secondCategory = { id: 'quality', tenantId: 'tenant', name: '质量管理' }
+    const secondGroup = { id: 'quality-group', tenantId: 'tenant', categoryId: 'quality', name: '质检资料' }
+    const api = client()
+    api.listGroups.mockResolvedValue([...groups, secondGroup])
+    render(<ModelsPage api={api as unknown as ApiClient} categoryId="quality" categories={[...categories, secondCategory]} entries={[]} onRefresh={vi.fn().mockResolvedValue(undefined)} onQuery={vi.fn()} onOrganizations={vi.fn()} />)
+    expect(screen.queryByLabelText('按分类筛选')).toBeNull()
+    expect(screen.queryByRole('button', { name: '管理分类' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
+    const dialog = await screen.findByRole('dialog')
+    const category = within(dialog).getByLabelText('分类') as HTMLInputElement
+    expect(category.value).toBe('质量管理')
+    expect(category.readOnly).toBe(true)
+    expect(api.listGroups).toHaveBeenCalledWith('quality', expect.any(AbortSignal))
+    await within(dialog).findByRole('option', { name: '质检资料' })
+    expect(within(dialog).queryByRole('option', { name: '基础资料' })).toBeNull()
+    fireEvent.change(within(dialog).getByLabelText('分组'), { target: { value: secondGroup.id } })
+    await userEvent.type(within(dialog).getByLabelText('业务名称'), '质检项目')
+    await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '项目名称')
+    const created = record()
+    Object.assign(created.definition, { categoryId: 'quality', groupId: secondGroup.id, name: '质检项目' })
+    created.definition.schema!.properties[0].name = '项目名称'
+    api.createDefinition.mockResolvedValue(created)
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(api.createDefinition).toHaveBeenCalledWith(expect.objectContaining({ categoryId: 'quality', groupId: secondGroup.id })))
+  })
+
+  it('未选择分类或当前分类没有分组时引导独立管理页', async () => {
+    const api = client()
+    api.listGroups.mockResolvedValue([])
+    const onOrganizations = vi.fn()
+    const props = { api: api as unknown as ApiClient, categories, entries: [], onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn(), onOrganizations }
+    const view = render(<ModelsPage {...props} categoryId="" />)
+    expect(screen.getByText('先选择当前业务分类')).toBeTruthy()
+    expect((screen.getByRole('button', { name: '新建定义' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: '前往分类与分组' }))
+    expect(onOrganizations).toHaveBeenCalledTimes(1)
+    expect(api.listGroups).not.toHaveBeenCalled()
+    view.rerender(<ModelsPage {...props} categoryId="category" />)
+    await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。')
+    await userEvent.type(within(dialog).getByLabelText('业务名称'), '尚无分组')
+    expect((within(dialog).getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(within(dialog).getByRole('button', { name: '前往分类与分组' }))
+    expect(onOrganizations).toHaveBeenCalledTimes(2)
+    expect(api.createDefinition).not.toHaveBeenCalled()
+  })
+
+  it('目录与统计限定当前分类，关系仍可引用其他分类的已授权模型', async () => {
+    const other = record('active')
+    Object.assign(other.definition, { id: 'quality-model', categoryId: 'quality', groupId: 'quality-group', name: '检验报告' })
+    const api = client()
+    render(<ModelsPage api={api as unknown as ApiClient} categoryId="category" categories={[...categories, { id: 'quality', tenantId: 'tenant', name: '质量管理' }]} entries={[record('active'), other]} onRefresh={vi.fn().mockResolvedValue(undefined)} onQuery={vi.fn()} onOrganizations={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '全部定义1' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '对象模型1' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '检验报告' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '关系0' }))
+    await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(within(dialog).getByLabelText('来源模型')).getByRole('option', { name: '质量管理 / 检验报告' })).toBeTruthy()
+  })
+
+  it('从分类与分组返回时刷新可选分组，保留尚未保存的模型表单', async () => {
+    const api = client()
+    api.listGroups.mockResolvedValueOnce([])
+    const onOrganizations = vi.fn()
+    const props = { api: api as unknown as ApiClient, categoryId: 'category', categories, entries: [], onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn(), onOrganizations }
+    const view = render(<ModelsPage {...props} active />)
+    await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。')
+    await userEvent.type(within(dialog).getByLabelText('业务名称'), '待完成的设备模型')
+    await userEvent.type(within(dialog).getByLabelText('对象属性第1项名称'), '设备编码')
+    await userEvent.click(within(dialog).getByRole('button', { name: '前往分类与分组' }))
+    expect(onOrganizations).toHaveBeenCalledTimes(1)
+    const groupsSignal = api.listGroups.mock.calls[0][1] as AbortSignal
+    view.rerender(<ModelsPage {...props} active={false} />)
+    expect(groupsSignal.aborted).toBe(true)
+    api.listGroups.mockResolvedValue(groups)
+    expect(api.listGroups).toHaveBeenCalledTimes(1)
+    view.rerender(<ModelsPage {...props} active />)
+    await within(dialog).findByRole('option', { name: '基础资料' })
+    expect(api.listGroups).toHaveBeenCalledTimes(2)
+    expect((within(dialog).getByLabelText('业务名称') as HTMLInputElement).value).toBe('待完成的设备模型')
+    expect((within(dialog).getByLabelText('对象属性第1项名称') as HTMLInputElement).value).toBe('设备编码')
+    fireEvent.change(within(dialog).getByLabelText('分组'), { target: { value: 'group' } })
+    expect((within(dialog).getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('分类切换关闭旧编辑并重置搜索，迟到的旧定义读取不会打开新分类编辑器', async () => {
+    const api = client()
+    let finishRead!: (value: DefinitionRecord) => void
+    api.getDraft.mockImplementationOnce(() => new Promise((resolve) => { finishRead = resolve }))
+    const secondCategory = { id: 'quality', tenantId: 'tenant', name: '质量管理' }
+    const props = { api: api as unknown as ApiClient, categories: [...categories, secondCategory], entries: [record()], onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn(), onOrganizations: vi.fn() }
+    const view = render(<ModelsPage {...props} categoryId="category" />)
+    await userEvent.type(screen.getByLabelText('搜索业务模型'), '生产')
+    await userEvent.click(screen.getByRole('button', { name: '编辑' }))
+    view.rerender(<ModelsPage {...props} categoryId="quality" />)
+    await act(async () => finishRead(record()))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect((screen.getByLabelText('搜索业务模型') as HTMLInputElement).value).toBe('')
+    expect(screen.queryByRole('button', { name: '生产设备' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
+    const dialog = await screen.findByRole('dialog')
+    expect((within(dialog).getByLabelText('分类') as HTMLInputElement).value).toBe('质量管理')
+    view.rerender(<ModelsPage {...props} categoryId="category" />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('未确认发布按分类保留，切回原分类后仍可恢复', async () => {
+    const api = client()
+    const publication = { id: 'operation', tenantId: 'tenant', definitionId: 'equipment', status: 'activation_pending' }
+    api.publish.mockRejectedValue(new ApiError(503, 'activation_pending', '等待激活', publication))
+    const props = { api: api as unknown as ApiClient, categories: [...categories, { id: 'quality', tenantId: 'tenant', name: '质量管理' }], entries: [record()], onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn(), onOrganizations: vi.fn() }
+    const view = render(<ModelsPage {...props} categoryId="category" />)
+    const dialog = await edit()
+    await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
+    await within(dialog).findByText('发布结果待确认')
+    view.rerender(<ModelsPage {...props} categoryId="quality" />)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
+    view.rerender(<ModelsPage {...props} categoryId="category" />)
+    await userEvent.click(screen.getByRole('button', { name: /生产设备.*等待激活.*恢复发布/ }))
+    expect(within(await screen.findByRole('dialog')).getByRole('button', { name: /继续恢复发布/ })).toBeTruthy()
+  })
+
+  it('切换分类后迟到的发布结果仅保留原分类恢复意图', async () => {
+    const api = client()
+    let rejectPublication!: (cause: unknown) => void
+    api.publish.mockImplementation(() => new Promise((_, reject) => { rejectPublication = reject }))
+    const props = { api: api as unknown as ApiClient, categories: [...categories, { id: 'quality', tenantId: 'tenant', name: '质量管理' }], entries: [record()], onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn(), onOrganizations: vi.fn() }
+    const view = render(<ModelsPage {...props} categoryId="category" />)
+    const dialog = await edit()
+    await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
+    await waitFor(() => expect(api.publish).toHaveBeenCalledTimes(1))
+    view.rerender(<ModelsPage {...props} categoryId="quality" />)
+    await act(async () => rejectPublication(new ApiError(503, 'prepare_failed', '等待恢复', { id: 'operation', tenantId: 'tenant', definitionId: 'equipment', status: 'prepare_failed' })))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('region', { name: '待恢复的发布' })).toBeNull()
+    view.rerender(<ModelsPage {...props} categoryId="category" />)
+    expect(screen.getByRole('button', { name: /生产设备.*等待确认.*恢复发布/ })).toBeTruthy()
+  })
+
+  it('服务器返回其他分类的定义时拒绝在当前分类打开', async () => {
+    const api = client()
+    const other = record()
+    other.definition.categoryId = 'quality'
+    api.getDraft.mockResolvedValue(other)
+    mount(api)
+    await userEvent.click(screen.getByRole('button', { name: '编辑' }))
+    await screen.findByText('定义不属于当前分类，请切换顶部分类后重新打开。')
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('未保存编辑不能发布，保存后以服务器返回的新 etag 发布', async () => {
     const api = client()
     mount(api)
@@ -136,7 +292,7 @@ describe('模型工作流', () => {
   it('保存刷新完成后目录服从最新远端内容，不被本地副本长期覆盖', async () => {
     const api = client()
     const onRefresh = vi.fn().mockResolvedValue(undefined)
-    const props = { api: api as unknown as ApiClient, categories, onRefresh, onQuery: vi.fn() }
+    const props = { api: api as unknown as ApiClient, categoryId: 'category', categories, onOrganizations: vi.fn(), onRefresh, onQuery: vi.fn() }
     const view = render(<ModelsPage {...props} entries={[record()]} />)
     const dialog = await edit()
     const name = within(dialog).getByLabelText('业务名称')
@@ -155,7 +311,7 @@ describe('模型工作流', () => {
   it('目录刷新失败并清空授权目录时不残留乐观副本', async () => {
     const api = client()
     const onRefresh = vi.fn().mockRejectedValue(new Error('目录不可用'))
-    const props = { api: api as unknown as ApiClient, categories, onRefresh, onQuery: vi.fn() }
+    const props = { api: api as unknown as ApiClient, categoryId: 'category', categories, onOrganizations: vi.fn(), onRefresh, onQuery: vi.fn() }
     const view = render(<ModelsPage {...props} entries={[record()]} />)
     const dialog = await edit()
     const name = within(dialog).getByLabelText('业务名称')
@@ -174,7 +330,7 @@ describe('模型工作流', () => {
     const api = client()
     const initial = record()
     const onRefresh = vi.fn().mockResolvedValue(undefined)
-    const props = { api: api as unknown as ApiClient, categories, onRefresh, onQuery: vi.fn() }
+    const props = { api: api as unknown as ApiClient, categoryId: 'category', categories, onOrganizations: vi.fn(), onRefresh, onQuery: vi.fn() }
     const view = render(<ModelsPage {...props} entries={[initial]} />)
     const publication = { id: 'operation', tenantId: 'tenant', definitionId: 'equipment', status: 'prepare_failed' }
     api.publish.mockRejectedValue(new ApiError(503, 'prepare_failed', '等待恢复', publication))
@@ -244,7 +400,7 @@ describe('模型工作流', () => {
     const initial = record('draft', 'private-draft'); initial.hasCurrent = true; initial.definition.name = '仅编辑者可见的草稿'
     const api = client(initial)
     api.publish.mockRejectedValue(new ApiError(503, 'prepare_failed', '等待恢复', { id: 'operation', tenantId: 'tenant', definitionId: 'equipment', status: 'prepare_failed' }))
-    const props = { api: api as unknown as ApiClient, categories, onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn() }
+    const props = { api: api as unknown as ApiClient, categoryId: 'category', categories, onOrganizations: vi.fn(), onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn() }
     const view = render(<ModelsPage {...props} entries={[initial]} />)
     const dialog = await edit()
     await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
@@ -261,7 +417,7 @@ describe('模型工作流', () => {
     const api = client()
     let rejectPublication!: (cause: unknown) => void
     api.publish.mockImplementation(() => new Promise((_, reject) => { rejectPublication = reject }))
-    const props = { api: api as unknown as ApiClient, categories, onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn() }
+    const props = { api: api as unknown as ApiClient, categoryId: 'category', categories, onOrganizations: vi.fn(), onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn() }
     const view = render(<ModelsPage {...props} entries={[record()]} />)
     const dialog = await edit()
     await userEvent.click(within(dialog).getByRole('button', { name: /发布定义/ }))
