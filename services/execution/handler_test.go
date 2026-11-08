@@ -84,6 +84,29 @@ func (s *memoryStore) Finish(_ context.Context, r Record) (bool, error) {
 type memoryMetadata struct {
 	mu          sync.Mutex
 	definitions map[string]c.Definition
+	drafts      map[string]c.Definition
+}
+
+func (m *memoryMetadata) Draft(_ context.Context, tenant, id string) (c.CurrentDefinition, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.drafts[tenant+":"+id]
+	if !ok {
+		return c.CurrentDefinition{}, problem(404, "not_found", "not found")
+	}
+	raw, _ := json.Marshal(d)
+	var isolated c.Definition
+	_ = json.Unmarshal(raw, &isolated)
+	return c.CurrentDefinition{Definition: isolated, Status: "draft", ETag: digest(isolated)}, nil
+}
+
+func (m *memoryMetadata) setDraft(d c.Definition) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.drafts == nil {
+		m.drafts = map[string]c.Definition{}
+	}
+	m.drafts[d.TenantID+":"+d.ID] = d
 }
 
 func (m *memoryMetadata) Current(_ context.Context, tenant, id string) (c.CurrentDefinition, error) {

@@ -106,6 +106,9 @@ export class ApiClient {
   invoke(definitionId: string, input: Values, idempotencyKey: string, signal?: AbortSignal): Promise<Invocation> {
     return this.request('/api/execution/invocations', { method: 'POST', body: { definitionId, input }, idempotencyKey, signal })
   }
+  invokeDraft(definitionId: string, input: Values, draftEtag: string, idempotencyKey: string, signal?: AbortSignal): Promise<Invocation> {
+    return this.request('/api/execution/invocations', { method: 'POST', body: { definitionId, input, draftEtag }, idempotencyKey, signal })
+  }
   getInvocation(id: string, signal?: AbortSignal): Promise<Invocation> { return this.request(`/api/execution/invocations/${encodeURIComponent(id)}`, { signal }) }
   private async readSession(path: string, options: RequestOptions = {}): Promise<Session> {
     const session = await this.request<Session>(path, options)

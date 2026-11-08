@@ -1,7 +1,7 @@
-import { lazy, Suspense, useEffect, useId, useState, type KeyboardEvent } from 'react'
+import { lazy, Suspense, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { AlertCircle, ArrowLeft, ArrowRight, Check, FileCode2, LoaderCircle, Plus, RefreshCw, Save, Send, Trash2 } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
-import type { Definition, DefinitionRecord, Index, Kind, Link, Organization, Preview, Publication } from '../../lib/types'
+import type { Definition, DefinitionRecord, Index, Invocation, Kind, Link, Organization, Preview, Publication, SourceDiagnostic } from '../../lib/types'
 import { PropertyEditor } from './PropertyEditor'
 import { SchemaStorageEditor } from './SchemaStorageEditor'
 import { SchemaPropertiesEditor } from './SchemaPropertiesEditor'
@@ -11,6 +11,7 @@ import { ActionTargetsEditor } from './ActionTargetsEditor'
 import { LinkStorageEditor, validateLinkStorage } from './LinkStorageEditor'
 import { CallableImplementationEditor } from './CallableImplementationEditor'
 import { CallableRunner } from './CallableRunner'
+import { CallableTestCasesEditor } from './CallableTestCasesEditor'
 import { activeEntries, cloneDefinition, kindDescriptions, kindLabels, MAX_SCHEMA_INDEXES, MAX_SCHEMA_PROPERTIES, newDefinition, validateDefinition } from './model-helpers'
 
 const LinkVisualEditor = lazy(() => import('./LinkVisualEditor').then((module) => ({ default: module.LinkVisualEditor })))
@@ -76,6 +77,9 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const [publication, setPublication] = useState(pending?.publication)
   const [preview, setPreview] = useState<Preview>()
   const [tab, setTab] = useState<EditorTab>(initialRecord?.definition.schema ? 'properties' : 'basics')
+  const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<{ source: string; items: SourceDiagnostic[] }>()
+  const [diagnosticFocus, setDiagnosticFocus] = useState<SourceDiagnostic>()
+  const diagnosticEpoch = useRef(0)
   const tabId = useId()
   const dirty = JSON.stringify(definition) !== JSON.stringify(record?.definition ?? initialDefinition)
   const locked = !!(record?.hasCurrent || record?.status === 'active')
@@ -91,6 +95,24 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const currentLink = (currentEntries ?? entries).find((entry) => entry.definition.id === definition.id && entry.status === 'active')
   const currentSchema = definition.schema ? currentLink ?? (record?.status === 'active' ? record : undefined) : undefined
   const linkStorageLocked = locked && !!(currentLink?.definition.link?.storageBinding ?? (record?.status === 'active' ? record.definition.link?.storageBinding : !currentEntries ? initialRecord?.definition.link?.storageBinding : undefined))
+  const pythonSource = (definition.action ?? definition.function)?.runtime?.source
+  const visibleDiagnostics = runtimeDiagnostics?.source === pythonSource ? runtimeDiagnostics?.items : undefined
+
+  useEffect(() => {
+    diagnosticEpoch.current++
+    setRuntimeDiagnostics(undefined); setDiagnosticFocus(undefined)
+  }, [definition, record?.etag, active])
+
+  async function receiveDraftDiagnostics(invocation?: Invocation) {
+    const epoch = ++diagnosticEpoch.current
+    setRuntimeDiagnostics(undefined); setDiagnosticFocus(undefined)
+    if (!invocation?.diagnostics?.length || !pythonSource || invocation.mode !== 'draft') return
+    try {
+      const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pythonSource))
+      const hex = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
+      if (epoch === diagnosticEpoch.current && hex === invocation.codeDigest) setRuntimeDiagnostics({ source: pythonSource, items: invocation.diagnostics })
+    } catch { /* The textual result still carries line numbers if source matching is unavailable. */ }
+  }
 
   function panelProps(id: EditorTab) {
     return definition.schema ? { role: 'tabpanel', id: `${tabId}-panel-${id}`, 'aria-labelledby': `${tabId}-tab-${id}`, hidden: tab !== id, tabIndex: 0 } : {}
@@ -275,9 +297,10 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
           const callable = definition[key]!
           return <>
             {definition.action && <ActionTargetsEditor selected={callable.targetSchemaIds ?? []} schemas={currentSchemas} categories={categories} onChange={(targetSchemaIds) => update({ action: { ...callable, targetSchemaIds: targetSchemaIds.length ? targetSchemaIds : undefined } })} />}
-            <CallableImplementationEditor callable={callable} kind={key} locked={locked} disabled={disabled} functions={currentFunctions} onChange={(value) => update({ [key]: value })} />
+            <CallableImplementationEditor callable={callable} kind={key} locked={locked} disabled={disabled} functions={currentFunctions} onChange={(value) => update({ [key]: value })} diagnostics={visibleDiagnostics} diagnosticFocus={diagnosticFocus} />
             <PropertyEditor title="输入参数" properties={callable.input ?? []} enums={currentEnums} locked={locked} onChange={(input) => update({ [key]: { ...callable, input } })} />
             <PropertyEditor title="输出参数" properties={callable.output ?? []} enums={currentEnums} locked={locked} onChange={(output) => update({ [key]: { ...callable, output } })} />
+            <CallableTestCasesEditor key={`${definition.tenantId}:${definition.id}`} callable={callable} disabled={disabled} onChange={(testCases) => update({ [key]: { ...callable, testCases: testCases.length ? testCases : undefined } })} />
           </>
         })()}
         {definition.action && !definition.action.runtime && !locked && currentFunctions.some((entry) => entry.definition.id === definition.action!.functionId) && <div className="model-inline-actions"><button type="button" className="button" onClick={() => {
@@ -285,6 +308,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
           update({ action: { ...definition.action!, sideEffects: implementation.sideEffects, input: structuredClone(implementation.input ?? []).map((property) => ({ ...property, id: '' })), output: structuredClone(implementation.output ?? []).map((property) => ({ ...property, id: '' })) } })
         }}>从实现函数复制参数声明</button><span className="muted">替换本动作的输入、输出和副作用声明。</span></div>}
       </fieldset>
+      {(definition.action || definition.function) && <CallableRunner key={`draft:${definition.tenantId}:${definition.id}:${record?.etag}`} api={api} definitionId={definition.id} tenantId={definition.tenantId} mode="draft" draftEtag={record?.status === 'draft' ? record.etag : undefined} blocked={dirty || disabled || conflict} active={active && !uncertain} onDiagnostics={(result) => void receiveDraftDiagnostics(result)} onDiagnosticFocus={visibleDiagnostics?.length ? (item) => setDiagnosticFocus({ ...item }) : undefined} />}
       {locked && (definition.action || definition.function) && <CallableRunner key={`${definition.tenantId}:${definition.id}:${currentLink?.etag ?? record?.etag}`} api={api} definitionId={definition.id} tenantId={definition.tenantId} active={active && !uncertain} />}
       {definition.schema && <section className="model-editor-panel" {...panelProps('data')}>
         <ModelDataPreview key={definition.id || 'unpublished'} api={api} schemaId={definition.id} active={active && tab === 'data' && !uncertain} hasCurrent={locked} draft={record?.status !== 'active' || dirty} />

@@ -17,12 +17,24 @@ type MetadataReader interface {
 	Current(context.Context, string, string) (c.CurrentDefinition, error)
 }
 
+type DraftMetadataReader interface {
+	Draft(context.Context, string, string) (c.CurrentDefinition, error)
+}
+
 type RemoteMetadata struct {
 	URL, ServiceToken string
 	Client            *http.Client
 }
 
 func (m *RemoteMetadata) Current(ctx context.Context, tenant, id string) (c.CurrentDefinition, error) {
+	return m.read(ctx, tenant, id, false)
+}
+
+func (m *RemoteMetadata) Draft(ctx context.Context, tenant, id string) (c.CurrentDefinition, error) {
+	return m.read(ctx, tenant, id, true)
+}
+
+func (m *RemoteMetadata) read(ctx context.Context, tenant, id string, draft bool) (c.CurrentDefinition, error) {
 	var out c.CurrentDefinition
 	base, err := url.Parse(m.URL)
 	if err != nil || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || (base.Scheme != "http" && base.Scheme != "https") || len(m.ServiceToken) < 32 {
@@ -33,7 +45,13 @@ func (m *RemoteMetadata) Current(ctx context.Context, tenant, id string) (c.Curr
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(callCtx, http.MethodGet, strings.TrimRight(m.URL, "/")+"/metadata/definitions/"+url.PathEscape(id), nil)
+	path := "/metadata/definitions/" + url.PathEscape(id)
+	status := "active"
+	if draft {
+		path += "/draft"
+		status = "draft"
+	}
+	req, err := http.NewRequestWithContext(callCtx, http.MethodGet, strings.TrimRight(m.URL, "/")+path, nil)
 	if err != nil {
 		return out, err
 	}
@@ -61,7 +79,7 @@ func (m *RemoteMetadata) Current(ctx context.Context, tenant, id string) (c.Curr
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&out) != nil || decoder.Decode(new(any)) != io.EOF || out.Definition.TenantID != tenant || out.Definition.ID != id || out.Status != "active" {
+	if decoder.Decode(&out) != nil || decoder.Decode(new(any)) != io.EOF || out.Definition.TenantID != tenant || out.Definition.ID != id || out.Status != status || out.ETag == "" {
 		return c.CurrentDefinition{}, problem(503, "invalid_metadata", "定义服务返回了无效当前定义")
 	}
 	return out, nil

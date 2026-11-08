@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { CompletionContext, acceptCompletion, currentCompletions } from '@codemirror/autocomplete'
 import { EditorState } from '@codemirror/state'
@@ -7,6 +7,10 @@ import { EditorView } from '@codemirror/view'
 import { python } from '@codemirror/lang-python'
 import { undo } from '@codemirror/commands'
 import { PythonSourceEditor, pythonParameterCompletions } from './PythonSourceEditor'
+
+const tools = vi.hoisted(() => ({ checkPythonSource: vi.fn(), formatPythonSource: vi.fn() }))
+vi.mock('../lib/python-source-tools', () => tools)
+beforeEach(() => { tools.checkPythonSource.mockReset().mockResolvedValue([]); tools.formatPythonSource.mockReset() })
 
 const rect = { x: 0, y: 0, width: 100, height: 20, top: 0, right: 100, bottom: 20, left: 0, toJSON: () => ({}) }
 const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects')
@@ -208,5 +212,81 @@ describe('Python 源码编辑器', () => {
     expect(complete('return {')?.options[0].apply).toBe('"字符数": ')
     expect(complete('return {"字符数": "')).toBeNull()
     expect(complete('settings = {"')).toBeNull()
+  })
+
+  it('自动检查标红并点击诊断定位，对中文和 emoji 使用正确源码偏移', async () => {
+    tools.checkPythonSource.mockResolvedValue([{ code: 'invalid-syntax', message: '应填写冒号', line: 2, column: 13, endLine: 2, endColumn: 14 }])
+    const source = 'def main(inputs):\n    x="😀中文";!\n'
+    render(<PythonSourceEditor value={source} onChange={vi.fn()} />)
+    const view = editor()
+    await waitFor(() => expect(screen.getByRole('button', { name: /第 2 行，第 13 列：应填写冒号/ })).toBeTruthy())
+    expect(view.dom.querySelector('.cm-lintRange-error')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /第 2 行，第 13 列：应填写冒号/ }))
+    expect(view.state.selection.main.anchor).toBe(source.indexOf('!'))
+  })
+
+  it('语法检查旧响应不会标注最新源码，失败可重试', async () => {
+    let resolve!: (result: unknown) => void
+    tools.checkPythonSource.mockImplementationOnce(() => new Promise((done) => { resolve = done }))
+    const rendered = render(<PythonSourceEditor value="invalid" onChange={vi.fn()} />)
+    await waitFor(() => expect(tools.checkPythonSource).toHaveBeenCalledWith('invalid'))
+    tools.checkPythonSource.mockRejectedValueOnce(new Error('Python 工具暂不可用，请重试。'))
+    rendered.rerender(<PythonSourceEditor value="pass" onChange={vi.fn()} />)
+    act(() => resolve([{ code: 'invalid-syntax', message: '旧源码错误', line: 1 }]))
+    expect(screen.queryByText(/旧源码错误/)).toBeNull()
+    await waitFor(() => expect(screen.getByRole('button', { name: '重试语法检查' })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: '重试语法检查' }))
+    await waitFor(() => expect(screen.getByText(/本地语法检查通过/)).toBeTruthy())
+  })
+
+  it('格式化只应用当前快照且可一次撤销', async () => {
+    const original = 'def main( inputs ):\n return {}'
+    const formatted = 'def main(inputs):\n    return {}\n'
+    tools.formatPythonSource.mockResolvedValue(formatted)
+    function Controlled() {
+      const [value, setValue] = useState(original)
+      return <PythonSourceEditor value={value} onChange={setValue} />
+    }
+    render(<Controlled />)
+    fireEvent.click(screen.getByRole('button', { name: '格式化代码' }))
+    await waitFor(() => expect(editor().state.doc.toString()).toBe(formatted))
+    expect(screen.getByText('已格式化，可撤销。')).toBeTruthy()
+    act(() => { undo(editor()) })
+    expect(editor().state.doc.toString()).toBe(original)
+  })
+
+  it('等待格式化时继续输入会丢弃迟到结果，组词期间不发起格式化', async () => {
+    let resolve!: (result: string) => void
+    tools.formatPythonSource.mockImplementation(() => new Promise((done) => { resolve = done }))
+    render(<PythonSourceEditor value="pass" onChange={vi.fn()} />)
+    const view = editor()
+    fireEvent.compositionStart(view.contentDOM)
+    fireEvent.click(screen.getByRole('button', { name: '格式化代码' }))
+    expect(tools.formatPythonSource).not.toHaveBeenCalled()
+    fireEvent.compositionEnd(view.contentDOM)
+    await act(async () => { await Promise.resolve() })
+    fireEvent.click(screen.getByRole('button', { name: '格式化代码' }))
+    act(() => view.dispatch({ changes: { from: 4, insert: '\n# 新内容' } }))
+    await act(async () => resolve('pass\n'))
+    expect(view.state.doc.toString()).toBe('pass\n# 新内容')
+    expect(screen.getByText(/已忽略本次格式化结果/)).toBeTruthy()
+  })
+
+  it('祖先禁用期间的格式化响应不能在恢复后写回，支持运行错误外部定位', async () => {
+    let resolve!: (result: string) => void
+    tools.formatPythonSource.mockImplementation(() => new Promise((done) => { resolve = done }))
+    const changed = vi.fn()
+    const source = 'def main(inputs):\n    return 1/0'
+    const diagnostic = { code: 'python_failed', message: 'Python 运算失败', line: 2 }
+    const rendered = render(<fieldset><PythonSourceEditor value={source} onChange={changed} diagnostics={[diagnostic]} /></fieldset>)
+    fireEvent.click(screen.getByRole('button', { name: '格式化代码' }))
+    rendered.rerender(<fieldset disabled><PythonSourceEditor value={source} onChange={changed} /></fieldset>)
+    await waitFor(() => expect(editor().state.readOnly).toBe(true))
+    rendered.rerender(<fieldset><PythonSourceEditor value={source} onChange={changed} diagnosticFocus={diagnostic} /></fieldset>)
+    await waitFor(() => expect(editor().state.readOnly).toBe(false))
+    await act(async () => resolve('rewritten'))
+    expect(changed).not.toHaveBeenCalled()
+    expect(editor().state.doc.toString()).toBe(source)
+    expect(editor().state.selection.main.anchor).toBe(source.indexOf('    return'))
   })
 })

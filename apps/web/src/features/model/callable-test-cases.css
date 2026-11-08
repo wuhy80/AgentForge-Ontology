@@ -1,0 +1,8 @@
+.model-test-cases { margin-block: 1rem; min-width: 0; }
+.model-test-case-list { list-style: none; padding: 0; margin: .5rem 0; }
+.model-test-case-list li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid var(--border); }
+.model-test-case-list li > span { overflow-wrap: anywhere; min-width: 0; }
+.model-test-cases summary { cursor: pointer; padding: .75rem 0; }
+.model-test-cases details > label { display: grid; gap: .35rem; }
+.model-callable-runner fieldset > label { display: grid; gap: .35rem; margin-block: .75rem; }
+.model-callable-runner button[data-diagnostic] { white-space: normal; text-align: left; }

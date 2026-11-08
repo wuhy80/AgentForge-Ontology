@@ -56,6 +56,7 @@ func validID(id string) bool {
 }
 
 var requestKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+var draftETagPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 func NewHandler(cfg Config) http.Handler {
 	limit := cfg.MaxConcurrent
@@ -133,14 +134,18 @@ func (h *handler) session(ctx context.Context, r *http.Request, p c.Principal) e
 }
 
 func (h *handler) authorize(ctx context.Context, p c.Principal, kind c.Kind, id string) error {
-	if h.cfg.Authorizer == nil {
-		return problem(503, "authorization_unavailable", "授权服务未配置")
-	}
 	operation := "function.invoke"
 	if kind == c.KindAction {
 		operation = "action.invoke"
 	} else if kind != c.KindFunction {
 		return problem(404, "not_found", "未找到可调用的当前定义")
+	}
+	return h.authorizeOperation(ctx, p, operation, kind, id)
+}
+
+func (h *handler) authorizeOperation(ctx context.Context, p c.Principal, operation string, kind c.Kind, id string) error {
+	if h.cfg.Authorizer == nil {
+		return problem(503, "authorization_unavailable", "授权服务未配置")
 	}
 	decision, err := h.cfg.Authorizer.Authorize(ctx, p, c.AuthorizationRequest{Operation: operation, ResourceID: id, Kind: kind})
 	if err != nil {
@@ -186,6 +191,36 @@ func (h *handler) plan(ctx context.Context, p c.Principal, id string) (plan, err
 	if current.Status != "active" || out.root.ID != id || out.root.TenantID != p.TenantID {
 		return out, problem(404, "not_found", "未找到可调用的当前定义")
 	}
+	return h.resolvePlan(ctx, p, out)
+}
+
+func (h *handler) draftPlan(ctx context.Context, p c.Principal, id, etag string) (plan, error) {
+	var out plan
+	reader, ok := h.cfg.Metadata.(DraftMetadataReader)
+	if !ok {
+		return out, problem(503, "draft_unavailable", "定义服务尚不支持草稿读取")
+	}
+	draft, err := reader.Draft(ctx, p.TenantID, id)
+	if err != nil {
+		return out, err
+	}
+	out.root = draft.Definition
+	if draft.Status != "draft" || out.root.ID != id || out.root.TenantID != p.TenantID {
+		return out, problem(404, "not_found", "未找到可试运行的草稿")
+	}
+	if err := h.authorizeOperation(ctx, p, "definition.edit", out.root.Kind, id); err != nil {
+		return out, err
+	}
+	if err := h.authorize(ctx, p, out.root.Kind, id); err != nil {
+		return out, err
+	}
+	if draft.ETag != etag {
+		return out, problem(409, "draft_changed", "草稿已改变，请重新保存或载入后使用新的请求标识试运行")
+	}
+	return h.resolvePlan(ctx, p, out)
+}
+
+func (h *handler) resolvePlan(ctx context.Context, p c.Principal, out plan) (plan, error) {
 	if err := h.authorize(ctx, p, out.root.Kind, out.root.ID); err != nil {
 		return out, err
 	}
@@ -263,7 +298,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p c.Princ
 		_, err := h.cfg.Runner.Ready(ctx)
 		available = err == nil
 	}
-	out := map[string]any{"invocation": available, "runtimes": []string{"python"}, "synchronous": true, "async": false, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionInlineSource": true, "actionRequiresFunctionInvoke": true}
+	out := map[string]any{"invocation": available, "draftInvocation": available, "sourceDiagnostics": true, "testCases": true, "runtimes": []string{"python"}, "synchronous": true, "async": false, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionInlineSource": true, "actionRequiresFunctionInvoke": true}
 	if !available {
 		out["reason"] = "Python运行器或执行存储尚未就绪"
 	}
@@ -300,6 +335,9 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	if !validID(request.DefinitionID) {
 		return problem(400, "invalid_definition", "定义标识无效")
 	}
+	if request.DraftETag != "" && !draftETagPattern.MatchString(request.DraftETag) {
+		return problem(400, "invalid_draft_etag", "草稿并发凭证须为已保存草稿的ETag")
+	}
 	hash := digest(request)
 	previous, err := h.cfg.Store.FindKey(r.Context(), p.TenantID, p.Subject, key)
 	if err == nil {
@@ -314,7 +352,14 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	default:
 		return problem(429, "execution_busy", "计算并发已满，请稍后使用原请求标识重试")
 	}
-	initial, err := h.plan(r.Context(), p, request.DefinitionID)
+	mode := c.InvocationModeCurrent
+	var initial plan
+	if request.DraftETag != "" {
+		mode = c.InvocationModeDraft
+		initial, err = h.draftPlan(r.Context(), p, request.DefinitionID, request.DraftETag)
+	} else {
+		initial, err = h.plan(r.Context(), p, request.DefinitionID)
+	}
 	if err != nil {
 		return err
 	}
@@ -331,7 +376,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		return problem(503, "runtime_unavailable", "Python运行器尚未就绪")
 	}
 	now := time.Now().UTC()
-	record := Record{TenantID: p.TenantID, SubjectID: p.Subject, RequestKey: key, RequestHash: hash, Root: initial.root, Implementation: initial.implementation, Input: namedInput, ImageID: imageID, DeadlineAt: now.Add(time.Duration(runtime.TimeoutSeconds)*time.Second + 90*time.Second), Invocation: c.Invocation{ID: c.NewID(), DefinitionID: initial.root.ID, DefinitionName: initial.root.Name, Kind: initial.root.Kind, Status: "running", CreatedAt: now.Format(time.RFC3339Nano), CodeDigest: sourceDigest(runtime.Source)}}
+	record := Record{TenantID: p.TenantID, SubjectID: p.Subject, RequestKey: key, RequestHash: hash, Root: initial.root, Implementation: initial.implementation, Input: namedInput, ImageID: imageID, DeadlineAt: now.Add(time.Duration(runtime.TimeoutSeconds)*time.Second + 90*time.Second), Invocation: c.Invocation{ID: c.NewID(), DefinitionID: initial.root.ID, DefinitionName: initial.root.Name, Kind: initial.root.Kind, Status: "running", CreatedAt: now.Format(time.RFC3339Nano), CodeDigest: sourceDigest(runtime.Source), Mode: mode, DraftETag: request.DraftETag}}
 	// Recheck after setup and immediately before admission; no saved allow or
 	// user-supplied viaAction context can substitute for these current checks.
 	if err := h.checkRecord(r.Context(), r, p, record); err != nil {
@@ -364,6 +409,10 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		if errors.As(runErr, &re) {
 			record.Invocation.Status = re.Status
 			record.Invocation.Error = &c.Error{Code: re.Code, Message: re.Message}
+			var diagnosticError *DiagnosticRunError
+			if errors.As(runErr, &diagnosticError) {
+				record.Invocation.Diagnostics = diagnosticError.Diagnostics
+			}
 		} else {
 			record.Invocation.Status = "failed"
 			record.Invocation.Error = &c.Error{Code: "runtime_failed", Message: "Python执行失败"}
@@ -410,7 +459,18 @@ func (h *handler) checkRecord(ctx context.Context, r *http.Request, p c.Principa
 	if err := h.session(ctx, r, p); err != nil {
 		return err
 	}
-	current, err := h.plan(ctx, p, record.Root.ID)
+	var current plan
+	var err error
+	if record.Invocation.Mode == c.InvocationModeDraft {
+		if !draftETagPattern.MatchString(record.Invocation.DraftETag) {
+			return problem(409, "invalid_record", "草稿执行记录的并发凭证无效")
+		}
+		current, err = h.draftPlan(ctx, p, record.Root.ID, record.Invocation.DraftETag)
+	} else if record.Invocation.Mode == "" || record.Invocation.Mode == c.InvocationModeCurrent {
+		current, err = h.plan(ctx, p, record.Root.ID)
+	} else {
+		return problem(409, "invalid_record", "执行记录的实现模式无效")
+	}
 	if err != nil {
 		return err
 	}
@@ -466,6 +526,11 @@ func (h *handler) deliver(w http.ResponseWriter, r *http.Request, p c.Principal,
 	status := 200
 	if record.Invocation.Status == "running" {
 		status = 202
+	}
+	if record.Invocation.Mode == "" {
+		// Older persisted records predate the draft protocol and always invoked
+		// the active definition. Preserve their wire identity on delivery.
+		record.Invocation.Mode = c.InvocationModeCurrent
 	}
 	w.Header().Set("Location", "/execution/invocations/"+record.Invocation.ID)
 	writeJSON(w, status, record.Invocation)

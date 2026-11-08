@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
@@ -24,6 +25,13 @@ type Runner interface {
 type RunError struct{ Status, Code, Message string }
 
 func (e *RunError) Error() string { return e.Code + ": " + e.Message }
+
+type DiagnosticRunError struct {
+	*RunError
+	Diagnostics []c.SourceDiagnostic
+}
+
+func (e *DiagnosticRunError) Unwrap() error { return e.RunError }
 
 // DockerRunner never invokes a host Python, mounts host paths, forwards host
 // environment variables or pulls a user-selected image. The configured image
@@ -187,9 +195,59 @@ try:
         raise ValueError("output budget")
     sys.stdout.write(encoded)
     sys.stdout.flush()
-except BaseException:
+except BaseException as failure:
+    try:
+        diagnostic = {"code": "python_error", "line": 0}
+        if isinstance(failure, SyntaxError) and failure.filename == "<function>":
+            diagnostic.update(code="syntax_error", line=failure.lineno or 0,
+                              column=failure.offset or 0, endLine=failure.end_lineno or 0,
+                              endColumn=failure.end_offset or 0)
+        else:
+            frame = failure.__traceback__
+            while frame is not None:
+                if frame.tb_frame.f_code.co_filename == "<function>":
+                    diagnostic["line"] = frame.tb_lineno
+                frame = frame.tb_next
+        sys.stderr.write(json.dumps(diagnostic, separators=(",", ":")))
+        sys.stderr.flush()
+    except BaseException:
+        pass
     sys.exit(10)
 `
+
+// Treat subprocess diagnostics as untrusted data. Messages are selected here,
+// never copied from Python exceptions; coordinates must fit this exact source.
+func sourceFailure(source string, raw []byte) error {
+	fallback := &RunError{"failed", "python_error", "Python执行失败，请核对代码、入口与参数"}
+	var diagnostic c.SourceDiagnostic
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&diagnostic) != nil || decoder.Decode(new(any)) != io.EOF {
+		return fallback
+	}
+	switch diagnostic.Code {
+	case "syntax_error":
+		diagnostic.Message = "Python语法错误，请检查此处的缩进、括号与语句"
+	case "python_error":
+		diagnostic.Message = "Python在此处执行失败，请核对参数、类型与计算逻辑"
+	default:
+		return fallback
+	}
+	lines := strings.Split(source, "\n")
+	if diagnostic.Line < 1 || diagnostic.Line > len(lines) {
+		return fallback
+	}
+	columnFits := func(line, column int) bool {
+		return line >= 1 && line <= len(lines) && column > 0 && column <= utf8.RuneCountInString(strings.TrimSuffix(lines[line-1], "\r"))+1
+	}
+	if !columnFits(diagnostic.Line, diagnostic.Column) {
+		diagnostic.Column = 0
+	}
+	if diagnostic.EndLine < diagnostic.Line || !columnFits(diagnostic.EndLine, diagnostic.EndColumn) || diagnostic.EndLine == diagnostic.Line && diagnostic.EndColumn < diagnostic.Column {
+		diagnostic.EndLine, diagnostic.EndColumn = 0, 0
+	}
+	return &DiagnosticRunError{RunError: &RunError{"failed", diagnostic.Code, diagnostic.Message}, Diagnostics: []c.SourceDiagnostic{diagnostic}}
+}
 
 type cappedBuffer struct {
 	bytes.Buffer
@@ -275,7 +333,7 @@ func (d *DockerRunner) Run(ctx context.Context, runtime *c.ScriptRuntime, input 
 		return nil, &RunError{"canceled", "execution_canceled", "请求已取消，计算已停止"}
 	}
 	if err != nil {
-		return nil, &RunError{"failed", "python_error", "Python执行失败，请核对代码、入口与参数"}
+		return nil, sourceFailure(runtime.Source, stderr.Bytes())
 	}
 	var out map[string]json.RawMessage
 	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))

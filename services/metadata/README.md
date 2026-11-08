@@ -63,7 +63,7 @@ go run ./cmd/server
 | `GET /metadata/resolve?category=分类名&name=定义名&kind=schema` | 中文名称解析；kind 可选 |
 | `GET /metadata/schemas/{id}/links` | 发现正反方向，按 Link ID 与 direction 定位 |
 
-`GET current` 和 `GET resolve` 是内部服务凭据唯一可访问的业务路径；必须同时提供 `X-Tenant-ID`。内部身份核对及权限决策分别通过受服务凭据保护的 `/internal/identity/session`、`/internal/authorization/decision` 提供给 Data。服务凭据不能编辑、发布、读取草稿或替代普通用户授权。JSON `etag` 为裸并发凭证，HTTP `ETag` 和 `If-Match` 使用双引号包围凭证。
+`GET current`、`GET draft` 和 `GET resolve` 是内部服务凭据唯一可访问的业务路径；必须同时提供 `X-Tenant-ID`。精确草稿读取供Execution试运行，Execution独立复核真实调用者的编辑与调用权限；服务凭据不能编辑、发布或替代普通用户发起计算。内部身份核对及权限决策分别通过受服务凭据保护的 `/internal/identity/session`、`/internal/authorization/decision` 提供给Data/Execution。JSON `etag` 为裸并发凭证，HTTP `ETag` 和 `If-Match` 使用双引号包围凭证。
 
 组织及定义列表默认100条、最多200条，使用返回的 `nextCursor` 作为下一次 `after`。这与 Data 的查询游标分别处理。
 
@@ -76,6 +76,8 @@ Schema 的 `storageBinding` 声明主数据源、命名空间、表、稳定标�
 Action 正文支持可选 `targetSchemaIds` 数组，为动作详情和 Schema 详情的关联发现保存最多32个同租户已生效 Schema 稳定 ID；空数组或省略表示未关联，不表示对所有 Schema 生效。保存草稿及发布均校验目标类型与状态，发布将目标写入当前依赖；已有 Action 可经草稿/发布修改这一关联，签名、实现和副作用仍保持原有变更限制。Function 不接受该字段。关联仅是定义元数据，不授予执行或实例权限，详细规则以 [Action](../../docs/模块/Action.md#当前对象关联协议2026-11-07) 为主要说明。
 
 Function增加可选`runtime`内联Python实现，字段及参数规则以[Function](../../docs/模块/Function.md#首批python运行协议2026-11-07已实现)为主要说明。保存校验语言、源码预算、入口、超时与无副作用声明；runtime与artifactRef或其他Function引用不能并存。Action绑定同租户已生效Function，发布校验双方中文参数签名及副作用；Function重发布还检查当前引用它的Action。已生效Function可经草稿/发布更新runtime，签名、副作用和实现引用继续受结构限制。Metadata仍不执行用户代码，能力中的`invocation:false`只描述本服务，真实运行可用性通过[Execution](../execution/README.md)查询。
+
+Function与Action的`testCases`随定义草稿保存，最多10项、总JSON最多64KiB；名称最多80个Unicode字符且不重复，输入仅使用声明参数稳定ID与相应标量传输格式。样例可部分填写，运行时由Execution检查必填和默认值。已有定义可经草稿/发布修改样例；该编辑不改变可执行签名或调用授权，发布后样例按定义读取权限可见。草稿试运行使用已保存ETag，不写当前态；源码诊断与运行记录由Execution负责。
 
 定义目录的 `view` 只接受 `current` 或 `draft`，未提供时保持读取当前态。草稿视图只返回实际有草稿的对象，包括从未生效的定义和生效后重新编辑的草稿；结果 `status` 为 `draft`，内容与 ETag 均来自该草稿。草稿目录同时检查全局及逐对象的 `definition.edit` 授权，当前目录保持 `definition.read` 授权；无权对象不会成为续页标记。目录仅用于当前身份可管理内容的发现，不将拥有当前定义读取权限等同于拥有草稿编辑权限。
 

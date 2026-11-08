@@ -188,6 +188,9 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if err := validateProperties(c.Output, assignIDs); err != nil {
 			return err
 		}
+		if err := contracts.ValidateCallableTestCases(c); err != nil {
+			return problem(422, "invalid_test_cases", err.Error())
+		}
 		for _, ps := range [][]contracts.Property{c.Input, c.Output} {
 			for _, property := range ps {
 				if property.Mapping != nil {
@@ -392,6 +395,7 @@ func withoutDisplayMetadata(d contracts.Definition) contracts.Definition {
 		if c != nil {
 			clearProperties(c.Input)
 			clearProperties(c.Output)
+			c.TestCases = nil
 		}
 	}
 	return copied

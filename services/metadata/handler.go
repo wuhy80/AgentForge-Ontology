@@ -31,6 +31,7 @@ type handler struct {
 	client *http.Client
 }
 type internalReaderKey struct{}
+type internalDraftReaderKey struct{}
 type apiError struct {
 	status        int
 	code, message string
@@ -80,13 +81,17 @@ func (h *handler) wrap(next endpoint) http.HandlerFunc {
 		p, ok := platform.Principal(r)
 		if !ok && platform.EqualSecret(platform.Bearer(r), h.cfg.ServiceToken) {
 			currentPath := r.PathValue("id") != "" && r.URL.Path == "/metadata/definitions/"+r.PathValue("id")
-			if r.Method != http.MethodGet || (!currentPath && r.URL.Path != "/metadata/resolve") {
-				writeProblem(w, problem(403, "forbidden", "服务凭据仅可读取当前定义"))
+			draftPath := r.PathValue("id") != "" && r.URL.Path == "/metadata/definitions/"+r.PathValue("id")+"/draft"
+			if r.Method != http.MethodGet || (!currentPath && !draftPath && r.URL.Path != "/metadata/resolve") {
+				writeProblem(w, problem(403, "forbidden", "服务凭据仅可读取定义"))
 				return
 			}
 			p = contracts.Principal{Subject: "__metadata_service__", TenantID: r.Header.Get("X-Tenant-ID")}
 			ok = p.TenantID != ""
 			r = r.WithContext(context.WithValue(r.Context(), internalReaderKey{}, true))
+			if draftPath {
+				r = r.WithContext(context.WithValue(r.Context(), internalDraftReaderKey{}, true))
+			}
 		}
 		if !ok || p.TenantID == "" || len(p.TenantID) > 128 {
 			writeProblem(w, problem(401, "unauthenticated", "需要可信身份与租户上下文"))
@@ -100,6 +105,11 @@ func (h *handler) wrap(next endpoint) http.HandlerFunc {
 
 func (h *handler) authorize(ctx context.Context, p contracts.Principal, op, id string, kind contracts.Kind) error {
 	if internal, _ := ctx.Value(internalReaderKey{}).(bool); internal && op == "definition.read" {
+		return nil
+	}
+	if internal, _ := ctx.Value(internalDraftReaderKey{}).(bool); internal && op == "definition.edit" {
+		// Set exclusively for the exact internal GET draft path. Execution must
+		// separately check the real caller's edit and invocation permissions.
 		return nil
 	}
 	if h.cfg.Authorizer == nil {

@@ -1,10 +1,13 @@
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Annotation, Compartment, EditorState, Transaction } from '@codemirror/state'
 import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { autocompletion, closeBrackets, closeBracketsKeymap, closeCompletion, completionKeymap, startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 import { bracketMatching, defaultHighlightStyle, indentOnInput, indentUnit, syntaxHighlighting, syntaxTree } from '@codemirror/language'
 import { globalCompletion, localCompletionSource, python } from '@codemirror/lang-python'
+import { lintGutter, setDiagnostics } from '@codemirror/lint'
+import type { SourceDiagnostic } from '../lib/types'
+import { checkPythonSource, formatPythonSource } from '../lib/python-source-tools'
 import './PythonSourceEditor.css'
 
 export type PythonSourceEditorProps = {
@@ -14,9 +17,21 @@ export type PythonSourceEditorProps = {
   outputNames?: string[]
   disabled?: boolean
   label?: string
+  diagnostics?: SourceDiagnostic[]
+  diagnosticFocus?: SourceDiagnostic
 }
 
 const externalChange = Annotation.define<boolean>()
+
+function diagnosticRange(state: EditorState, diagnostic: SourceDiagnostic) {
+  const line = state.doc.line(Math.max(1, Math.min(state.doc.lines, diagnostic.line)))
+  const end = state.doc.line(Math.max(1, Math.min(state.doc.lines, diagnostic.endLine ?? diagnostic.line)))
+  // Both CPython and Ruff use one-based Unicode code points. CodeMirror uses
+  // UTF-16 offsets, so an emoji before the error must count as two code units.
+  const from = line.from + Array.from(line.text).slice(0, Math.max(0, (diagnostic.column ?? 1) - 1)).join('').length
+  const to = Math.max(from, end.from + Array.from(end.text).slice(0, Math.max(0, (diagnostic.endColumn ?? (diagnostic.column ?? 1) + 1) - 1)).join('').length)
+  return { from, to }
+}
 
 function escapeParameter(name: string, quote: string) {
   const escaped = JSON.stringify(name).slice(1, -1)
@@ -84,12 +99,21 @@ export function PythonSourceEditor(props: PythonSourceEditorProps) {
   const compositionCanceled = useRef(false)
   const pendingExternal = useRef<string | undefined>(undefined)
   const synchronize = useRef<(() => void) | undefined>(undefined)
+  const mounted = useRef(false)
+  const revision = useRef(0)
+  const [source, setSource] = useState(props.value)
+  const [analysis, setAnalysis] = useState<{ source: string; diagnostics: SourceDiagnostic[] }>()
+  const [toolError, setToolError] = useState<string>()
+  const [retry, setRetry] = useState(0)
+  const [formatting, setFormatting] = useState(false)
+  const [formatMessage, setFormatMessage] = useState<string>()
   const hintId = useId()
   const label = props.label ?? 'Python 源码'
   const parameterSignature = JSON.stringify([props.inputNames ?? [], props.outputNames ?? []])
 
   useEffect(() => {
     if (!host.current) return
+    mounted.current = true
     let alive = true
     function isDisabled() {
       if (latest.current.disabled) return true
@@ -121,7 +145,7 @@ export function PythonSourceEditor(props: PythonSourceEditorProps) {
         doc: latest.current.value,
         extensions: [
           python(), syntaxHighlighting(defaultHighlightStyle), indentUnit.of('    '),
-          lineNumbers(), highlightActiveLine(), highlightActiveLineGutter(), drawSelection(),
+          lineNumbers(), highlightActiveLine(), highlightActiveLineGutter(), drawSelection(), lintGutter(),
           history(), bracketMatching(), closeBrackets(), indentOnInput(),
           access.current.of(accessExtensions()),
           keymap.of([...closeBracketsKeymap, ...completionKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
@@ -133,15 +157,16 @@ export function PythonSourceEditor(props: PythonSourceEditorProps) {
             ],
           }),
           EditorView.domEventHandlers({
-            compositionstart() { composing.current = true; compositionCanceled.current = false; closeCompletion(view); return false },
+            compositionstart() { revision.current++; composing.current = true; compositionCanceled.current = false; closeCompletion(view); return false },
             compositionend() {
               // CodeMirror flushes its final DOM mutation first. Then apply any
               // external reload deferred during IME, using only the latest value.
-              queueMicrotask(() => { if (alive) { composing.current = false; synchronizeExternal() } })
+              queueMicrotask(() => { if (alive) { composing.current = false; synchronizeExternal(); setRetry((value) => value + 1) } })
               return false
             },
           }),
           EditorView.updateListener.of((update) => {
+            if (update.docChanged) { revision.current++; setSource(update.state.doc.toString()); setFormatMessage(undefined) }
             if (update.docChanged && !update.state.readOnly && !update.transactions.some((transaction) => transaction.annotation(externalChange))) latest.current.onChange(update.state.doc.toString())
           }),
         ],
@@ -152,7 +177,7 @@ export function PythonSourceEditor(props: PythonSourceEditorProps) {
     const observer = new MutationObserver(() => {
       if (alive) {
         const disabled = isDisabled()
-        if (disabled) { composing.current = false; compositionCanceled.current = true }
+        if (disabled) { revision.current++; composing.current = false; compositionCanceled.current = true }
         closeCompletion(view)
         view.dispatch({ effects: access.current.reconfigure(accessExtensions()) })
         if (disabled) synchronizeExternal()
@@ -161,7 +186,7 @@ export function PythonSourceEditor(props: PythonSourceEditorProps) {
     for (let parent = host.current.parentElement; parent; parent = parent.parentElement) {
       if (parent instanceof HTMLFieldSetElement) observer.observe(parent, { attributes: true, attributeFilter: ['disabled'] })
     }
-    return () => { alive = false; composing.current = false; compositionCanceled.current = false; pendingExternal.current = undefined; synchronize.current = undefined; observer.disconnect(); editor.current = undefined; view.destroy() }
+    return () => { alive = false; mounted.current = false; revision.current++; composing.current = false; compositionCanceled.current = false; pendingExternal.current = undefined; synchronize.current = undefined; observer.disconnect(); editor.current = undefined; view.destroy() }
   }, [hintId])
 
   useEffect(() => {
@@ -178,6 +203,7 @@ export function PythonSourceEditor(props: PythonSourceEditorProps) {
     for (let parent = host.current?.parentElement; parent; parent = parent.parentElement) {
       if (parent instanceof HTMLFieldSetElement && parent.disabled) disabled = true
     }
+    revision.current++
     if (disabled) { composing.current = false; compositionCanceled.current = true }
     closeCompletion(view)
     view.dispatch({ effects: access.current.reconfigure([
@@ -189,13 +215,64 @@ export function PythonSourceEditor(props: PythonSourceEditorProps) {
 
   useEffect(() => { if (editor.current) closeCompletion(editor.current) }, [parameterSignature])
 
+  useEffect(() => {
+    let active = true
+    setToolError(undefined)
+    const timer = setTimeout(() => {
+      if (composing.current || editor.current?.compositionStarted) return
+      checkPythonSource(source).then((diagnostics) => { if (active) setAnalysis({ source, diagnostics }) })
+        .catch((error: unknown) => { if (active) setToolError(error instanceof Error ? error.message : 'Python 语法检查失败，请重试。') })
+    }, 450)
+    return () => { active = false; clearTimeout(timer) }
+  }, [source, retry])
+
+  const diagnostics = [...(analysis?.source === source ? analysis.diagnostics : []), ...(props.diagnostics ?? [])]
+  const diagnosticSignature = JSON.stringify(diagnostics)
+  useEffect(() => {
+    const view = editor.current
+    if (!view || composing.current || view.composing) return
+    const entries = JSON.parse(diagnosticSignature) as SourceDiagnostic[]
+    view.dispatch(setDiagnostics(view.state, entries.map((diagnostic) => ({ ...diagnosticRange(view.state, diagnostic), severity: 'error', message: diagnostic.message }))))
+  }, [diagnosticSignature, source, retry])
+
+  function jump(diagnostic: SourceDiagnostic) {
+    const view = editor.current
+    if (!view || composing.current || view.composing) return
+    const { from } = diagnosticRange(view.state, diagnostic)
+    view.dispatch({ selection: { anchor: from }, effects: EditorView.scrollIntoView(from, { y: 'center' }) })
+    view.focus()
+  }
+
+  useEffect(() => { if (props.diagnosticFocus) jump(props.diagnosticFocus) }, [props.diagnosticFocus])
+
+  async function format() {
+    const view = editor.current
+    if (!view || view.state.readOnly || composing.current || view.composing || formatting) return
+    const snapshot = view.state.doc.toString()
+    const generation = revision.current
+    setFormatting(true)
+    setFormatMessage(undefined)
+    try {
+      const formatted = await formatPythonSource(snapshot)
+      if (!mounted.current || editor.current !== view) return
+      if (generation !== revision.current || view.state.readOnly || composing.current || view.composing) { setFormatMessage('源码或编辑状态已变化，已忽略本次格式化结果。'); return }
+      if (formatted !== snapshot) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted }, userEvent: 'input.format', annotations: Transaction.addToHistory.of(true) })
+      setFormatMessage(formatted === snapshot ? '代码格式已符合规范。' : '已格式化，可撤销。')
+    } catch (error: unknown) {
+      if (mounted.current && editor.current === view && generation === revision.current) setFormatMessage(error instanceof Error ? error.message : '格式化失败，请重试。')
+    } finally { if (mounted.current) setFormatting(false) }
+  }
+
   return <div className="python-source-editor">
-    <div className="python-source-toolbar"><span>{label}</span><button type="button" className="button subtle" disabled={props.disabled} onClick={() => {
+    <div className="python-source-toolbar"><span>{label}</span><div className="python-source-actions"><button type="button" className="button subtle" disabled={props.disabled || formatting} onClick={() => void format()}>{formatting ? '格式化中…' : '格式化代码'}</button><button type="button" className="button subtle" disabled={props.disabled} onClick={() => {
       const view = editor.current
       if (!view || view.state.readOnly || composing.current || view.composing) return
       view.focus(); startCompletion(view)
-    }}>自动补全</button></div>
+    }}>自动补全</button></div></div>
     <div className="python-source-host" ref={host} />
     <p id={hintId} className="python-source-hint muted">Ctrl+Space 补全 · Tab 缩进 · Esc 后按 Tab 移出编辑区。支持 Python 语法、局部变量及已声明的中文参数补全。</p>
+    {diagnostics.length > 0 && <ul className="python-source-diagnostics" aria-label="源码诊断">{diagnostics.map((diagnostic, index) => <li key={`${diagnostic.code}-${diagnostic.line}-${index}`}><button type="button" className="button subtle" onClick={() => jump(diagnostic)}>第 {diagnostic.line} 行{diagnostic.column ? `，第 ${diagnostic.column} 列` : ''}：{diagnostic.message}</button></li>)}</ul>}
+    {toolError ? <p className="python-source-hint" role="status">{toolError} <button type="button" className="button subtle" disabled={props.disabled} onClick={() => setRetry((value) => value + 1)}>重试语法检查</button></p> : analysis?.source === source && analysis.diagnostics.length === 0 ? <p className="python-source-hint muted" role="status">本地语法检查通过；实际执行以 Python 3.12 试运行结果为准。</p> : !diagnostics.length && <p className="python-source-hint muted" role="status">正在检查 Python 语法…</p>}
+    {formatMessage && <p className="python-source-hint" role="status">{formatMessage}</p>}
   </div>
 }

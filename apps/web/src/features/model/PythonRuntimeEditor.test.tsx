@@ -74,4 +74,31 @@ describe('Python 实现编辑', () => {
     definition.action!.sideEffects = 'dataWrite'
     expect(validateDefinition(definition)).toContain('无副作用')
   })
+
+  it('按稳定参数ID提示改名后的旧字面量引用，修正后消失且不自动改源码', () => {
+    const changed = vi.fn()
+    const callable: Callable = {
+      sideEffects: 'none',
+      input: [{ id: 'input-id', name: '原文', dataType: 'string' }],
+      output: [{ id: 'output-id', name: '旧结果', dataType: 'string' }],
+      runtime: { language: 'python', entrypoint: 'main', timeoutSeconds: 5, source: 'def main(inputs):\n    return {"旧结果": inputs["原文"]}\n' },
+    }
+    const rendered = render(<PythonRuntimeEditor callable={callable} locked={false} onChange={changed} />)
+    expect(screen.queryByRole('list', { name: '参数改名引用提醒' })).toBeNull()
+    const renamed: Callable = { ...callable, input: [{ ...callable.input![0], name: '正文' }], output: [{ ...callable.output![0], name: '结果' }] }
+    rendered.rerender(<PythonRuntimeEditor callable={renamed} locked={false} onChange={changed} />)
+    expect(screen.getByText(/输入参数「原文」已改为「正文」，第 2 行仍可能使用旧名称/)).toBeTruthy()
+    expect(screen.getByText(/输出参数「旧结果」已改为「结果」，第 2 行仍可能使用旧名称/)).toBeTruthy()
+    expect(changed).not.toHaveBeenCalled()
+    expect(EditorView.findFromDOM(screen.getByRole('textbox', { name: 'Python 源码' }))!.state.doc.toString()).toBe(callable.runtime!.source)
+    rendered.rerender(<PythonRuntimeEditor callable={{ ...renamed, runtime: { ...renamed.runtime!, source: 'def main(inputs):\n    return {"结果": inputs["正文"]}\n' } }} locked={false} onChange={changed} />)
+    expect(screen.queryByRole('list', { name: '参数改名引用提醒' })).toBeNull()
+  })
+
+  it('切换到其他稳定ID的定义不继承上一份参数改名提醒', () => {
+    const runtime = { language: 'python' as const, entrypoint: 'main', timeoutSeconds: 5, source: 'return {"结果": inputs["原文"]}' }
+    const rendered = render(<PythonRuntimeEditor callable={{ sideEffects: 'none', input: [{ id: 'first', name: '原文', dataType: 'string' }], runtime }} locked={false} onChange={vi.fn()} />)
+    rendered.rerender(<PythonRuntimeEditor callable={{ sideEffects: 'none', input: [{ id: 'second', name: '正文', dataType: 'string' }], runtime }} locked={false} onChange={vi.fn()} />)
+    expect(screen.queryByRole('list', { name: '参数改名引用提醒' })).toBeNull()
+  })
 })

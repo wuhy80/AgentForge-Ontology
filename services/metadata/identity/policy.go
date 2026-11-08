@@ -206,11 +206,15 @@ func validatePolicy(ctx context.Context, tx *sql.Tx, tenant string, policy contr
 					kind = "action"
 				}
 				var count int
-				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM af_meta_definitions WHERE tenant_id=? AND id=? AND kind=? AND status='active' AND current_json IS NOT NULL", tenant, rule.ResourceID, kind).Scan(&count); err != nil {
+				present := "status='active' AND current_json IS NOT NULL"
+				if kind == "function" || kind == "action" {
+					present = "((status='active' AND current_json IS NOT NULL) OR (status IN ('draft','active') AND draft_json IS NOT NULL))"
+				}
+				if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM af_meta_definitions WHERE tenant_id=? AND id=? AND kind=? AND "+present, tenant, rule.ResourceID, kind).Scan(&count); err != nil {
 					return err
 				}
 				if count != 1 {
-					return problem(422, "invalid_policy_resource", "关系、函数或动作授权必须绑定当前租户已生效的对应类型定义")
+					return problem(422, "invalid_policy_resource", "关系授权须绑定当前租户已生效Link；调用授权须绑定同租户已有当前态或草稿的对应类型定义")
 				}
 				continue
 			}

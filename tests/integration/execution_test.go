@@ -287,6 +287,7 @@ func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	// Saving source is separate from publication. Existing calls keep the
 	// current source until publication; afterwards old results are rejected.
 	inline.Definition.Action.Runtime.Source = "def main(inputs):\n    return {'字符数': str(len(inputs['正文']) + 20)}\n"
+	inline.Definition.Action.TestCases = []c.CallableTestCase{{ID: "usual-note", Name: "常用笔记样例", Input: map[string]json.RawMessage{inline.Definition.Action.Input[0].ID: raw("Hello知识")}}}
 	var inlineDraft c.CurrentDefinition
 	inlineHeaders := admin.request("PUT", metaServer.URL+"/metadata/definitions/"+inline.Definition.ID+"/draft", inline.Definition, map[string]string{"If-Match": `"` + inline.ETag + `"`}, 200, &inlineDraft)
 	admin.request("GET", inlineURL, nil, nil, 200, &replay)
@@ -294,7 +295,45 @@ func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if string(replay.Output[inlineOutputID]) != `"17"` {
 		t.Fatal("unpublished native Action source was executed")
 	}
+	var loadedDraft c.CurrentDefinition
+	admin.request("GET", metaServer.URL+"/metadata/definitions/"+inline.Definition.ID+"/draft", nil, nil, 200, &loadedDraft)
+	if len(loadedDraft.Definition.Action.TestCases) != 1 || string(loadedDraft.Definition.Action.TestCases[0].Input[inline.Definition.Action.Input[0].ID]) != `"Hello知识"` {
+		t.Fatal("saved test case did not round trip through metadata")
+	}
+	draftIntent := inlineIntent
+	draftIntent.DraftETag = inlineDraft.ETag
+	var draftResult c.Invocation
+	draftKey := c.NewID()
+	admin.request("POST", execServer.URL+"/execution/invocations", draftIntent, map[string]string{"Idempotency-Key": draftKey}, 201, &draftResult)
+	if draftResult.Mode != "draft" || draftResult.DraftETag != inlineDraft.ETag || string(draftResult.Output[inlineOutputID]) != `"27"` {
+		t.Fatalf("saved draft did not run independently: %+v", draftResult)
+	}
+	draftResultURL := execServer.URL + "/execution/invocations/" + draftResult.ID
+	other.request("GET", draftResultURL, nil, nil, 404, nil)
+	peerClient.request("GET", draftResultURL, nil, nil, 404, nil)
+	editDenied := append(append([]c.PermissionRule{}, denied...), c.PermissionRule{ID: c.NewID(), RoleID: roleID, Effect: "deny", Operation: "definition.edit", ResourceID: inline.Definition.ID})
+	savePolicy(editDenied)
+	admin.request("GET", draftResultURL, nil, nil, 403, nil)
+	admin.request("POST", execServer.URL+"/execution/invocations", draftIntent, map[string]string{"Idempotency-Key": draftKey}, 403, nil)
+	// Current business calls continue with invoke permission, without edit.
+	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
+	if replay.Mode != "current" || string(replay.Output[inlineOutputID]) != `"17"` {
+		t.Fatal("draft permission affected current business call")
+	}
+	savePolicy(denied)
+	correctSource := inlineDraft.Definition.Action.Runtime.Source
+	inlineDraft.Definition.Action.Runtime.Source = "def main(inputs):\n    结果 = (1 + )\n    return {}\n"
+	inlineHeaders = admin.request("PUT", metaServer.URL+"/metadata/definitions/"+inline.Definition.ID+"/draft", inlineDraft.Definition, map[string]string{"If-Match": inlineHeaders.Get("ETag")}, 200, &inlineDraft)
+	admin.request("GET", draftResultURL, nil, nil, 409, nil)
+	draftIntent.DraftETag = inlineDraft.ETag
+	admin.request("POST", execServer.URL+"/execution/invocations", draftIntent, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
+	if replay.Status != "failed" || len(replay.Diagnostics) != 1 || replay.Diagnostics[0].Code != "syntax_error" || replay.Diagnostics[0].Line != 2 {
+		t.Fatalf("draft syntax location missing: %+v", replay)
+	}
+	inlineDraft.Definition.Action.Runtime.Source = correctSource
+	inlineHeaders = admin.request("PUT", metaServer.URL+"/metadata/definitions/"+inline.Definition.ID+"/draft", inlineDraft.Definition, map[string]string{"If-Match": inlineHeaders.Get("ETag")}, 200, &inlineDraft)
 	admin.request("POST", metaServer.URL+"/metadata/definitions/"+inline.Definition.ID+"/publish", nil, map[string]string{"If-Match": inlineHeaders.Get("ETag")}, 200, nil)
+	admin.request("GET", draftResultURL, nil, nil, 404, nil)
 	admin.request("GET", inlineURL, nil, nil, 409, nil)
 	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": inlineKey}, 409, nil)
 	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
@@ -306,12 +345,25 @@ func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	fn.Definition.Function.Runtime.Source = "def main(inputs):\n    return {'字符数': str(len(inputs['正文']) + 1)}\n"
 	var draft c.CurrentDefinition
 	headers := admin.request("PUT", metaServer.URL+"/metadata/definitions/"+fn.Definition.ID+"/draft", fn.Definition, map[string]string{"If-Match": `"` + fn.ETag + `"`}, 200, &draft)
+	functionDraftIntent := intent
+	functionDraftIntent.DraftETag = draft.ETag
+	admin.request("POST", execServer.URL+"/execution/invocations", functionDraftIntent, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
+	if replay.Mode != "draft" || string(replay.Output[outputID]) != `"8"` {
+		t.Fatal("Function draft did not use draft implementation")
+	}
 	admin.request("POST", metaServer.URL+"/metadata/definitions/"+fn.Definition.ID+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
 	admin.request("GET", resultURL, nil, nil, 409, nil)
 	admin.request("POST", execServer.URL+"/execution/invocations", intent, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
 	if string(replay.Output[outputID]) != `"8"` {
 		t.Fatal("new invocation did not use the current source")
 	}
+	var unpublished c.CurrentDefinition
+	admin.request("POST", metaServer.URL+"/metadata/definitions", c.Definition{CategoryID: category.ID, GroupID: group.ID, Kind: c.KindFunction, Name: "未发布草稿试算", Function: &c.Callable{SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 5, Source: "def main(inputs):\n    return {}\n"}}}, nil, 201, &unpublished)
+	admin.request("POST", execServer.URL+"/execution/invocations", c.InvocationRequest{DefinitionID: unpublished.Definition.ID, DraftETag: unpublished.ETag, Input: map[string]json.RawMessage{}}, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
+	if replay.Mode != "draft" || replay.Status != "succeeded" {
+		t.Fatalf("unpublished Function draft did not run: %+v", replay)
+	}
+	admin.request("GET", metaServer.URL+"/metadata/definitions/"+unpublished.Definition.ID, nil, nil, 404, nil)
 	slow := publish(c.Definition{Kind: c.KindFunction, Name: "超时计算", Function: &c.Callable{SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 1, Source: "def main(inputs):\n    while True:\n        pass\n"}}})
 	admin.request("POST", execServer.URL+"/execution/invocations", c.InvocationRequest{DefinitionID: slow.Definition.ID, Input: map[string]json.RawMessage{}}, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
 	if replay.Status != "timed_out" {

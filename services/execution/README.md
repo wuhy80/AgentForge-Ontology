@@ -8,6 +8,8 @@
 - Python入口由作者声明，工作台初始示例为`main`，接受并返回以声明中文参数名为键的字典。HTTP输入、输出使用稳定参数ID。int64、decimal始终以字符串传递，Python计算可显式使用`int`、`decimal.Decimal`，输出再转为字符串。
 - 输入输出支持 string、text、longtext、uuid、int64、decimal、boolean、timestamp；单次输入/输出仍受 256 KiB 总预算。枚举引用、存储映射与复杂参数类型明确拒绝。可选输入缺省时不注入键，有默认值则使用默认值；null 仅在 nullable 时接受。
 - 执行记录按租户与发起用户隔离；记录真实调用目标、实际源码、定义上下文、输入、源码SHA-256与实际容器image ID。直接源码Action保存自己的实现快照，绑定Action另外保存Function上下文。HTTP仅返回状态、输出、摘要及安全错误，不返回源码、原始输入、stdout、stderr或traceback。
+- 已保存的Function/Action草稿可独立试运行；请求显式携带草稿`draftEtag`，不替换当前态，也不能运行任意客户端定义。未发布的纯计算草稿同样可用。草稿与当前态共用隔离容器、并发、参数校验和持久化协议，记录以`mode: draft/current`区分。
+- `Callable.testCases`随定义草稿保存，发布后随当前定义可见；最多10项，总JSON最多64KiB，名称最多80个Unicode字符且不重复。样例输入使用参数稳定ID，可部分填写，已填写值须满足标量传输声明；运行时仍检查必填与默认值，不将样例当作执行授权。
 
 未开放JavaScript、自定义镜像、容器业务程序、HTTP/gRPC外部实现、第三方依赖安装、网络访问、业务数据读写、模型API调用、事件/周期调度、后台队列、自动重试和调用委托。既无runtime也未绑定可执行Function的定义仍可登记；业务调用会明确拒绝。
 
@@ -23,6 +25,8 @@
 
 能力响应中的`actionRequiresFunctionInvoke=true`是旧兼容字段，仅指绑定Function的Action；直接源码Action的支持由`actionInlineSource`表达。
 
+`draftInvocation`表示已保存草稿试运行实际可用；`sourceDiagnostics`与`testCases`说明源码坐标诊断、样例协议已接入。
+
 公共入口沿用HttpOnly Cookie、Origin与CSRF规则。服务凭据不能替代用户调用。Function、直接源码Action、绑定Action的调用授权统一见[权限设计](../../docs/权限/权限设计.md#首批纯计算调用2026-11-07已实现)；本服务在受理、启动及结果交付时执行对应检查，不根据源码编辑权限推导调用许可。未自动为已有租户策略追加授权。
 
 受理、实际启动、结果交付、GET 和幂等重放均复核当前会话、当前权限和当前定义。退出注销即使账号仍启用，也不能交付旧会话的结果。定义上下文变化后，旧结果返回 `409 definition_changed`，保守拒绝整份结果；不按旧文本重新解析同名定义。此检查不等于跨服务原子即时撤权。
@@ -32,6 +36,10 @@ POST 请求使用 `contracts.InvocationRequest`，例如：
 ```json
 {"definitionId":"已生效的定义稳定ID","input":{"输入参数稳定ID":"9007199254740993.10"}}
 ```
+
+草稿请求在同一结构增加`"draftEtag":"已保存草稿的64位小写SHA-256凭证"`。Execution通过只读服务身份从Metadata精确GET草稿，同时检查真实调用者的`definition.edit`与根定义调用权限；绑定Action还检查其当前实现Function的调用权限。元数据服务凭据只允许读定义，不能写草稿或发布。ETag不一致返回`409 draft_changed`，读取结果和幂等重放同样重查；草稿发布后已不存在，旧草稿结果返回404。试运行不绕过发布时结构兼容与依赖校验。
+
+失败响应可含`diagnostics`数组，返回受控`code/message`与源码内`line/column/endLine/endColumn`。行列从1开始，列按Unicode码点计数，非UTF-8字节；Python语法错误可给出范围，执行异常只给最深的用户源码行。坐标越界被丢弃，原异常文本、堆栈和源码片段不会返回；超时等没有可靠源码位置的错误不伪造行号。
 
 首次完成返回 201，同键同请求重放返回 200，相同请求仍运行时返回 202；内容变化返回 `409 idempotency_conflict`。键限定 1～128 个字母、数字、`.`、`_`、`:` 或 `-`，在租户与发起用户范围内唯一。新计算使用新键，网络不确定时保留原键，不能为了重试生成新键。
 
@@ -73,6 +81,8 @@ go run ./cmd/server
 ## 验证
 
 模块测试涵盖稳定参数映射、精确数值、类型拒绝、Action 双重授权、启动/结果/幂等重放的当前身份权限检查、源码变更后旧结果拒绝、并发限制、过期记录终态及容器清理失败阻断/恢复。
+
+草稿专项覆盖未发布Function、Action绑定当前Function、edit与invoke联合授权、ETag变更/发布后的拒绝、当前态不受草稿影响、诊断坐标和受控消息；Metadata/identity测试覆盖样例保存发布与对应类型草稿资源授权。
 
 `EXECUTION_TEST_DSN` 开启真实 MySQL 隔离测试，以随机租户检查唯一并发认领、重开仓库读取、用户/租户隔离及终态不可覆盖，只清理该次随机租户。`EXECUTION_TEST_DOCKER=1` 开启真实容器测试，检查 Python 精确计算、非 root、只读目录、网络限制、无凭据、异常、超时、取消与输出预算；使用相同镜像配置。测试入口不自动下载镜像。
 

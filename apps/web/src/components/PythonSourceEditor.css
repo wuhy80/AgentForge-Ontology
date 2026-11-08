@@ -1,6 +1,7 @@
 .python-source-editor { width: 100%; min-width: 0; max-width: 100%; }
 .python-source-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; font-weight: 600; }
 .python-source-toolbar .button { font-size: 12px; }
+.python-source-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .python-source-host { width: 100%; min-width: 0; overflow: hidden; border: 1px solid var(--border, #dce2e8); border-radius: 8px; background: var(--surface, #fff); }
 .python-source-host:focus-within { border-color: var(--primary, #3b82f6); box-shadow: 0 0 0 2px #3b82f61a; }
 .python-source-host .cm-editor { width: 100%; min-width: 0; max-width: 100%; min-height: 290px; font-size: 13px; }
@@ -15,4 +16,6 @@
 .python-source-host .cm-tooltip-autocomplete ul { max-width: min(420px, 85vw); }
 .python-source-host .cm-completionLabel { white-space: pre-wrap; overflow-wrap: anywhere; }
 .python-source-hint { margin: 8px 0 0; font-size: 12px; line-height: 1.7; }
+.python-source-diagnostics { margin: 10px 0 0; padding-left: 20px; color: #b42318; font-size: 12px; }
+.python-source-diagnostics .button { height: auto; min-height: 28px; padding: 4px 6px; color: inherit; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 480px) { .python-source-host .cm-editor, .python-source-host .cm-content { min-height: 240px; } }

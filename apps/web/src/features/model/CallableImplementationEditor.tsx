@@ -1,13 +1,15 @@
-import type { Callable, DefinitionRecord } from '../../lib/types'
+import type { Callable, DefinitionRecord, SourceDiagnostic } from '../../lib/types'
 import { PythonRuntimeEditor } from './PythonRuntimeEditor'
 
-export function CallableImplementationEditor({ callable, kind, locked, disabled, functions, onChange }: {
+export function CallableImplementationEditor({ callable, kind, locked, disabled, functions, onChange, diagnostics, diagnosticFocus }: {
   callable: Callable
   kind: 'function' | 'action'
   locked: boolean
   disabled: boolean
   functions: DefinitionRecord[]
   onChange: (callable: Callable) => void
+  diagnostics?: SourceDiagnostic[]
+  diagnosticFocus?: SourceDiagnostic
 }) {
   return <>
     <section>
@@ -23,6 +25,6 @@ export function CallableImplementationEditor({ callable, kind, locked, disabled,
       </div>
       {kind === 'action' && callable.functionId && <p className="muted">绑定动作的输入、输出中文名称和类型须与函数一致，并声明「无副作用」。</p>}
     </section>
-    <PythonRuntimeEditor callable={callable} kind={kind} locked={locked} disabled={disabled} onChange={onChange} />
+    <PythonRuntimeEditor callable={callable} kind={kind} locked={locked} disabled={disabled} onChange={onChange} diagnostics={diagnostics} diagnosticFocus={diagnosticFocus} />
   </>
 }

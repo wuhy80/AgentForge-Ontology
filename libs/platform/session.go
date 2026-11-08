@@ -164,6 +164,7 @@ func ProtectSessionRoutes(serviceToken string, metadata bool, checker SessionChe
 			public.ServeHTTP(w, r)
 		})
 		mux.Handle("GET /metadata/definitions/{id}", serviceRead)
+		mux.Handle("GET /metadata/definitions/{id}/draft", serviceRead)
 		mux.Handle("GET /metadata/resolve", serviceRead)
 	}
 	mux.Handle("/", public)

@@ -45,11 +45,16 @@ func TestInternalCredentialIsReadOnlyAndRequiresTenant(t *testing.T) {
 	called := false
 	endpoint := h.wrap(func(w http.ResponseWriter, r *http.Request, p contracts.Principal) error {
 		called = true
-		return h.authorize(r.Context(), p, "definition.read", "schema", contracts.KindSchema)
+		op := "definition.read"
+		if strings.HasSuffix(r.URL.Path, "/draft") {
+			op = "definition.edit"
+		}
+		return h.authorize(r.Context(), p, op, "schema", contracts.KindSchema)
 	})
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /metadata/definitions/{id}", endpoint)
 	mux.HandleFunc("GET /metadata/definitions/{id}/draft", endpoint)
+	mux.HandleFunc("PUT /metadata/definitions/{id}/draft", endpoint)
 	mux.HandleFunc("POST /metadata/definitions/{id}/publish", endpoint)
 	for _, tc := range []struct {
 		method, path, tenant string
@@ -58,7 +63,9 @@ func TestInternalCredentialIsReadOnlyAndRequiresTenant(t *testing.T) {
 	}{
 		{"GET", "/metadata/definitions/schema", "tenant", 200, true},
 		{"GET", "/metadata/definitions/schema", "", 401, false},
-		{"GET", "/metadata/definitions/schema/draft", "tenant", 403, false},
+		{"GET", "/metadata/definitions/schema/draft", "tenant", 200, true},
+		{"GET", "/metadata/definitions/schema/draft", "", 401, false},
+		{"PUT", "/metadata/definitions/schema/draft", "tenant", 403, false},
 		{"POST", "/metadata/definitions/schema/publish", "tenant", 403, false},
 	} {
 		called = false

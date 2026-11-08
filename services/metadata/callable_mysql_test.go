@@ -98,6 +98,7 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	inline := create(inlineDefinition)
 	publish(inline, 200)
 	originalSource := inline.Definition.Action.Runtime.Source
+	inline.Definition.Action.TestCases = []c.CallableTestCase{{ID: "uppercase-sample", Name: "大写样例", Input: map[string]json.RawMessage{inline.Definition.Action.Input[0].ID: json.RawMessage(`"hello"`)}}}
 	inline.Definition.Action.Runtime.Source = "def main(inputs):\n    return {'结果': inputs['文本'].upper()}\n"
 	var inlineUpdate, inlineCurrent c.CurrentDefinition
 	request("PUT", "/metadata/definitions/"+inline.Definition.ID+"/draft", inline.ETag, inline.Definition, 200, &inlineUpdate)
@@ -109,6 +110,17 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	request("GET", "/metadata/definitions/"+inline.Definition.ID, "", nil, 200, &inlineCurrent)
 	if inlineCurrent.Definition.Action.Runtime.Source != inlineUpdate.Definition.Action.Runtime.Source {
 		t.Fatal("published Action code did not become current")
+	}
+	if len(inlineCurrent.Definition.Action.TestCases) != 1 || string(inlineCurrent.Definition.Action.TestCases[0].Input[inlineCurrent.Definition.Action.Input[0].ID]) != `"hello"` {
+		t.Fatal("saved/published sample lost stable parameter binding")
+	}
+	// Samples can change through the regular draft flow without a structural migration.
+	inlineCurrent.Definition.Action.TestCases[0].Name = "改名样例"
+	request("PUT", "/metadata/definitions/"+inline.Definition.ID+"/draft", inlineCurrent.ETag, inlineCurrent.Definition, 200, &inlineUpdate)
+	publish(inlineUpdate, 200)
+	request("GET", "/metadata/definitions/"+inline.Definition.ID, "", nil, 200, &inlineCurrent)
+	if inlineCurrent.Definition.Action.TestCases[0].Name != "改名样例" {
+		t.Fatal("sample metadata update did not publish")
 	}
 	inlineCurrent.Definition.Action.Runtime, inlineCurrent.Definition.Action.FunctionID = nil, function.Definition.ID
 	request("PUT", "/metadata/definitions/"+inline.Definition.ID+"/draft", inlineCurrent.ETag, inlineCurrent.Definition, 200, &inlineUpdate)

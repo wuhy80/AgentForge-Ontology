@@ -98,6 +98,47 @@ func TestDockerRunnerTimeoutCancellationAndSafeFailures(t *testing.T) {
 	}
 }
 
+func TestDockerRunnerReportsSafeSyntaxAndRuntimeLocations(t *testing.T) {
+	runner, imageID := dockerTestRunner(t)
+	for _, test := range []struct {
+		name, source, code string
+		line               int
+	}{
+		{"syntax", "def main(inputs):\n    结果 = (1 + )\n    return {}", "syntax_error", 2},
+		{"runtime", "def helper():\n    raise RuntimeError('secret credential value')\ndef main(inputs):\n    return helper()", "python_error", 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, err := runner.Run(ctx, &c.ScriptRuntime{Language: "python", Source: test.source, Entrypoint: "main", TimeoutSeconds: 5}, nil, imageID)
+			var diagnostic *DiagnosticRunError
+			if !errors.As(err, &diagnostic) || diagnostic.Code != test.code || len(diagnostic.Diagnostics) != 1 || diagnostic.Diagnostics[0].Line != test.line || strings.Contains(mustJSON(diagnostic), "secret") {
+				t.Fatalf("missing/unsafe diagnostic: %v", err)
+			}
+		})
+	}
+}
+
+func TestSourceFailureRejectsUntrustedTextAndCoordinates(t *testing.T) {
+	source := "def main(inputs):\n    中文 = 1 +\n"
+	for _, raw := range []string{`{"code":"unknown","line":2}`, `{"code":"python_error","line":999}`, `{"code":"python_error","line":-2}`, `{"code":"python_error","line":2,"stack":"private"}`, `{"code":"python_error","line":2} {}`, `raw exception secret`} {
+		err := sourceFailure(source, []byte(raw))
+		var diagnostic *DiagnosticRunError
+		if errors.As(err, &diagnostic) || strings.Contains(err.Error(), "secret") {
+			t.Fatalf("unsafe diagnostic %v", err)
+		}
+	}
+	err := sourceFailure(source, []byte(`{"code":"syntax_error","line":2,"column":100,"endLine":500,"endColumn":1,"message":"secret"}`))
+	var diagnostic *DiagnosticRunError
+	if !errors.As(err, &diagnostic) || diagnostic.Diagnostics[0].Column != 0 || diagnostic.Diagnostics[0].EndLine != 0 || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("unbounded coordinates or text: %v", err)
+	}
+	err = sourceFailure(source, []byte(`{"code":"syntax_error","line":2,"column":12,"endLine":2,"endColumn":13}`))
+	if !errors.As(err, &diagnostic) || diagnostic.Diagnostics[0].Column != 12 {
+		t.Fatalf("Unicode source coordinate rejected: %v", err)
+	}
+}
+
 func mustJSON(v any) string { raw, _ := json.Marshal(v); return string(raw) }
 
 // The child process writes only explicitly supplied fixture text. This tests

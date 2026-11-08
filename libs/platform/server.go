@@ -9,7 +9,7 @@ import (
 
 // ProtectRoutes leaves only probes and independently authenticated internal
 // endpoints outside user authentication. Service credentials can read current
-// metadata but cannot edit definitions or call user data endpoints.
+// metadata and exact saved drafts but cannot edit definitions or call user data.
 func ProtectRoutes(secret, serviceToken string, metadata bool, app http.Handler) http.Handler {
 	public := Authenticate(secret, app)
 	mux := http.NewServeMux()
@@ -25,6 +25,7 @@ func ProtectRoutes(secret, serviceToken string, metadata bool, app http.Handler)
 			public.ServeHTTP(w, r)
 		})
 		mux.Handle("GET /metadata/definitions/{id}", serviceRead)
+		mux.Handle("GET /metadata/definitions/{id}/draft", serviceRead)
 		mux.Handle("GET /metadata/resolve", serviceRead)
 	}
 	mux.Handle("/", public)

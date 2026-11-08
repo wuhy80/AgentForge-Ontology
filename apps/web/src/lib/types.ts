@@ -183,9 +183,12 @@ export interface Callable {
   artifactRef?: string
   sideEffects: 'none' | 'dataWrite' | 'externalWrite'
   runtime?: ScriptRuntime
+  testCases?: CallableTestCase[]
 }
+export interface CallableTestCase { id: string; name: string; input: Values }
+export interface SourceDiagnostic { code: string; message: string; line: number; column?: number; endLine?: number; endColumn?: number }
 export interface ScriptRuntime { language: 'python'; source: string; entrypoint: string; timeoutSeconds: number }
-export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; actionInlineSource?: boolean; reason?: string }
+export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; actionInlineSource?: boolean; draftInvocation?: boolean; reason?: string }
 export interface Invocation {
   id: string
   definitionId: string
@@ -197,6 +200,9 @@ export interface Invocation {
   createdAt: string
   finishedAt?: string
   codeDigest: string
+  mode?: 'current' | 'draft'
+  draftEtag?: string
+  diagnostics?: SourceDiagnostic[]
 }
 export interface Definition {
   id: string

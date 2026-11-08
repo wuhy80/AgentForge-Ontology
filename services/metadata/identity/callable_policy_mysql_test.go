@@ -40,6 +40,10 @@ func TestMySQLCallablePoliciesBindTypeTenantAndRecheckRevocation(t *testing.T) {
 	function := seed(c.KindFunction, f.tenant, "active")
 	action := seed(c.KindAction, f.tenant, "active")
 	draftFunction := seed(c.KindFunction, f.tenant, "draft")
+	validDraft := seed(c.KindFunction, f.tenant, "draft")
+	if _, err := f.db.Exec("UPDATE af_meta_definitions SET draft_json=current_json,draft_digest=current_digest,current_json=NULL,current_digest='' WHERE tenant_id=? AND id=?", f.tenant, validDraft.ID); err != nil {
+		t.Fatal(err)
+	}
 	foreign := seed(c.KindFunction, "foreign-"+c.NewID(), "active")
 	defer f.db.Exec("DELETE FROM af_meta_definitions WHERE tenant_id=? AND id=?", foreign.TenantID, foreign.ID)
 	functionRequest := c.AuthorizationRequest{Operation: "function.invoke", ResourceID: function.ID, Kind: c.KindFunction}
@@ -55,7 +59,8 @@ func TestMySQLCallablePoliciesBindTypeTenantAndRecheckRevocation(t *testing.T) {
 		}
 	}
 	grant := c.PermissionRule{ID: c.NewID(), RoleID: roleID, Effect: "allow", Operation: "function.invoke", ResourceID: function.ID}
-	candidate := c.PermissionPolicy{Rules: append(append([]c.PermissionRule{}, policy.Current.Rules...), grant)}
+	draftGrant := c.PermissionRule{ID: c.NewID(), RoleID: roleID, Effect: "allow", Operation: "function.invoke", ResourceID: validDraft.ID}
+	candidate := c.PermissionPolicy{Rules: append(append([]c.PermissionRule{}, policy.Current.Rules...), grant, draftGrant)}
 	w := f.request("PUT", "/metadata/admin/policy", &f.admin, policy.ETag, candidate)
 	f.check(w, 200)
 	draft := groupDecode[c.PolicyRecord](t, w)
@@ -68,6 +73,7 @@ func TestMySQLCallablePoliciesBindTypeTenantAndRecheckRevocation(t *testing.T) {
 	}
 	f.check(f.request("POST", "/metadata/admin/policy/publish", &f.admin, draft.ETag, nil), 200)
 	f.expectDecision(worker, functionRequest, true)
+	f.expectDecision(worker, c.AuthorizationRequest{Operation: "function.invoke", ResourceID: validDraft.ID, Kind: c.KindFunction}, true)
 	f.expectDecision(worker, actionRequest, false)
 	// Caller-supplied kind cannot turn a Function grant into Action execution.
 	invalid := functionRequest

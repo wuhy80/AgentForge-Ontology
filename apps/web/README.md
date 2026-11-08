@@ -42,7 +42,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [Schema 映射](src/features/model/SchemaStorageEditor.tsx) | 两种建模方向、主表稳定身份及逐属性跨源/跨表目录选择；默认平台存储也展示实际生效表列，草稿与生效映射分开标识；反向导入保留已有属性身份 |
 | [Link 映射](src/features/model/LinkStorageEditor.tsx) | 区分纯定义、平台关系表、已有外部关联表和外键；可视化表列选择、关系示意、一次性补绑定 |
 | [关系可视化](src/features/model/RelationOverview.tsx)、[关系详情](src/features/model/LinkVisualEditor.tsx) | `#models?view=graph`查看当前分类关系，选线侧栏编辑；详情及对象Link页共用画布，支持拖线创建、个人布局、草稿/预览/发布与当前态双向数据预览；[主要规则](../../docs/模块/Link.md#关系可视化管理2026-11-08首批已实现) |
-| [Python源码](src/components/PythonSourceEditor.tsx) | Function及直接源码Action独立使用的CodeMirror编辑器；Python高亮、本地语法与中文参数补全、缩进、括号及行号，运行范围仍仅Python纯计算 |
+| [Python源码](src/components/PythonSourceEditor.tsx) | Function及直接源码Action独立使用的CodeMirror编辑器；Python高亮、中文参数补全、语法诊断与定位、格式化及参数改名引用提醒；共同边界见[Function](../../docs/模块/Function.md#python调试与草稿试运行2026-11-08已确认) |
 | [数据源配置](src/features/sources/SourcesPage.tsx) | 表格列出连接及兼容状态，每行测试/编辑/管理；密码只写入，编辑沿用版本、TLS、租户隔离及ETag |
 | [数据库管理](src/features/sources/SourceManager.tsx) | 重新读取数据库基础信息、搜索表目录、查看字段及索引；专属来源执行有界单表只读SQL并展示结果，共享来源通过模型查询；实际权限与SQL范围见[数据源](../../docs/数据源.md#列表与数据库管理2026-11-07) |
 | [数据探索](src/features/query/QueryPage.tsx) | 默认OntologySQL，顶部指导、左侧模型/右侧字段、双击与键盘插入、CodeMirror懒加载、参数、服务端补全/诊断、结果详情/关联及续页；保留可视化完整子集转换 |
@@ -69,9 +69,11 @@ Link 编辑页可配置实际数据库映射，数据探索从每条结果的“
 
 Function 编辑页可启用 Python 实现，配置源码、入口和 1–30 秒超时；已生效纯函数可更新代码并重新发布，参数类型与约束保持锁定。Python 字典按声明的中文参数名传入/返回，改名须同步源码；HTTP 继续使用稳定属性 ID，int64/decimal 使用字符串。当前仅支持标准库及无副作用计算，网络、第三方依赖和平台数据访问未开放。运行器及实际协议见 [Execution](../../services/execution/README.md)，源码与清单主要规则见 [Function](../../docs/模块/Function.md)。
 
-已生效的 Action/Function 编辑页提供“运行当前定义”面板，打开时从服务器读取当前定义并检查 Execution 能力；草稿不参与运行。运行采用同步调用、持久记录及幂等键；响应丢失时保持相同参数重试以核对同一次调用，修改参数或已确认完成后再次运行使用新键。运行中记录可显式核对；关闭、离开、身份变化及拒绝时清除旧运行数据，迟到响应不能重新显示。执行服务不可用不阻止现有模型、查询或权限页面。
+已生效的Action/Function编辑页提供“运行当前定义”，打开时读取服务器当前定义并检查Execution能力；独立的“试运行草稿”使用服务端已保存草稿与对应ETag，未保存修改须先保存。草稿试运行不改变普通调用的当前代码，已保存测试样例随定义草稿/发布共享，不写入浏览器localStorage。源码调试、样例类型与预算统一见[Function](../../docs/模块/Function.md#python调试与草稿试运行2026-11-08已确认)，记录来源、幂等及过期结果规则见[执行与调度](../../docs/执行与调度.md#草稿试运行2026-11-08)。
 
-隔离浏览器用例 `e2e/python-runtime.spec.ts` 在真实 Edge 中拦截全部 API，覆盖 Python 编辑/发布、当前态运行、中文参数与结果、403 清理以及 1440px/390px 无页面溢出；不连接既有租户数据库，不代表真实容器执行验收。若本机 Windows 保留了 5173 端口，可临时启动 `npm.cmd run dev -- --port 6173`，设置 `$env:ONTOLOGY_WEB_URL='http://127.0.0.1:6173'` 后运行 `npm.cmd run test:e2e -- e2e/python-runtime.spec.ts`。这只改变测试地址，真实服务的 Origin 配置保持既有值。
+两种运行都采用同步调用、持久记录及幂等键；响应丢失时保持相同参数与草稿ETag重试以核对同一次调用，修改参数、草稿或已确认完成后再次运行使用新键。运行中记录可显式核对；关闭、离开、身份变化及拒绝时清除旧运行数据，迟到响应不能重新显示。执行服务不可用不阻止现有模型、查询或权限页面。诊断坐标只定位对应源码快照，编辑代码后不继续显示旧结果的错误位置。
+
+2026-11-08本批前端以`npm.cmd test -- --maxWorkers=4`完整通过38个文件/319项单元与交互测试，TypeScript/Vite构建通过。隔离浏览器用例`e2e/python-runtime.spec.ts`共4条在真实Edge中通过，拦截全部API，覆盖Python编辑/发布、当前态运行、中文参数与结果、403清理，以及新增真实Ruff WASM语法检查、保留注释的格式化、参数改名提醒、样例保存、草稿与当前态分离、错误定位及1440px/390px布局；不连接既有租户数据库，不代表浏览器已验证真实容器执行，后端真实集成记录见[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)。WASM随前端独立构建并惰性加载，资源体积与工具范围见[Function](../../docs/模块/Function.md#python调试与草稿试运行2026-11-08已确认)。若本机Windows保留了5173端口，可临时启动`npm.cmd run dev -- --port 6173`，设置`$env:ONTOLOGY_WEB_URL='http://127.0.0.1:6173'`后运行`npm.cmd run test:e2e -- e2e/python-runtime.spec.ts`。这只改变测试地址，真实服务的Origin配置保持既有值。
 
 权限配置和模拟支持 `function.invoke`、`action.invoke`，按对应类型的完整资源授权，不接受字段或行条件；Action 调用还须拥有绑定 Function 的运行权限。已有租户不会自动追加权限，由管理员显式配置并生效。受控委托、Action 独享的函数调用路径及数据/外部写入继续待实现。
 
