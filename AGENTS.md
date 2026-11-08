@@ -40,6 +40,32 @@
 - Schema、Enum、Link、Action、Function 统一只维护一份当前生效定义，最多一份草稿，不引入业务 version 或可选择旧定义的接口。
 - Schema 覆盖 db_2_schema、schema_2_db、索引、预览、计算属性和分表；具体规则统一维护在模块文档中。
 
+## OntoApp 参考与跨仓库协作
+
+- OntoApp 位于同级 `../OntoApp`，当前工作区对应 `D:/github/OntoApp`，是独立 Git 仓库。它是连接 Ontology 的可视化应用搭建器，参考 NocoBase 的配置体验；不宣称兼容 NocoBase 插件或服务协议。
+- Ontology 负责业务模型、数据、账号会话、租户隔离、行列与调用授权、后端执行；OntoApp 负责应用导航、页面、区块、拖拽布局、展示与操作配置、应用草稿和发布快照，以及 AI 辅助搭建。页面配置和发布不能授予或扩展 Ontology 业务权限。
+- 参考或修改 OntoApp 前先读其 [AGENTS.md](../OntoApp/AGENTS.md)，并检查具体目录的适用约定；当前目标、已实现能力与候选范围以其[项目设计](../OntoApp/docs/项目设计.md)为主说明，以源码和测试核对实际行为。不要只凭历史文档或界面选项判断能力已实现。
+
+| 需要了解或修改的内容 | OntoApp 中的主要入口（相对其仓库根目录） |
+| --- | --- |
+| 项目范围、职责与当前配置格式 | `docs/项目设计.md`、`src/types.ts`、`src/config.ts` |
+| 页面、拖拽、嵌套布局和区块属性 | `src/App.tsx`、`src/Designer.tsx`、`src/Inspector.tsx`、`src/layout.ts`、`src/block-tree.ts`、`docs/设计器交互.md` |
+| 表格、表单、查询和记录编辑删除 | `src/Blocks.tsx`、`src/QueryControls.tsx`、`src/RecordActions.tsx`、`docs/列表与表单搭建.md` |
+| 公开 API、会话与授权对象目录 | `src/api.ts`、`src/DataSources.tsx`、`server/ontology-source.ts`、`docs/Ontology接入.md` |
+| 独立配置 API、数据库、草稿与发布 | `server/http.ts`、`server/repository.ts`、`server/database.ts`、`server/migrations.ts`、`src/workspace.ts`、`docs/独立数据库.md` |
+| AI 辅助搭建及输出校验 | `src/AiBuilder.tsx`、`src/ai-config.ts`、`server/ai.ts`、`docs/AI辅助搭建.md` |
+| 网关、安全和双方接入要求 | `deploy/nginx.conf.example`、`docs/公网部署与安全.md`、`docs/Ontology公网安全配合清单.md` |
+| 验证命令与分项结果 | `package.json`、`e2e/`、`docs/验证记录.md` |
+
+- OntoApp 正式发布前统一使用 `ontoapp/v1`，容器、标签页、分栏、表单分组和列表交互直接可用，不设置 v1/v2 升级或列表交互总开关；编辑字段和删除按钮仍逐项配置，实际写入由 Ontology 校验。后续调整以用户最新确认及其主说明为准。
+- 两边运行时只通过公开 HTTP API 对接；可阅读对方源码和测试作参考，但不将对方内部源码作为运行时依赖、不跨库访问私有表，也不复制密钥、账号文件或会话凭据。绑定使用稳定 schemaId / field ID，int64 和 decimal 按公开协议保留字符串。
+- OntoApp 真实应用配置保存在自己的独立配置数据库，按 Ontology 权威会话中的租户与用户隔离；其应用草稿和发布快照独立于 Ontology 定义草稿与当前生效定义。演示配置仅在浏览器保存，真实请求失败不得切换演示或本地存储；保存到服务端不代表团队共享或公网发布。
+- OntoApp 的 AI 辅助搭建生成页面配置，经当前授权目录及格式校验、用户核对差异后应用到草稿；不自动发布，不修改 Ontology 模型或业务记录，也不把业务查询结果、密码、Cookie、CSRF 发送给模型。业务 AI 对话、检索和 Action 调用是否支持，以所属文档和真实接口为准，不与页面生成混为同一能力。
+- 涉及页面、搭建配置或客户端适配时在 OntoApp 修改；涉及模型、查询、业务读写、授权或执行协议时在 Ontology 修改。当前需求需要双方配合时，同步修改所属仓库的公开协议、实现、测试与接入说明；不以客户端隐藏、改写 Origin 或内部服务身份代替当前用户的服务端授权。
+- 改动公开会话、授权目录、字段元数据、查询、CRUD、ETag/If-Match、分页/资源预算或网关规则时，检查 OntoApp 调用方和其[接入说明](../OntoApp/docs/Ontology接入.md)；公网要求同时对照其[配合清单](../OntoApp/docs/Ontology公网安全配合清单.md)与本仓库对应复核记录。接口变化和待补验收在双方所属文档记录，不把单边测试通过视为联合验收通过。
+- 跨仓库修改前分别检查 `git status` 和相关 diff，保留两边已有的无关改动。Ontology 按本仓库开发指南验证；OntoApp 在其根目录执行 `npm test`、`npm run build`，交互变更补充适当的浏览器验证。单元测试、模拟 HTTP、真实后端集成分别记录，缺少环境而跳过的验证明确说明；需要提交时分别暂存、提交并报告各仓库结果。
+- 修改代码不自动修改已有部署、来源、数据库或重启对方服务；迁移、重启和部署按当前任务已授权范围显式执行。联调通过公开 API，在隔离测试环境验证，不将密码、会话凭据、CSRF 或业务查询结果写入应用配置、日志、截图或 Git。
+
 ## 文档入口
 
 - [项目文档](docs/README.md)：模块及公共主题入口与维护方式。
