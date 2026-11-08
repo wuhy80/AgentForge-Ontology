@@ -22,6 +22,7 @@ const unavailableReasons: Record<string, string> = {
   mapped_write_storage_unsupported: '此来源的存储方式尚不支持写入',
   mapped_write_effects_unsupported: '此来源的数据库写入行为尚不支持',
   mapped_write_metadata_unavailable: '暂时无法确认此来源的写入条件，请稍后重试',
+  mapped_write_metadata_visibility_unsupported: '此来源的数据库目录可见性不足，暂不能确认写入安全条件',
 }
 
 export function ModelWriteOperations({ api, schemaId, active, hasCurrent }: {
