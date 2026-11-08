@@ -6,6 +6,8 @@
 
 Linux 单机的 Git 拉取、HTTPS 入口、systemd、备份及本地数据迁移方式见[部署与运维](docs/部署与运维.md#0-linux-单机部署2026-11-08)；单机验证与生产容量、扩容及恢复验收分别记录。
 
+服务器后续开发目录为 `~/github/agentforge`。代码由开发机或 GitHub Actions 编译，服务器执行 `make run` 安装已传入的 Linux 制品、停止旧进程并通过 systemd 启动新程序，检查就绪后返回终端；`make stop`、`make status`、`make logs` 分别停止、检查及查看最近日志。GitHub 构建、制品传输及显式迁移见[部署文档](docs/部署与运维.md#服务器开发目录与-make-run2026-11-08)。
+
 本地开发需要支持自动工具链的Go（或预装Go 1.26.10）、PowerShell和运行中的Docker Desktop；当前模块基线及公网部署前置条件见[开发指南](docs/开发指南.md)和[部署与运维](docs/部署与运维.md)。在仓库根目录执行：
 
 ```powershell

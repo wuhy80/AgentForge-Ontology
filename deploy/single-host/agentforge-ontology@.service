@@ -8,7 +8,7 @@ Requires=docker.service
 Type=simple
 User=ontology-%i
 Group=ontology-%i
-WorkingDirectory=/opt/agentforge-ontology
+WorkingDirectory=/var/lib/agentforge-ontology/current
 EnvironmentFile=/etc/agentforge-ontology/%i.env
 Environment=GOMAXPROCS=1 GOMEMLIMIT=96MiB
 ExecStart=/var/lib/agentforge-ontology/current/bin/%i
