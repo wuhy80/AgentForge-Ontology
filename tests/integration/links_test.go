@@ -55,7 +55,7 @@ func cleanupOntologyTenant(t *testing.T, me, de *storage.Engine, tenant string) 
 			t.Error(err)
 		}
 	}
-	for _, table := range []string{"af_data_schema_migrations", "af_data_outbox", "af_data_idempotency", "af_data_write_receipts", "af_data_transaction_receipts", "af_data_gates"} {
+	for _, table := range []string{"af_data_saved_queries", "af_data_saved_query_owners", "af_data_schema_migrations", "af_data_outbox", "af_data_idempotency", "af_data_write_receipts", "af_data_transaction_receipts", "af_data_gates"} {
 		if _, err := de.DB().Exec("DELETE FROM "+table+" WHERE tenant_id=?", tenant); err != nil {
 			t.Error(err)
 		}

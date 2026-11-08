@@ -5,11 +5,13 @@ import type { DefinitionRecord, Organization, QueryResult, QuerySpec } from '../
 import { InstanceDialog } from './InstanceDialog';
 import { useSchemaWrites } from './useSchemaWrites';
 import { RelatedInstances } from './RelatedInstances';
-import { compileQuery, errorMessage, newGroup, propertyValueText } from './query';
+import { aggregateFields, compileQuery, errorMessage, newGroup, propertyValueText } from './query';
 import type { QueryEditor } from './query';
 import { GroupEditor } from './QueryFilterEditor';
 import { VisualRelations } from './VisualRelations';
 import { RowResults } from './RowResults';
+import { AggregateEditor } from './AggregateEditor';
+import { AggregateResults } from './AggregateResults';
 import { compileRowQuery, rowQueryModel } from './ontologySql';
 import type { VisualRowsDraft } from './visualRows';
 import { loadRowContext } from './visualRows';
@@ -82,6 +84,8 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
   const [association, setAssociation] = useState(initialRows);
   const [blocked, setBlocked] = useState(false);
   const [removePending, setRemovePending] = useState(false);
+  const [aggregateAvailable, setAggregateAvailable] = useState(false);
+  const [aggregateCapabilityError, setAggregateCapabilityError] = useState('');
   const properties = association ? rowQueryModel(association.rows, association.context, true).fields : schema.definition.schema!.properties;
   const binding = schema.definition.schema!.storageBinding;
   const readOnly = !!binding || !!association;
@@ -103,6 +107,13 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
   const [relatedId, setRelatedId] = useState<string>();
   const request = useRef<{ controller: AbortController; sequence: number } | undefined>(undefined);
   const sequence = useRef(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    if (typeof api.dataCapabilities !== 'function') return;
+    api.dataCapabilities(controller.signal).then((value) => { if (!controller.signal.aborted) setAggregateAvailable(!!value.aggregates); }).catch((cause: unknown) => { if (!controller.signal.aborted) setAggregateCapabilityError(errorMessage(cause)); });
+    return () => controller.abort();
+  }, [api]);
 
   useEffect(() => () => {
     sequence.current += 1;
@@ -169,6 +180,7 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
       const result = await api.query(spec, controller.signal);
       if (controller.signal.aborted || sequence.current !== current) return;
       if (!!spec.rows !== !!result.rowMode) throw new Error('查询结果形态与请求不一致，请检查服务后重试');
+      if (!!spec.aggregate !== !!result.aggregateMode) throw new Error('汇总结果形态与请求不一致，请检查服务后重试');
       // Preserve exactly the submitted query; subsequent pages only replace its cursor.
       const base: QuerySpec = { ...spec, page: { limit: spec.page.limit } };
       setExecuted({ result, spec: base, page });
@@ -195,6 +207,7 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
   }
 
   function run() {
+    if (editor.aggregate && (!aggregateAvailable || binding || association)) { setError('当前服务或模型尚不支持分组汇总，请使用默认平台 MySQL 单模型'); return; }
     try { void execute(association ? compileRowQuery(association.rows, association.context, editor) : compileQuery(schema.definition.id, properties, editor), 1); }
     catch (reason) { setError(errorMessage(reason)); }
   }
@@ -216,6 +229,7 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
     setStale(false);
     setDialog(undefined);
     setRelatedId(undefined);
+    setEditor({ filter: newGroup(), select: [], sort: '', direction: 'asc', limit: '25' });
     setError(message);
     setNotice('操作被授权拒绝，已清除先前读取的结果。');
     if (association) setBlocked(true);
@@ -234,29 +248,33 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
     finally { if (current === sequence.current) request.current = undefined; }
   }
 
-  const selectedCount = editor.select.length;
+  const selectedCount = editor.aggregate ? editor.aggregate.measures.length : editor.select.length;
+  const sortProperties = editor.aggregate ? aggregateFields(editor.aggregate, properties) : filterProperties;
   const result = executed?.result;
-  const rowCount = result?.rowMode ? result.rows?.length ?? 0 : result?.data.length ?? 0;
+  const rowCount = result?.aggregateMode ? result.aggregateRows?.length ?? 0 : result?.rowMode ? result.rows?.length ?? 0 : result?.data.length ?? 0;
   if (blocked) return <div className="notice notice-error" role="alert">{error || '查询权限已改变，已清除结果及关联字段候选。'}<button className="button" type="button" onClick={() => void reloadAuthorization()}>重新读取查询权限</button></div>;
   return <>
     <div className="card query-builder">
       <div className="query-section-heading"><div><Filter size={18} /><h2>构建查询</h2></div><span className="muted">更改配置后，点击运行应用</span></div>
       <div className="query-builder-content">
-        <VisualRelations api={api} schema={schema} categories={categories} editor={editor} rows={association?.rows} context={association?.context} onApply={applyAssociation} onRename={renameRole} onRemove={() => removeAssociation()} onForbidden={forbidden} />
+        <label className="query-result-mode">结果类型<select aria-label="查询结果类型" value={editor.aggregate ? 'aggregate' : 'detail'} onChange={(event) => { change({ aggregate: event.target.value === 'aggregate' ? { groupBy: [], measures: [{ id: 'm0', op: 'count', name: '记录数量' }] } : undefined, sort: '' }); setDialog(undefined); setRelatedId(undefined); }}><option value="detail">明细记录</option><option value="aggregate" disabled={!aggregateAvailable || !!binding || !!association}>分组汇总</option></select></label>
+        {(!aggregateAvailable || binding || association) && <p className="muted">分组汇总需要服务端开放能力，并使用默认平台 MySQL 单模型。</p>}
+        {aggregateCapabilityError && <p className="notice notice-error">汇总能力读取失败：{aggregateCapabilityError}</p>}
+        {!editor.aggregate && <VisualRelations api={api} schema={schema} categories={categories} editor={editor} rows={association?.rows} context={association?.context} onApply={applyAssociation} onRename={renameRole} onRemove={() => removeAssociation()} onForbidden={forbidden} />}
         {removePending && <div className="notice" role="status"><p>{association?.rows.joins.length === 1 ? '移除后返回单模型对象列表，同一对象只出现一次。现有字段和条件将保留。' : '移除最后一个关联后，仅返回剩余路径的匹配行。现有字段和条件将保留。'}</p><button type="button" className="button" onClick={() => removeAssociation(true)}>确认移除关联</button><button type="button" className="button subtle" onClick={() => setRemovePending(false)}>保留关联</button></div>}
         <section className="query-filter-section"><div className="query-step-title"><span>01</span><h3>筛选条件</h3></div>
           {filterProperties.length > 0 ? <GroupEditor group={editor.filter} properties={filterProperties} onChange={(filter) => change({ filter })} /> : <p className="muted">主表尚未映射可筛选属性。</p>}
           {readOnly && <p className="muted">{association ? '筛选作用于全部匹配关系行；字段名称包含模型角色。' : '筛选和排序使用主表属性；其他来源的属性可选择返回。'}</p>}
         </section>
-        <div className="query-settings-grid"><section><div className="query-step-title"><span>02</span><h3>返回字段</h3><small className="muted">已选 {selectedCount} 项</small></div>
+        <div className="query-settings-grid">{editor.aggregate ? <AggregateEditor aggregate={editor.aggregate} properties={properties} onChange={(aggregate) => change({ aggregate, ...(editor.sort && !aggregateFields(aggregate, properties).some((field) => field.id === editor.sort) ? { sort: '' } : {}) })} /> : <section><div className="query-step-title"><span>02</span><h3>返回字段</h3><small className="muted">已选 {selectedCount} 项</small></div>
           <div className="query-column-actions"><button type="button" className="button subtle" onClick={() => change({ select: properties.map((property) => property.id) })}>全选</button><button type="button" className="button subtle" onClick={() => change({ select: [] })}>清空</button></div>
           <div className="query-columns">{properties.map((property) => <label className={`query-column ${editor.select.includes(property.id) ? 'query-column-selected' : ''}`} key={property.id}>
             <input type="checkbox" aria-label={property.name} checked={editor.select.includes(property.id)} onChange={(event) => change({ select: event.target.checked ? [...editor.select, property.id] : editor.select.filter((id) => id !== property.id) })} />
             <span>{property.name}</span><small className="muted">{property.dataType}</small>
           </label>)}</div>
-        </section><section><div className="query-step-title"><span>03</span><h3>排序与分页</h3></div>
+        </section>}<section><div className="query-step-title"><span>03</span><h3>排序与分页</h3></div>
           <div className="query-sort-settings"><div className="field"><label htmlFor="query-sort">排序字段</label><select id="query-sort" value={editor.sort} onChange={(event) => change({ sort: event.target.value })}>
-            <option value="">{association ? '全部模型的实例 ID（默认）' : '实例 ID（默认）'}</option>{filterProperties.filter((property) => property.dataType !== 'text' && property.dataType !== 'longtext').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
+            <option value="">{editor.aggregate ? '分组属性（默认）' : association ? '全部模型的实例 ID（默认）' : '实例 ID（默认）'}</option>{sortProperties.filter((property) => property.dataType !== 'text' && property.dataType !== 'longtext').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
           </select></div><div className="form-grid"><div className="field"><label htmlFor="query-direction">排序方向</label><select id="query-direction" value={editor.direction} disabled={!editor.sort} onChange={(event) => change({ direction: event.target.value as 'asc' | 'desc' })}><option value="asc">升序</option><option value="desc">降序</option></select></div>
             <div className="field"><label htmlFor="query-limit">每页条数</label><input id="query-limit" type="number" min="1" max="100" step="1" value={editor.limit} onChange={(event) => change({ limit: event.target.value })} /></div></div>
             <p className="muted query-sort-hint"><ArrowDownWideNarrow size={14} />结果由服务端排序和分页，每页最多 100 条。</p>
@@ -272,12 +290,12 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
     {notice && <div className="notice query-status" role="status">{notice}</div>}
     <section className="card query-results" aria-label="查询结果" aria-busy={busy}>
       <div className="query-section-heading"><div><Rows3 size={18} /><h2>查询结果</h2>{result && <span className="badge">本页 {rowCount} 条</span>}</div>
-        {association || !writes.allowed('create') ? <span className="muted">{association ? '关联明细 · 只读结果' : '写入能力由当前权限与来源状态决定'}</span> : <button className="button" type="button" onClick={() => setDialog({})}><Plus size={16} />新建实例</button>}
+        {editor.aggregate || result?.aggregateMode || association || !writes.allowed('create') ? <span className="muted">{editor.aggregate || result?.aggregateMode ? '分组汇总' : association ? '关联明细 · 只读结果' : '写入能力由当前权限与来源状态决定'}</span> : <button className="button" type="button" onClick={() => setDialog({})}><Plus size={16} />新建实例</button>}
       </div>
       {stale && result && <div className="query-stale" role="status"><span className="query-stale-dot" />结果已过期：配置或数据已改变，请重新运行查询。<span>续页已停用</span></div>}
       {!result ? <div className="empty-state query-result-empty"><div className="query-empty-icon"><Database size={27} /></div><h3>{busy ? '正在读取数据' : '准备好后，运行第一次查询'}</h3><p className="muted">{busy ? '你可以取消本次请求并继续调整条件。' : '勾选返回字段，按需添加条件。这里将展示服务端返回的真实结果。'}</p></div>
         : !rowCount ? <div className="empty-state query-result-empty"><Check size={30} /><h3>没有匹配的数据</h3><p className="muted">{association ? '可以调整关联路径或筛选条件后重新运行。' : '可以调整筛选条件后重新运行，或新建一个实例。'}</p></div>
-          : result.rowMode ? <><p className="ontology-row-grain muted">每行对应一组匹配对象，同一对象可能出现多次。结果只读。</p><RowResults result={result} query={executed!.spec} /></>
+          : result.aggregateMode ? <AggregateResults result={result} /> : result.rowMode ? <><p className="ontology-row-grain muted">每行对应一组匹配对象，同一对象可能出现多次。结果只读。</p><RowResults result={result} query={executed!.spec} /></>
           : <div className="table-wrap query-result-table"><table><thead><tr><th className="query-row-number">#</th><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}<small>{field.dataType}</small></th>)}<th className="query-row-action">操作</th></tr></thead>
             <tbody>{result.data.map((instance, index) => <tr key={instance.id}><td className="query-row-number">{index + 1}</td><td><button type="button" className="query-id-link" title={instance.id} onClick={() => setDialog({ id: instance.id })}>{instance.id}</button></td>
               {result.fields.map((field) => { const value = instance.values[field.id]; return <td key={field.id}><span className={value === undefined || value === null || value === '' ? 'query-cell-special' : 'query-cell-value'}>{propertyValueText(field, value)}</span></td>; })}

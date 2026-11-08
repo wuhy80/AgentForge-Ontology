@@ -1,5 +1,5 @@
 import type { Expression, JsonValue, Property, QueryContextModel, QuerySpec, RowQuery, SQLParameter } from '../../lib/types';
-import { availableOperators, compileQuery, newGroup, parseFieldValue } from './query';
+import { aggregateFields, availableOperators, compileQuery, newGroup, parseFieldValue, validateAggregate } from './query';
 import type { FilterGroup, FilterNode, QueryEditor } from './query';
 
 export const quoteIdentifier = (value: string) => `"${value.replaceAll('"', '""')}"`;
@@ -34,6 +34,7 @@ export function rowQueryModel(rows: RowQuery, context: RowQueryContext, allowInc
 }
 
 export function compileRowQuery(rows: RowQuery, context: RowQueryContext, editor: QueryEditor): QuerySpec {
+  if (editor.aggregate) throw new Error('分组汇总暂不支持 Link 关联查询');
   const model = rowQueryModel(rows, context);
   const query = compileQuery(model.schemaId, model.fields, editor);
   if (editor.select.length > 100) throw new Error('返回字段最多 100 项');
@@ -129,17 +130,28 @@ export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue
     if (!operator || !availableOperators(field).some((item) => item.value === node.op)) throw new Error('条件无法完整转换为 OntologySQL');
     return `${text} ${operator} ${bindValue(node.value, field, node.op)}`;
   }
-  if (!query.select.length || new Set(query.select).size !== query.select.length) throw new Error('请先选择返回字段');
-  const columns = query.select.map((id) => reference(id).text).join(', ');
+  if (query.aggregate && query.rows) throw new Error('分组汇总暂不支持 Link 关联查询');
+  if (!query.aggregate && (!query.select.length || new Set(query.select).size !== query.select.length)) throw new Error('请先选择返回字段');
+  if (query.aggregate) validateAggregate(query.aggregate, model.fields);
+  const aggregate = query.aggregate;
+  const outputs = aggregate ? aggregateFields(aggregate, model.fields) : [];
+  const columns = aggregate ? [...(aggregate.groupBy ?? []).map((id) => reference(id).text), ...aggregate.measures.map((measure) => {
+    const op = measure.op === 'countDistinct' ? 'COUNT' : measure.op.toUpperCase();
+    const field = measure.field ? reference(measure.field).text : '*';
+    const name = outputs.find((item) => item.id === measure.id)!.name;
+    return `${op}(${measure.op === 'countDistinct' ? 'DISTINCT ' : ''}${field}) AS ${quoteIdentifier(name)}`;
+  })].join(', ') : query.select.map((id) => reference(id).text).join(', ');
   const order = query.orderBy?.[0];
-  if (order && !reference(order.field).field.sortable) throw new Error('排序字段当前不支持排序');
+  if (order && !(aggregate ? outputs.some((item) => item.id === order.field) : reference(order.field).field.sortable)) throw new Error('排序字段当前不支持排序');
   const joins = query.rows?.joins.map((join) => {
     const from = query.rows!.nodes.find((node) => node.id === join.from)!;
     const to = query.rows!.nodes.find((node) => node.id === join.to)!;
     const link = context!.links.find((item) => item.id === join.linkId)!;
     return `\nJOIN LINK ${quoteIdentifier(from.alias)} VIA ${quoteIdentifier(link.category)}.${quoteIdentifier(link.name)} DIRECTION ${join.direction.toUpperCase()} AS ${quoteIdentifier(to.alias)}`;
   }).join('') ?? '';
-  return `SELECT ${columns}\nFROM ${quoteIdentifier(model.category)}.${quoteIdentifier(model.name)} AS ${quoteIdentifier(query.rows?.nodes[0].alias ?? model.name)}${joins}${query.where ? `\nWHERE ${expression(query.where)}` : ''}${order ? `\nORDER BY ${reference(order.field).text} ${order.direction.toUpperCase()}` : ''}\nLIMIT ${query.page.limit};`;
+  const groupBy = aggregate?.groupBy?.length ? `\nGROUP BY ${aggregate.groupBy.map((id) => reference(id).text).join(', ')}` : '';
+  const sort = order ? aggregate?.measures.some((measure) => measure.id === order.field) ? quoteIdentifier(outputs.find((item) => item.id === order.field)!.name) : reference(order.field).text : '';
+  return `SELECT ${columns}\nFROM ${quoteIdentifier(model.category)}.${quoteIdentifier(model.name)} AS ${quoteIdentifier(query.rows?.nodes[0].alias ?? model.name)}${joins}${query.where ? `\nWHERE ${expression(query.where)}` : ''}${groupBy}${order ? `\nORDER BY ${sort} ${order.direction.toUpperCase()}` : ''}\nLIMIT ${query.page.limit};`;
 }
 
 export function queryToSQLDraft(query: QuerySpec, model: QueryContextModel, context?: RowQueryContext): { text: string; drafts: ParameterDrafts; parameters: Record<string, JsonValue> } {
@@ -193,7 +205,7 @@ export function queryToEditor(query: QuerySpec, model: QueryContextModel, contex
   }
   const node = query.where ? visit(query.where) : newGroup();
   const filter: FilterGroup = node.kind === 'group' ? node : { ...newGroup(), children: [node] };
-  const editor: QueryEditor = { filter, select: [...query.select], sort: query.orderBy?.[0]?.field ?? '', direction: query.orderBy?.[0]?.direction ?? 'asc', limit: String(query.page.limit) };
+  const editor: QueryEditor = { filter, select: [...query.select], sort: query.orderBy?.[0]?.field ?? '', direction: query.orderBy?.[0]?.direction ?? 'asc', limit: String(query.page.limit), ...(query.aggregate ? { aggregate: structuredClone(query.aggregate) } : {}) };
   // Revalidate the complete draft through the existing visual compiler before switching.
   compileQuery(model.schemaId, model.fields, editor);
   return editor;

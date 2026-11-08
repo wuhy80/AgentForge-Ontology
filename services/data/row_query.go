@@ -50,6 +50,9 @@ func (p *rowQueryPlan) close() {
 }
 
 func validateRowQueryShape(q c.QuerySpec) error {
+	if q.Aggregate != nil {
+		return problem(422, "aggregate_unsupported", "首批聚合不能混用关联行查询")
+	}
 	if q.Rows == nil || q.Via != nil || len(q.Rows.Joins) < 1 || len(q.Rows.Joins) > maxRowQueryJoins || len(q.Rows.Nodes) != len(q.Rows.Joins)+1 {
 		return problem(422, "invalid_row_query", "关联行查询需要1到4条INNER Link和对应对象节点，不能混用固定实例导航")
 	}

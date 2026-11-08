@@ -1,9 +1,9 @@
-import type { Expression, JsonValue, Property, QuerySpec, Values } from '../../lib/types';
+import type { Expression, JsonValue, Property, QueryAggregate, QuerySpec, Values } from '../../lib/types';
 
 export type FilterCondition = { id: string; kind: 'condition'; field: string; op: string; raw: string };
 export type FilterGroup = { id: string; kind: 'group'; join: 'and' | 'or'; negated: boolean; children: FilterNode[] };
 export type FilterNode = FilterCondition | FilterGroup;
-export type QueryEditor = { filter: FilterGroup; select: string[]; sort: string; direction: 'asc' | 'desc'; limit: string };
+export type QueryEditor = { filter: FilterGroup; select: string[]; sort: string; direction: 'asc' | 'desc'; limit: string; aggregate?: QueryAggregate };
 export type FieldDraft = { mode: 'unchanged' | 'omit' | 'value' | 'null'; text: string };
 export type FieldDrafts = Record<string, FieldDraft>;
 
@@ -113,17 +113,45 @@ export function compileFilter(group: FilterGroup, properties: Property[]): Expre
 }
 
 export function compileQuery(schemaId: string, properties: Property[], editor: QueryEditor): QuerySpec {
-  if (!editor.select.length) throw new Error('请至少勾选一个返回字段');
+  if (!editor.select.length && !editor.aggregate) throw new Error('请至少勾选一个返回字段');
   if (new Set(editor.select).size !== editor.select.length || editor.select.some((id) => !properties.some((property) => property.id === id))) throw new Error('返回字段已失效，请重新选择');
   if (!/^\d+$/.test(editor.limit) || Number(editor.limit) < 1 || Number(editor.limit) > 100) throw new Error('每页条数应为 1 至 100 的整数');
   const where = compileFilter(editor.filter, properties);
-  const sort = properties.find((property) => property.id === editor.sort);
+  if (editor.aggregate) validateAggregate(editor.aggregate, properties);
+  const outputFields = editor.aggregate ? aggregateFields(editor.aggregate, properties) : properties;
+  const sort = outputFields.find((property) => property.id === editor.sort);
   if (editor.sort && (!sort || sort.dataType === 'text' || sort.dataType === 'longtext')) throw new Error('当前字段不支持排序');
   return {
-    from: { schemaId }, select: [...editor.select], ...(where ? { where } : {}),
+    from: { schemaId }, select: editor.aggregate ? [] : [...editor.select], ...(editor.aggregate ? { aggregate: editor.aggregate } : {}), ...(where ? { where } : {}),
     ...(sort ? { orderBy: [{ field: sort.id, direction: editor.direction }] } : {}),
     page: { limit: Number(editor.limit) },
   };
+}
+
+export const aggregateLabels = { count: '计数', countDistinct: '去重计数', sum: '求和', avg: '平均值', min: '最小值', max: '最大值' };
+
+export function validateAggregate(aggregate: QueryAggregate, properties: Property[]) {
+  const groupBy = aggregate.groupBy ?? [];
+  if (groupBy.length > 3 || new Set(groupBy).size !== groupBy.length) throw new Error('分组最多选择 3 个不同的属性');
+  if (groupBy.some((id) => !properties.some((field) => field.id === id && !['text', 'longtext'].includes(field.dataType)))) throw new Error('分组属性不可用或不支持分组');
+  if (!aggregate.measures.length || aggregate.measures.length > 20) throw new Error('请选择 1–20 项汇总指标');
+  const ids = new Set(groupBy);
+  for (const measure of aggregate.measures) {
+    if (!/^m[A-Za-z0-9_]{0,63}$/.test(measure.id) || ids.has(measure.id)) throw new Error('汇总指标标识无效或重复');
+    ids.add(measure.id);
+    if (!Object.hasOwn(aggregateLabels, measure.op)) throw new Error('汇总方式尚不支持');
+    const field = properties.find((item) => item.id === measure.field);
+    if (measure.op === 'count' && !measure.field) continue;
+    if (!field || measure.op !== 'count' && ['text', 'longtext'].includes(field.dataType) || ['min', 'max'].includes(measure.op) && field.dataType === 'boolean') throw new Error('请选择可汇总的属性');
+    if (['sum', 'avg'].includes(measure.op) && !['int64', 'decimal'].includes(field.dataType)) throw new Error('求和及平均值只支持整数与精确小数');
+  }
+}
+
+export function aggregateFields(aggregate: QueryAggregate, properties: Property[]): Property[] {
+  return [...(aggregate.groupBy ?? []).flatMap((id) => properties.filter((field) => field.id === id)), ...aggregate.measures.map((measure) => {
+    const source = properties.find((field) => field.id === measure.field);
+    return { ...source, id: measure.id, name: measure.name?.trim() || `${aggregateLabels[measure.op]}${source ? ` · ${source.name}` : ' · 全部记录'}`, dataType: ['count', 'countDistinct'].includes(measure.op) ? 'int64' as const : source?.dataType ?? 'decimal' as const };
+  })];
 }
 
 export function valueText(value: JsonValue | undefined): string {

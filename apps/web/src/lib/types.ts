@@ -293,13 +293,17 @@ export interface PermissionValueRef {
   matchUserAttribute?: 'id' | 'username'
   mode?: 'scalar' | 'set'
 }
-export interface Expression { op: string; field?: string; value?: JsonValue; valueRef?: PermissionValueRef; args?: Expression[] }
+export interface Expression { op: string; field?: string; value?: JsonValue; parameter?: string; valueRef?: PermissionValueRef; args?: Expression[] }
 export interface Source { schemaId?: string; category?: string; schema?: string }
 export interface Order { field: string; direction: 'asc' | 'desc' }
+export type AggregateOperation = 'count' | 'countDistinct' | 'sum' | 'avg' | 'min' | 'max'
+export interface AggregateMeasure { id: string; op: AggregateOperation; field?: string; name?: string }
+export interface QueryAggregate { groupBy?: string[]; measures: AggregateMeasure[] }
 export interface QuerySpec {
   from: Source
   via?: LinkTraversal
   rows?: RowQuery
+  aggregate?: QueryAggregate
   where?: Expression
   select: string[]
   orderBy?: Order[]
@@ -311,7 +315,12 @@ export interface RowQueryJoin { from: string; to: string; linkId: string; direct
 export interface RowQuery { nodes: RowQueryNode[]; joins: RowQueryJoin[] }
 export interface QueryRowEntity { nodeId: string; schemaId: string; instanceId: string }
 export interface QueryRow { id: string; values: Values; entities: QueryRowEntity[] }
-export interface QueryResult { data: Instance[]; fields: Property[]; rowMode?: boolean; rows?: QueryRow[]; nextCursor?: string; hasMore: boolean }
+export interface QueryResult { data: Instance[]; fields: Property[]; rowMode?: boolean; rows?: QueryRow[]; aggregateMode?: boolean; aggregateRows?: { values: Values }[]; nextCursor?: string; hasMore: boolean }
+export interface SavedQueryParameter { name: string; dataType: DataType; nullable: boolean; precision?: number; scale?: number; array?: boolean; enumId?: string }
+export interface SavedQueryTemplate { query: QuerySpec; parameters: SavedQueryParameter[] }
+export interface SavedQueryInput extends SavedQueryTemplate { name: string; source: { kind: 'visual' | 'ontology-sql'; text?: string; defaultCategoryId?: string } }
+export interface SavedQuerySummary { id: string; name: string; etag: string; createdAt: string; updatedAt: string }
+export interface SavedQuery extends SavedQueryInput, SavedQuerySummary {}
 export interface SQLRange { from: number; to: number; line: number; column: number }
 export interface SQLDiagnostic { code: string; message: string; severity: 'error' | 'warning'; range: SQLRange }
 export interface SQLParameter {
@@ -368,6 +377,17 @@ export interface DataCapabilities {
   queryPathPlanning?: boolean
   batch: boolean
   calculatedProperties: boolean
+  aggregates?: boolean
+  aggregateOperations?: AggregateOperation[]
+  maxAggregateGroups?: number
+  maxAggregateGroupFields?: number
+  maxAggregateMeasures?: number
+  savedQueries?: boolean
+  savedQueryScope?: 'user'
+  maxSavedQueries?: number
+  maxSavedQueryBytes?: number
+  maxSavedQueryParameters?: number
+  aggregateMapped?: boolean
 }
 
 export interface User {

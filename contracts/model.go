@@ -208,13 +208,14 @@ type WriteRequest struct {
 }
 
 type QuerySpec struct {
-	From    Source         `json:"from"`
-	Via     *LinkTraversal `json:"via,omitempty"`
-	Rows    *RowQuery      `json:"rows,omitempty"`
-	Where   *Expression    `json:"where,omitempty"`
-	Select  []string       `json:"select"`
-	OrderBy []Order        `json:"orderBy,omitempty"`
-	Page    Page           `json:"page"`
+	From      Source          `json:"from"`
+	Via       *LinkTraversal  `json:"via,omitempty"`
+	Rows      *RowQuery       `json:"rows,omitempty"`
+	Aggregate *AggregateQuery `json:"aggregate,omitempty"`
+	Where     *Expression     `json:"where,omitempty"`
+	Select    []string        `json:"select"`
+	OrderBy   []Order         `json:"orderBy,omitempty"`
+	Page      Page            `json:"page"`
 }
 
 // LinkTraversal restricts the result Schema to one-hop neighbors of InstanceID.
@@ -233,11 +234,14 @@ type Source struct {
 }
 
 type Expression struct {
-	Op       string              `json:"op"`
-	Field    string              `json:"field,omitempty"`
-	Value    json.RawMessage     `json:"value,omitempty"`
-	ValueRef *PermissionValueRef `json:"valueRef,omitempty"`
-	Args     []Expression        `json:"args,omitempty"`
+	Op    string          `json:"op"`
+	Field string          `json:"field,omitempty"`
+	Value json.RawMessage `json:"value,omitempty"`
+	// Parameter is allowed only in a saved-query template. Ordinary queries
+	// reject unbound placeholders; parameter values are supplied per execution.
+	Parameter string              `json:"parameter,omitempty"`
+	ValueRef  *PermissionValueRef `json:"valueRef,omitempty"`
+	Args      []Expression        `json:"args,omitempty"`
 }
 type Order struct {
 	Field     string `json:"field"`
@@ -248,12 +252,14 @@ type Page struct {
 	Cursor string `json:"cursor,omitempty"`
 }
 type QueryResult struct {
-	Data       []Instance `json:"data"`
-	Fields     []Property `json:"fields"`
-	RowMode    bool       `json:"rowMode,omitempty"`
-	Rows       []QueryRow `json:"rows,omitempty"`
-	NextCursor string     `json:"nextCursor,omitempty"`
-	HasMore    bool       `json:"hasMore"`
+	Data          []Instance     `json:"data"`
+	Fields        []Property     `json:"fields"`
+	RowMode       bool           `json:"rowMode,omitempty"`
+	Rows          []QueryRow     `json:"rows,omitempty"`
+	AggregateMode bool           `json:"aggregateMode,omitempty"`
+	AggregateRows []AggregateRow `json:"aggregateRows,omitempty"`
+	NextCursor    string         `json:"nextCursor,omitempty"`
+	HasMore       bool           `json:"hasMore"`
 }
 
 type Principal struct {

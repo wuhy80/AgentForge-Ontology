@@ -57,6 +57,9 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 	bad := func() (string, []any, error) {
 		return "", nil, problem(422, "invalid_expression", "表达式结构不合法")
 	}
+	if e.Parameter != "" {
+		return "", nil, problem(422, "unbound_parameter", "查询参数尚未绑定；请通过保存查询执行入口提供参数")
+	}
 	if e.ValueRef != nil {
 		return bad()
 	}
@@ -249,6 +252,9 @@ type sqlPredicate struct {
 
 func compileQueryPredicate(d c.Definition, etag string, p c.Principal, dec c.Decision, q c.QuerySpec, secret string, relation *sqlPredicate) (compiledQuery, error) {
 	var result compiledQuery
+	if q.Aggregate != nil {
+		return result, problem(422, "aggregate_context_required", "聚合查询必须通过独立聚合编译器")
+	}
 	if err := validateSchema(d); err != nil {
 		return result, err
 	}

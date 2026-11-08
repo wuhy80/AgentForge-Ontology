@@ -1,6 +1,23 @@
 # OntologySQL：中文本体查询语言与统一查询计划
 
-状态：用户于2026-11-07确认按工作台方案开发。已实现只读文本、类型化参数、授权目录、诊断、补全、格式化及最多4条INNER JOIN LINK，统一编译到QuerySpec；完整目标中的LEFT、EXISTS、聚合、复杂关系文本仍为候选。实现与验证结果统一见[项目总览](../项目总览.md#当前实现与验证2026-11-06)。本文只维护文本语法、编译与诊断；页面、引导和补全交互见[查询工作台设计增量](可视化查询编辑器.md#ontologysql-工作台设计增量2026-11-07候选)，公共查询语义和执行边界唯一见 [DataSet](DataSet.md)，名称与身份规则见[组织与隔离](../组织与隔离.md)。
+状态：用户于2026-11-07确认按工作台方案开发。已实现只读文本、类型化参数、授权目录、诊断、补全、格式化、最多4条INNER JOIN LINK及单模型聚合，统一编译到QuerySpec；完整目标中的LEFT、EXISTS、HAVING和复杂关系文本仍为候选。实现与验证结果统一见[项目总览](../项目总览.md#当前实现与验证2026-11-06)。本文只维护文本语法、编译与诊断；页面、引导和补全交互见[查询工作台设计增量](可视化查询编辑器.md#ontologysql-工作台设计增量2026-11-07候选)，公共查询语义和执行边界唯一见 [DataSet](DataSet.md)，名称与身份规则见[组织与隔离](../组织与隔离.md)。
+
+### 单模型聚合与模板编译（2026-11-08已实现）
+
+当前SQL新增 `COUNT(*)`、`COUNT(属性)`、`COUNT(DISTINCT 属性)`、`SUM/AVG/MIN/MAX(属性)` 及可选 `GROUP BY`。普通投影字段须先于计量，且与GROUP BY逐项同序；计量可用 `AS "中文名称"` 命名，内部按出现顺序生成m0、m1等输出ID。只允许一个输出排序；计量可按其中文输出名定位。纯计量无需GROUP BY，独立返回 `aggregateMode/aggregateRows/fields`，不能按实例编辑。示例为当前支持语法，具体类型、精度、权限、组数预算、分页及拒绝组合唯一见[公共单模型聚合](DataSet.md#公共单模型聚合2026-11-08本批实现)：
+
+```sql
+SELECT "状态", COUNT(*) AS "数量", SUM("金额") AS "合计"
+FROM "业务"."工单"
+WHERE "金额" >= :最低金额
+GROUP BY "状态"
+ORDER BY "数量" DESC
+LIMIT 25;
+```
+
+该子集仅支持默认平台MySQL单Schema，JOIN LINK与聚合不能组合，HAVING、窗口、表达式计量和映射聚合仍明确拒绝。聚合下的普通字段插入接口拒绝改稿，避免破坏GROUP BY或输出粒度。SQL与可视化的统计转换必须完整保留同一QuerySpec。
+
+个人模板使用独立 `POST /data/saved-queries/compile`，输入仅text和可选defaultCategoryId，不携带当前运行实参。它按AST区分固定常量与命名占位，输出稳定ID计划及参数声明，不查询业务行。模板编译首批拒绝IN/NOT IN列表中的任何命名参数，临时SQL原有标量参数列表不受影响。加载、执行旧模板使用已保存ID计划，不重新解析source.text；其权限和生命周期唯一见[个人保存查询](DataSet.md#个人保存查询2026-11-08本批实现)。
 
 ## 1. 方案选择
 
@@ -73,7 +90,7 @@ LIMIT 50;
 
 ### 工作台首批语法候选（2026-11-07）
 
-当前 [QuerySpec](../../contracts/model.go) 能表达单 Schema 实体查询和固定实例起点的 `via`，尚无扁平 JOIN、输出表达式或聚合节点。用户已确认第一阶段实施下表，使相同条件的 SQL 与现有可视化查询可精确对照；实际 HTTP 类型以 [contracts/ontology_sql.go](../../contracts/ontology_sql.go) 为准。本节标题保留设计期锚点，避免已有引用失效。
+本节保留2026-11-07第一阶段单Schema实体语法及既有锚点；后续已增加INNER Link关联行和上节单模型聚合，新增形态按各自增量说明执行。用户已确认第一阶段实施下表，使相同条件的 SQL 与现有可视化查询可精确对照；实际 HTTP 类型以 [contracts/ontology_sql.go](../../contracts/ontology_sql.go) 为准。
 
 | 文本形态 | 第一阶段候选规则与对应能力 |
 | --- | --- |
@@ -249,7 +266,7 @@ LIMIT 对应最终页大小；游标建议作为查询请求参数传递，沿�
 | `POST /data/query/ontology-sql/analyze` | 正文 `text/parameters/defaultCategoryId/requestId`，返回 `requestId/textHash/diagnostics/parameters/fields/ready`；完整可执行时含稳定ID的 `query`；关联查询还提供授权 `scope`，缺参时也可用于角色选择。缺参仍返回类型和出现范围，`provided=false/ready=false`，不读取业务行 |
 | `POST /data/query/ontology-sql/complete` | 同上并提交从0开始的UTF-16 `cursorOffset`；返回 `items`，每项含 `label/insertText/detail/kind/range`。容忍未完成语法，最多50项；仅使用授权模型与字段，WHERE/ORDER按实际能力过滤 |
 | `POST /data/query/ontology-sql/format` | 同一词法/语法前端格式化，返回 `text/diagnostics/requestId/textHash`；字符串、标识符、注释保留，不完整语句不通过删除片段修复 |
-| `POST /data/query/ontology-sql` | 正文与analyze相同；检查完整且参数齐全才执行，返回QueryResult的 `data/fields/hasMore/nextCursor`，关联查询另有 `rowMode/rows`，附加实际绑定的 `query/requestId/textHash`。后续页携带此query及游标提交既有 `/data/query`，继续重新授权 |
+| `POST /data/query/ontology-sql` | 正文与analyze相同；检查完整且参数齐全才执行，返回QueryResult的 `data/fields/hasMore/nextCursor`，关联查询另有 `rowMode/rows`，聚合另有 `aggregateMode/aggregateRows`，附加实际绑定的 `query/requestId/textHash`。后续页携带此query及游标提交既有 `/data/query`，继续重新授权 |
 
 目录已使用独立业务发现桥，原会话在Metadata恢复并复核；内部每次最多20份定义、2MiB，数据库每批最多5份并先关闭cursor再授权。公开目录包含游标最多1MiB，按完整模型分页，不静默删字段；单模型超限返回422 `directory_budget`。游标最多4096字符、15分钟有效，HMAC绑定租户/用户、分类/模型/搜索/limit、最后模型ETag和授权State；每页重新授权，篡改、跨上下文、绑定定义或权限变化拒绝。其他模型的并发变化不提供历史快照。目录从准入及会话校验开始整体4秒，为OntoApp单次5秒留传输余量；客户端累计4MiB/100页等预算仍独立生效，真实代表目录压力与时延未验收。SQL文本模型解析及关系发现仍要求其原有定义/组织读取授权，不能把目录只需instance.query推广到完整SQL编辑协议。
 
@@ -266,7 +283,7 @@ LIMIT 对应最终页大小；游标建议作为查询请求参数传递，沿�
 
 目录以当前调用者身份读取Metadata公开目录，叠加 `instance.query` 与 `readFields` 生成，不用服务身份列目录。显式FROM的名称解析随后也检查定义可发现性及当前查询授权。格式化只处理调用者提交的文本，不解析隐藏目录；analyze、context和complete不查询业务表、样例或COUNT。物理目录、gate、实际来源及授权状态在执行时仍按共用执行器重新核验，分析通过不能代替运行时检查。
 
-以下继续描述完整方案；其中计划预览、复杂关系、聚合、持久缓存等为后续候选，不能从上表接口可用推断为已开放。
+以下继续描述完整方案；其中计划预览、复杂关系、关系/跨源聚合、持久缓存等为后续候选，不能从上表接口可用推断为已开放。
 
 建议 Data 服务内部增加文本前端，不新增独立查询服务或执行通道。编译步骤为：完整解析单条语句并保留源码位置 → 按可信租户及作用域绑定名称/ID → 检查类型、单位、参数及操作权限 → 降低为 QuerySpec → 执行统一能力/预算校验及优化 → 生成数据库 SQL 或受控批量计划。SDK/JSON 也通过同一校验器，外部提交的 IR 或已绑定对象同样不被直接信任。
 
@@ -296,7 +313,7 @@ SQL 文本解析和语义绑定可缓存，但绑定及执行计划须按租户�
 
 ## 8. 验收与待定事项
 
-以下覆盖完整目标；单Schema与有界INNER Link已有模块及真实数据库验证，复杂关系、聚合、缓存与性能继续待验收，具体结果见项目总览。
+以下覆盖完整目标；单Schema、有界INNER Link及本批单模型聚合已有模块及真实数据库验证，复杂关系、关系/跨源聚合、缓存与性能继续待验收，具体结果见项目总览。
 
 | 编号 | 要求 | 验收方法 |
 | --- | --- | --- |
@@ -307,7 +324,7 @@ SQL 文本解析和语义绑定可缓存，但绑定及执行计划须按租户�
 | OSQL-05 | 只读、参数化及预算在所有入口成立 | 多语句/写语句/物理表访问拒绝，参数和名称不能注入 SQL；复杂文本及小页高扇出受控失败，无物理 SQL 兜底通道 |
 | OSQL-06 | 绑定身份、当前态和权限一致 | 改名、同名重建、原文重编译、缓存失效及参数变化不误绑/漏成员；依赖或权限失效明确拒绝，旧绑定不运行历史定义 |
 | OSQL-07 | 预览与性能结论有相同语义基线 | 预览不执行业务扫描，三种编写入口复用当前校验；分阶段报告解析/绑定/编译/执行成本，不将文档或单例等价当作三库性能通过 |
-| OSQL-08 | 实体与关联行文本分别降低为等价QuerySpec | 比较基础SELECT、参数、NULL/集合、精确数值及分页；INNER Link比较多角色、反向/自关联/分支、主表限制、路径候选及保留重复行；拒绝星号、列别名、字段间比较、普通JOIN/LEFT/聚合及尾部多语句，不丢弃未支持片段 |
+| OSQL-08 | 实体、关联行与单模型聚合文本分别降低为等价QuerySpec | 比较基础SELECT、参数、NULL/集合、精确数值及分页；INNER Link比较多角色、反向/自关联/分支、主表限制、路径候选及保留重复行；聚合比较分组、六类计量和输出排序；拒绝实体星号/列别名、字段间比较、普通JOIN/LEFT、JOIN聚合及尾部多语句，不丢弃未支持片段 |
 | OSQL-09 | 查询上下文、补全与源码诊断准确受控 | 不完整语句可补全；候选随分类、别名、字段类型/主表能力及当前权限变化，不泄露隐藏目录或扫描业务值；UTF-16范围覆盖中文/emoji/CRLF，旧响应被拒绝 |
 
-单Schema文本与最多4条INNER Link关联行已按用户确认方案落实，实际验证以项目总览为准。固定起点关系文本、EXISTS、聚合、复杂关系、三库能力、持久查询、缓存及性能目标继续待定。
+单Schema文本、最多4条INNER Link关联行、单模型聚合及个人模板编译已按用户确认方案落实，实际验证以项目总览为准。固定起点关系文本、EXISTS、HAVING、关系聚合、复杂关系、三库能力、团队查询分享、缓存及性能目标继续待定。

@@ -166,6 +166,9 @@ func (b *ontologySQLBinder) expression(expression *ontologySQLExpression, depth 
 // Definitions passed to the binder contain only currently query-authorized
 // fields. Unknown and hidden names deliberately receive one generic diagnostic.
 func bindOntologySQL(statement *ontologySQLStatement, definition c.Definition, parameters map[string]json.RawMessage) c.OntologySQLAnalysis {
+	if statement != nil && (len(statement.Measures) > 0 || len(statement.GroupBy) > 0) {
+		return bindAggregateOntologySQL(statement, definition, parameters)
+	}
 	b := ontologySQLBinder{statement: statement, definition: definition, parameters: parameters, parameterIndex: map[string]int{}, analysis: c.OntologySQLAnalysis{Diagnostics: []c.SQLDiagnostic{}, Parameters: []c.SQLParameter{}, Fields: []c.Property{}}}
 	if statement == nil || definition.Schema == nil {
 		b.fail("source_unavailable", "模型不存在或当前不可查询", c.SQLRange{Line: 1, Column: 1})

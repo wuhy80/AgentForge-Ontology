@@ -286,6 +286,11 @@ func (h *handler) insertOntologySQLFieldHTTP(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, 200, out)
 		return
 	}
+	if len(stmt.Measures) > 0 || len(stmt.GroupBy) > 0 {
+		out.Diagnostics = append(out.Diagnostics, sqlDiagnostic("aggregate_field_insertion_unsupported", "聚合字段需同时维护SELECT与GROUP BY，请在文本或聚合编辑器中编辑", stmt.SourceRange))
+		writeJSON(w, 200, out)
+		return
+	}
 	scope, err := h.rowSQLScope(r, p, stmt, req.DefaultCategoryID)
 	if err != nil {
 		var binding *ontologySQLBindingError

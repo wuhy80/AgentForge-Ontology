@@ -7,6 +7,7 @@ import type {
   SchemaLink, LinkInstance,
   QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
   QueryPathsRequest, QueryPathsResult, QueryFieldInsertionRequest, QueryFieldInsertionResult,
+  SavedQuery, SavedQueryInput, SavedQuerySummary, SavedQueryTemplate,
 } from './types'
 import type { ConnectionDirectory, CreateConnection, CreatedConnection, OAuthAuthorization, OAuthPreview } from './external-auth'
 
@@ -301,6 +302,29 @@ export class ApiClient {
   }
   query(spec: QuerySpec, signal?: AbortSignal): Promise<QueryResult> {
     return this.request('/api/data/query', { method: 'POST', body: spec, signal })
+  }
+  listSavedQueries(cursor?: string, signal?: AbortSignal): Promise<Page<SavedQuerySummary>> {
+    const params = new URLSearchParams({ limit: '20' })
+    if (cursor) params.set('cursor', cursor)
+    return this.request(`/api/data/saved-queries?${params}`, { signal })
+  }
+  getSavedQuery(id: string, signal?: AbortSignal): Promise<SavedQuery> {
+    return this.request(`/api/data/saved-queries/${encodeURIComponent(id)}`, { signal })
+  }
+  compileSavedQuery(text: string, defaultCategoryId: string, signal?: AbortSignal): Promise<SavedQueryTemplate> {
+    return this.request('/api/data/saved-queries/compile', { method: 'POST', body: { text, defaultCategoryId }, signal })
+  }
+  createSavedQuery(input: SavedQueryInput, signal?: AbortSignal): Promise<SavedQuery> {
+    return this.request('/api/data/saved-queries', { method: 'POST', body: input, signal })
+  }
+  updateSavedQuery(id: string, input: SavedQueryInput, etag: string, signal?: AbortSignal): Promise<SavedQuery> {
+    return this.request(`/api/data/saved-queries/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag, signal })
+  }
+  deleteSavedQuery(id: string, etag: string, signal?: AbortSignal): Promise<void> {
+    return this.request(`/api/data/saved-queries/${encodeURIComponent(id)}`, { method: 'DELETE', etag, signal })
+  }
+  executeSavedQuery(id: string, parameters: Values, cursor?: string, signal?: AbortSignal): Promise<QueryResult> {
+    return this.request(`/api/data/saved-queries/${encodeURIComponent(id)}/execute`, { method: 'POST', body: { parameters, ...(cursor ? { cursor } : {}) }, signal })
   }
   writeCapabilities(schemaId: string, signal?: AbortSignal): Promise<WriteCapabilities> {
     return this.request(`/api/data/schemas/${encodeURIComponent(schemaId)}/write-capabilities`, { signal })

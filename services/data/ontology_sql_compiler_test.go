@@ -153,12 +153,12 @@ func TestOntologySQLRejectsUnsupportedAndUnconsumedSyntax(t *testing.T) {
 	for _, text := range []string{
 		`DELETE FROM "笔记"`, `SELECT * FROM "笔记"`, `SELECT DISTINCT "标题" FROM "笔记"`, `SELECT "标题" AS "名称" FROM "笔记"`,
 		`SELECT "标题" FROM "笔记"; SELECT "计数" FROM "笔记"`, `SELECT "标题" FROM "笔记" JOIN "其他" ON 1 = 1`,
-		`SELECT "标题" FROM "笔记" JOIN LINK "关系" AS "其他"`, `SELECT COUNT(*) FROM "笔记"`, `SELECT '值' FROM "笔记"`,
+		`SELECT "标题" FROM "笔记" JOIN LINK "关系" AS "其他"`, `SELECT SUM(*) FROM "笔记"`, `SELECT '值' FROM "笔记"`,
 		`SELECT "标题" FROM "笔记" WHERE "计数" = "计数"`, `SELECT "标题" FROM "笔记" WHERE "计数" = NULL`,
 		`SELECT "标题" FROM "笔记" WHERE "标题" LIKE 'x%'`, `SELECT "标题" FROM "笔记" WHERE "计数" IN ()`,
 		`SELECT "标题" FROM "笔记" WHERE "计数" IN (SELECT "计数" FROM "笔记")`, `SELECT "标题" FROM "笔记" WHERE "计数" = 1e3`,
 		`SELECT "标题" FROM "笔记" ORDER BY "计数", "编码"`, `SELECT "标题" FROM "笔记" LIMIT 0`, `SELECT "标题" FROM "笔记" LIMIT 101`,
-		`SELECT "标题" FROM "笔记" LIMIT :页`, `SELECT "标题" FROM "笔记" LIMIT 1 OFFSET 2`, `SELECT "标题" FROM "笔记" GROUP BY "标题"`,
+		`SELECT "标题" FROM "笔记" LIMIT :页`, `SELECT "标题" FROM "笔记" LIMIT 1 OFFSET 2`, `SELECT "标题" FROM "笔记" HAVING COUNT(*) > 1`,
 		`SELECT 标题 FROM 笔记`, `SELECT "标题" FROM "笔记" /* incomplete`, `SELECT "标题" FROM "笔记" /* nested /* */ */`,
 	} {
 		t.Run(text, func(t *testing.T) {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Braces, Code2, LoaderCircle } from 'lucide-react';
 import { ApiClient, ApiError } from '../../lib/api';
-import type { DefinitionRecord, Organization } from '../../lib/types';
+import type { DefinitionRecord, Organization, SavedQueryInput } from '../../lib/types';
 import { compileQuery, errorMessage } from './query';
 import { compileRowQuery, queryToSQLDraft } from './ontologySql';
 import { assertVisualBindings, loadRowContext } from './visualRows';
@@ -9,6 +9,8 @@ import { VisualQueryPage } from './VisualQueryPage';
 import type { VisualDraft } from './VisualQueryPage';
 import { OntologySQLWorkspace } from './OntologySQLWorkspace';
 import type { SQLDraftMemory, SQLWorkspaceHandle, VisualConversion } from './OntologySQLWorkspace';
+import { SavedQueries } from './SavedQueries';
+import { visualSavedTemplate } from './saved-query-template';
 import './query.css';
 
 type Props = { api: ApiClient; categoryId: string; schemas: DefinitionRecord[]; categories?: Organization[]; initialSchemaId?: string; selectionRequest?: number; onModel: () => void };
@@ -42,6 +44,26 @@ function QueryModes({ initialDraft, remember, ...props }: Props & { initialDraft
   useEffect(() => { active.current = true; return () => { active.current = false; modeRequest.current++; modeController.current?.abort(); }; }, []);
   const onDraft = useCallback((value: SQLDraftMemory) => { setDraft(value); remember(props.categoryId, value); }, [props.categoryId, remember]);
   const onVisualDraft = useCallback((value: VisualDraft) => { visualDraft.current = value; }, []);
+  function savedAuthorizationFailed(message: string) {
+    setAuthorizationFailure({ sequence: ++modeRequest.current, message });
+    onDraft({ text: draft.text, drafts: {} });
+  }
+  async function capture(signal: AbortSignal): Promise<Omit<SavedQueryInput, 'name'>> {
+    if (mode === 'sql') {
+      const text = sql.current?.sourceText();
+      if (!text?.trim()) throw new Error('请先编写查询');
+      const template = await props.api.compileSavedQuery(text, props.categoryId, signal);
+      return { ...template, source: { kind: 'ontology-sql', text, defaultCategoryId: props.categoryId } };
+    }
+    const current = visualDraft.current;
+    if (!current) throw new Error('请先配置可视化查询');
+    if (current.association) throw new Error('保存查询首批支持单模型，暂不支持 Link 关联');
+    const context = await props.api.queryContext({ schemaId: current.schema.definition.id, limit: 1 }, signal);
+    const model = context.models.find((item) => item.schemaId === current.schema.definition.id);
+    if (!model) throw new Error('模型当前不可查询，请检查授权');
+    if (visualDraft.current !== current) throw new Error('查询配置已改变，请重新保存');
+    return { ...visualSavedTemplate(model.schemaId, model.fields, current.editor), source: { kind: 'visual', defaultCategoryId: props.categoryId } };
+  }
 
   async function switchMode(next: 'sql' | 'visual') {
     if (next === mode || switching) return;
@@ -92,7 +114,7 @@ function QueryModes({ initialDraft, remember, ...props }: Props & { initialDraft
   const visualSchemas = useMemo(() => visual ? props.schemas.map((schema) => schema.definition.id === visual.model.schemaId
     ? { ...schema, definition: { ...schema.definition, schema: { ...schema.definition.schema!, properties: schema.definition.schema!.properties.filter((field) => visual.model.fields.some((entry) => entry.id === field.id)) } } }
     : schema) : props.schemas, [visual, props.schemas]);
-  return <div className="ontology-query-page">
+  return <div className="ontology-query-page"><SavedQueries api={props.api} capture={capture} onDenied={savedAuthorizationFailed}>
     <div className="ontology-mode-bar" role="tablist" aria-label="查询编写方式">
       <button type="button" role="tab" aria-selected={mode === 'sql'} className={mode === 'sql' ? 'active' : ''} disabled={switching} onClick={() => void switchMode('sql')}><Code2 size={16} />OntologySQL</button>
       <button type="button" role="tab" aria-selected={mode === 'visual'} className={mode === 'visual' ? 'active' : ''} disabled={switching} onClick={() => void switchMode('visual')}><Braces size={16} />可视化查询</button>
@@ -100,7 +122,7 @@ function QueryModes({ initialDraft, remember, ...props }: Props & { initialDraft
       <span className="muted ontology-mode-hint">{mode === 'sql' ? '使用业务名称编写；也可切换可视化，无需写 SQL' : '选择字段、条件与 Link 关系，直接查询数据'}</span>
     </div>
     {message && <div className={`notice ${message.startsWith('无法') ? 'notice-error' : ''}`} role={message.startsWith('无法') ? 'alert' : 'status'}>{message}</div>}
-    <div inert={switching}>{mode === 'sql' ? <OntologySQLWorkspace ref={sql} {...props} initialDraft={draft} onDraft={onDraft} />
+    <div inert={switching}>{mode === 'sql' ? <OntologySQLWorkspace ref={sql} {...props} initialDraft={draft} onDraft={onDraft} authorizationFailure={authorizationFailure} />
       : <VisualQueryPage {...props} schemas={visualSchemas} initialSchemaId={visual?.model.schemaId ?? props.initialSchemaId} initialEditor={visual?.editor} initialRows={visual?.association} authorizationFailure={authorizationFailure} onDraftChange={onVisualDraft} />}</div>
-  </div>;
+  </SavedQueries></div>;
 }

@@ -219,6 +219,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	}
 	admin.request("PATCH", baseURL+"/"+legacy.ID, c.WriteRequest{Values: map[string]json.RawMessage{note: raw("过期编辑")}}, map[string]string{"If-Match": `"` + before.ETag + `"`}, 412, nil)
 	create("new", "ready", 409)
+	verifySavedQueriesAndAggregatesHTTP(t, admin, outsider, client, metaServer.URL, dataServer.URL, tenant, category, group, schema.Definition.ID, code, state, priority)
 	// Removed codes and destructive schema edits remain explicit rejections.
 	removed := states.Definition
 	removed.Enum = &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待处理"}, {Code: "done", Label: "已完成"}}}

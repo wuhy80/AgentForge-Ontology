@@ -6,6 +6,8 @@
 
 本批默认平台MySQL新增[安全追加迁移](../../docs/发布与迁移.md#默认平台schema安全追加2026-11-08)，已有模型可追加可空/合法默认值属性及普通/唯一索引。必须先显式执行平台迁移 `010_data_schema_migrations`；已有字段/索引的变更和删除仍拒绝，普通启动、预览和业务请求不创建平台控制表。原操作重试核对部分DDL并恢复，新字段回填事务轮换已有行ETag，旧并发凭证与旧回执不能绕过当前模型。
 
+随后新增[个人保存查询](../../docs/数据查询/DataSet.md#个人保存查询2026-11-08本批实现)与[公共单模型聚合](../../docs/数据查询/DataSet.md#公共单模型聚合2026-11-08本批实现)。保存目录需显式执行Data迁移 `011_saved_query_owners`、`012_saved_queries`，普通请求和启动不补表。实际契约为[aggregate_query.go](../../contracts/aggregate_query.go)、[saved_queries.go](../../contracts/saved_queries.go)，预算由capabilities声明；源码尚未部署，不自动迁移现有业务库。
+
 Schema字符串属性可引用同租户当前Enum；业务目录、表单及查询结果只为可见字段提供 `enumId/enumValues/enumEtag`。新写/默认值、旧废弃值保留、分页依赖及来源边界见[Enum实际协议](../../docs/模块/Enum.md#当前实现协议2026-11-08)，不把平台Enum支持推断为任意来源或任意类型写入已经认证。
 
 本模块是独立 Go module；在 `GOWORK=off` 下构建。配置环境变量后，先显式执行平台迁移，再启动服务：
@@ -52,10 +54,14 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `GET /data/schemas/{schemaId}/write-capabilities` | 当前调用者八项能力、可写字段、唯一键、覆盖范围及预算；不返回物理映射 |
 | `POST /data/transactions` | 默认平台存储跨Schema混合create/update/delete/upsert，整笔1～100项原子提交 |
 | `POST /data/transactions/status` | 使用原完整事务正文核对持久回执，不执行任何业务写入 |
-| `POST /data/query` | 中文名称或稳定 ID 绑定、类型化筛选、投影、排序和签名游标 |
+| `POST /data/query` | 中文名称或稳定 ID 绑定、类型化筛选、投影、排序和签名游标；可选aggregate执行独立只读单模型统计 |
+| `GET /data/saved-queries`、`POST /data/saved-queries` | 当前租户/用户的摘要分页及保存；非本体定义，不开放跨用户管理 |
+| `POST /data/saved-queries/compile` | text/defaultCategoryId无实参SQL模板编译，返回稳定ID计划及声明，不写库、不扫描业务行 |
+| `GET /data/saved-queries/{id}`、`PUT`、`DELETE` | 私有模板详情、更新与删除；更新/删除要求强If-Match，缺少428、旧值412，跨owner404 |
+| `POST /data/saved-queries/{id}/execute` | parameters及可选cursor，重新授权后返回公共QueryResult；不按保存source重绑名称 |
 | `GET /data/query/context` | 按当前目录及实例查询权限返回最小模型/字段能力，支持分类、模型、搜索及分页 |
 | `GET /data/schemas/{schemaId}/form?operation=create` | 默认create，可显式patch；只返回当前可见字段及对应写权限的安全表单描述，具体语义见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07) |
-| `POST /data/query/ontology-sql/analyze`、`complete`、`format` | 单Schema及最多4条INNER Link的OntologySQL检查、参数推断、UTF-16诊断、上下文补全及格式化；不扫描业务数据 |
+| `POST /data/query/ontology-sql/analyze`、`complete`、`format` | 单Schema、最多4条INNER Link及单模型聚合的OntologySQL检查、参数推断、UTF-16诊断、上下文补全及格式化；不扫描业务数据 |
 | `POST /data/query/ontology-sql/paths`、`insert-field` | 只读授权路径候选及多角色字段插入，保留筛选与参数；不读取业务行 |
 | `POST /data/query/ontology-sql` | 编译为稳定ID的QuerySpec并进入同一执行器，返回原查询结果及实际绑定的query供续页 |
 | `POST /internal/publications/preview` | 只读结构预览；正文为 `contracts.PrepareRequest` |
@@ -155,7 +161,7 @@ QuerySpec 目前每页为 1 至 100 条、最多一个业务排序字段并以�
 
 首批 [OntologySQL 实际协议](../../docs/数据查询/OntologySQL.md#首批实际协议2026-11-07) 支持单Schema只读SELECT、显式投影、类型化参数、布尔/比较/空值/集合/前缀条件、一个排序字段及LIMIT；通过有界lexer/parser和类型绑定进入上述共用执行路径。目录及补全使用调用者的当前定义发现权限，叠加instance.query和字段义务；响应不返回物理映射。文本/参数/游标限制、诊断与错误语义以该主要说明和contracts为准。能力响应的ontologySQL为true不表示任意SQL可用。
 
-分表、计算属性、跨源Link、跨来源事务、LEFT/EXISTS/聚合及任意联邦条件尚未开放；当前有界INNER Link关联行与Enum字段按各自主说明执行。权限当前支持受控行条件、静态字段集合及可安全合并的角色规则，不能安全合并的组合明确拒绝；不代表完整ABAC或逐行掩码已实现。Action/Function实际执行边界见[执行服务](../execution/README.md)。前端已接入CRUD、单Schema查询、OntologySQL和可视化INNER Link；无法表达的请求明确拒绝，不将元数据可维护等同运行能力。outbox和幂等记录目前不自动清理；保留期限、事件投递、全量恢复和生产容量仍待后续实现及验证。
+分表、计算属性、跨源Link、跨来源事务、LEFT/EXISTS、关系/映射聚合及任意联邦条件尚未开放；当前有界INNER Link关联行、单模型聚合、个人模板与Enum字段按各自主说明执行。权限当前支持受控行条件、静态字段集合及可安全合并的角色规则，不能安全合并的组合明确拒绝；不代表完整ABAC或逐行掩码已实现。Action/Function实际执行边界见[执行服务](../execution/README.md)。前端已接入CRUD、单Schema查询、OntologySQL、可视化INNER Link、统计和个人模板；无法表达的请求明确拒绝，不将元数据可维护等同运行能力。outbox和幂等记录目前不自动清理；保留期限、事件投递、全量恢复和生产容量仍待后续实现及验证。
 
 ## Link 运行接口
 

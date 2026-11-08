@@ -229,11 +229,19 @@ type ontologySQLStatement struct {
 	SourceRange                         c.SQLRange
 	Joins                               []ontologySQLJoin
 	Projection                          []ontologySQLField
+	Measures                            []ontologySQLAggregate
+	GroupBy                             []ontologySQLField
 	Where                               *ontologySQLExpression
 	Order                               *ontologySQLField
 	Direction                           string
 	Limit                               int
 	Tokens                              []ontologySQLToken
+}
+type ontologySQLAggregate struct {
+	Op    string
+	Field *ontologySQLField
+	Name  string
+	Range c.SQLRange
 }
 type ontologySQLJoin struct {
 	FromAlias, Entry, Category, Name, Direction, Alias string
@@ -404,6 +412,45 @@ func (p *ontologySQLParser) predicate() *ontologySQLExpression {
 	return p.add(e)
 }
 
+func (p *ontologySQLParser) projection(s *ontologySQLStatement) {
+	t := p.peek()
+	op := map[string]string{"COUNT": "count", "SUM": "sum", "AVG": "avg", "MIN": "min", "MAX": "max"}[t.Text]
+	if t.Kind != "word" || op == "" {
+		if len(s.Measures) > 0 {
+			p.fail("aggregate_projection_order", "聚合分组字段须写在计量之前", t.Range)
+		}
+		s.Projection = append(s.Projection, p.field())
+		return
+	}
+	p.take()
+	m := ontologySQLAggregate{Op: op, Range: t.Range}
+	p.expect("(")
+	if p.accept("DISTINCT") {
+		if op != "count" {
+			p.fail("aggregate_distinct_unsupported", "DISTINCT仅支持COUNT(DISTINCT 字段)", t.Range)
+		}
+		m.Op = "countDistinct"
+	}
+	if p.accept("*") {
+		if m.Op != "count" {
+			p.fail("aggregate_star_unsupported", "仅COUNT(*)支持星号", t.Range)
+		}
+	} else {
+		f := p.field()
+		m.Field = &f
+	}
+	p.expect(")")
+	if p.accept("AS") {
+		alias := p.identifier()
+		m.Name = alias.Text
+		m.Range.To = alias.Range.To
+	}
+	s.Measures = append(s.Measures, m)
+	if len(s.Measures) > c.MaxAggregateMeasures {
+		p.fail("aggregate_budget", "聚合最多20个计量", t.Range)
+	}
+}
+
 func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 	tokens, diagnostics := lexOntologySQL(text)
 	if len(diagnostics) > 0 {
@@ -422,9 +469,9 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 	if p.peek().Text == "*" {
 		p.fail("unsupported_projection", "请显式选择字段；首批不支持 SELECT *", p.peek().Range)
 	}
-	s.Projection = append(s.Projection, p.field())
+	p.projection(s)
 	for p.accept(",") && len(p.diagnostics) == 0 {
-		s.Projection = append(s.Projection, p.field())
+		p.projection(s)
 		if len(s.Projection) > 100 {
 			p.fail("budget_exceeded", "投影不能超过 100 个字段", p.peek().Range)
 		}
@@ -473,6 +520,16 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 	if p.accept("WHERE") {
 		s.Where = p.expr(0)
 	}
+	if p.accept("GROUP") {
+		p.expect("BY")
+		s.GroupBy = append(s.GroupBy, p.field())
+		for p.accept(",") && len(p.diagnostics) == 0 {
+			s.GroupBy = append(s.GroupBy, p.field())
+		}
+		if len(s.GroupBy) > c.MaxAggregateGroupFields {
+			p.fail("aggregate_budget", "聚合最多3个分组字段", s.GroupBy[0].Range)
+		}
+	}
 	if p.accept("ORDER") {
 		p.expect("BY")
 		f := p.field()
@@ -494,7 +551,7 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 	}
 	p.accept(";")
 	if p.peek().Kind != "eof" {
-		p.fail("unsupported_syntax", "仅支持单条 SELECT 与 INNER JOIN LINK；不支持任意键 JOIN、聚合、列别名或 OFFSET", p.peek().Range)
+		p.fail("unsupported_syntax", "仅支持单条SELECT、INNER JOIN LINK或单模型聚合；不支持任意键JOIN、HAVING、普通列别名或OFFSET", p.peek().Range)
 	}
 	if len(p.diagnostics) > 0 {
 		return nil, p.diagnostics
@@ -539,7 +596,7 @@ func formatOntologySQL(text string) (string, []c.SQLDiagnostic) {
 			}
 			continue
 		}
-		if t.Kind == "word" && (t.Text == "FROM" || t.Text == "JOIN" || t.Text == "WHERE" || t.Text == "ORDER" || t.Text == "LIMIT") {
+		if t.Kind == "word" && (t.Text == "FROM" || t.Text == "JOIN" || t.Text == "WHERE" || t.Text == "GROUP" || t.Text == "ORDER" || t.Text == "LIMIT") {
 			newline()
 		}
 		value := t.Raw
@@ -550,7 +607,7 @@ func formatOntologySQL(text string) (string, []c.SQLDiagnostic) {
 		case ".", ",", ")", ";":
 			out.WriteString(value)
 		case "(":
-			if previous != "STARTS_WITH" {
+			if previous != "STARTS_WITH" && previous != "COUNT" && previous != "SUM" && previous != "AVG" && previous != "MIN" && previous != "MAX" {
 				writeSpace()
 			}
 			out.WriteString(value)

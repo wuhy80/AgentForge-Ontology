@@ -4,6 +4,7 @@ import { ApiClient, ApiError } from '../../lib/api';
 import type { DefinitionRecord, JsonValue, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLRequest, Organization, QueryContextModel, QueryPathCandidate, QueryResult, QuerySpec, SQLDiagnostic, SQLParameter } from '../../lib/types';
 import { Dialog } from '../../components/Dialog';
 import { RowResults } from './RowResults';
+import { AggregateResults } from './AggregateResults';
 import { RelatedInstances } from './RelatedInstances';
 import { ValueInput } from './InstanceDialog';
 import { errorMessage, propertyValueText } from './query';
@@ -18,11 +19,12 @@ import type { VisualRowsDraft } from './visualRows';
 const SQLEditor = lazy(() => import('./OntologySQLEditor'));
 export type SQLDraftMemory = { text: string; drafts: ParameterDrafts };
 export type VisualConversion = { model: QueryContextModel; editor: QueryEditor; association?: VisualRowsDraft };
-export type SQLWorkspaceHandle = { toVisual: () => Promise<VisualConversion | undefined> };
+export type SQLWorkspaceHandle = { sourceText: () => string; toVisual: () => Promise<VisualConversion | undefined> };
 type Props = {
   api: ApiClient; categoryId: string; schemas: DefinitionRecord[]; categories?: Organization[];
   initialSchemaId?: string; selectionRequest?: number; onModel: () => void;
   initialDraft: SQLDraftMemory; onDraft: (draft: SQLDraftMemory) => void;
+  authorizationFailure?: { sequence: number; message: string };
 };
 type Executed = { result: QueryResult; query: QuerySpec; page: number; schema?: DefinitionRecord };
 type PathProposal = { sourceText: string; generation: number; target: QueryContextModel; candidates: QueryPathCandidate[]; truncated: boolean; message: string };
@@ -37,7 +39,7 @@ function matchesResponse(response: { requestId: string; textHash: string }, id: 
 }
 const authFailure = (error: unknown) => error instanceof ApiError && [401, 403].includes(error.status);
 
-export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(function OntologySQLWorkspace({ api, categoryId, schemas, categories = [], initialSchemaId, selectionRequest, onModel, initialDraft, onDraft }, ref) {
+export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(function OntologySQLWorkspace({ api, categoryId, schemas, categories = [], initialSchemaId, selectionRequest, onModel, initialDraft, onDraft, authorizationFailure }, ref) {
   const [text, setText] = useState(initialDraft.text);
   const [drafts, setDrafts] = useState<ParameterDrafts>(initialDraft.drafts);
   const [analysis, setAnalysis] = useState<OntologySQLAnalysis>();
@@ -96,9 +98,11 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
     checkController.current?.abort(); conversionController.current?.abort(); runController.current?.abort(); formatController.current?.abort(); contextController.current?.abort(); pathController.current?.abort(); fieldController.current?.abort();
     for (const controller of completeControllers.current) controller.abort();
     setModels([]); setScopeModels([]); setAnalysis(undefined); setExecuted(undefined); setRelatedId(undefined); setDetailId(undefined);
+    setDrafts({}); setUndo([]);
     setPathProposal(undefined); setPendingTemplate(undefined); setPathBusy(false); setFieldBusy(false); setFieldAlias('');
     setStale(false); setBusy(false); setChecking(false); setContextBusy(false); setError(message); setNotice('授权已改变，请重新读取可查询目录。');
   }, []);
+  useEffect(() => { if (authorizationFailure) clearAuthorized(authorizationFailure.message); }, [authorizationFailure, clearAuthorized]);
 
   useEffect(() => {
     contextController.current?.abort();
@@ -199,7 +203,7 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, categoryId, text, drafts, composing, clearAuthorized, parameterMetadata]);
 
-  useImperativeHandle(ref, () => ({ async toVisual() {
+  useImperativeHandle(ref, () => ({ sourceText() { if (latest.current.composing) throw new Error('请先完成中文输入'); return latest.current.text; }, async toVisual() {
     if (latest.current.composing) throw new Error('请先完成中文输入');
     if (!latest.current.text.trim()) return undefined;
     checkController.current?.abort();
@@ -394,7 +398,7 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
   try { parameterValues(parameters, drafts); } catch (cause) { parameterError = errorMessage(cause); }
   const diagnostics: SQLDiagnostic[] = analysis?.diagnostics ?? [];
   const result = executed?.result;
-  const rowCount = result?.rowMode ? result.rows?.length ?? 0 : result?.data.length ?? 0;
+  const rowCount = result?.aggregateMode ? result.aggregateRows?.length ?? 0 : result?.rowMode ? result.rows?.length ?? 0 : result?.data.length ?? 0;
   const queryScope = analysis?.scope ?? analysis?.query?.rows;
   const selectedRoles = queryScope?.nodes.filter((node) => node.schemaId === selectedId) ?? [];
   const selectedRole = selectedRoles.find((node) => node.alias === fieldAlias) ?? (selectedRoles.length === 1 ? selectedRoles[0] : undefined);
@@ -408,7 +412,7 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
     <div className="query-page-heading"><div><div className="query-eyebrow">ONTOLOGY QUERY</div><h1>数据查询</h1><p className="muted">用模型和属性的业务名称编写查询，结果直接来自已映射的数据源。</p></div><span className="badge">{category?.name ?? '当前分类'} · 只读 SELECT</span></div>
     {!categoryId ? <div className="card empty-state"><Database size={32} /><h2>请先选择当前分类</h2><p className="muted">选择顶部分类后，开始编写查询。</p></div> : <>
       <div className="ontology-toolbar"><button type="button" className="button subtle" aria-expanded={guide} onClick={() => setGuide(!guide)}><BookOpen size={16} />查询指导<ChevronDown size={13} /></button><button type="button" className="button subtle" aria-expanded={directory} onClick={() => setDirectory(!directory)}><FolderTree size={16} />模型目录<ChevronDown size={13} /></button><button type="button" className="button subtle" aria-expanded={fieldsPanel} onClick={() => setFieldsPanel(!fieldsPanel)}><Code2 size={16} />模型字段<ChevronDown size={13} /></button><span className="muted">Ctrl / ⌘ + Enter 运行整条查询</span></div>
-      {guide && <section className="card ontology-guide" aria-label="查询指导"><div className="ontology-panel-heading"><BookOpen size={16} /><strong>查询指导</strong></div><ol><li>双击左侧模型，生成查询。</li><li>继续双击模型，预览并选择关联路径。</li><li>双击右侧字段，按角色插入返回列。</li><li>填写筛选与参数，运行后查看结果。</li></ol><div className="ontology-guide-templates"><button type="button" className="button subtle" disabled={!selected || composing} onClick={() => insertTemplate('read')}>读取常用字段<ArrowRight size={13} /></button><button type="button" className="button subtle" disabled={!selected || composing} onClick={() => insertTemplate('filter')}>加一个筛选<ArrowRight size={13} /></button><button type="button" className="button subtle" disabled={!selected || composing} onClick={() => insertTemplate('parameter')}>使用参数<ArrowRight size={13} /></button></div><details><summary>语法速查</summary><p><code>"模型"."属性"</code><br />业务名称用双引号；双引号内转义为两个双引号。</p><p><code>'字符串'</code> · <code>TRUE / FALSE</code><br />字符串用单引号，数值不加引号。</p><p><code>:参数名</code><br />在参数面板填写，空字符串与待填写不同。</p><p><code>IS NULL</code> / <code>IS NOT NULL</code><br />请勿使用 <code>= NULL</code>。</p><p><code>STARTS_WITH("属性", :前缀)</code><br />按字面前缀匹配；% 与 _ 都是普通字符。</p><p><code>LIMIT 25</code><br />每页 1–100 条，使用结果下方“下一页”续页。</p></details><p className="muted ontology-support-note">支持单模型查询及同数据源、同数据库的 INNER Link 关联，最多 4 个 Link；使用 JOIN LINK 按已定义的关系连接模型。可添加条件和一个排序字段，暂不支持聚合与星号投影。</p></section>}
+      {guide && <section className="card ontology-guide" aria-label="查询指导"><div className="ontology-panel-heading"><BookOpen size={16} /><strong>查询指导</strong></div><ol><li>双击左侧模型，生成查询。</li><li>继续双击模型，预览并选择关联路径。</li><li>双击右侧字段，按角色插入返回列。</li><li>填写筛选与参数，运行后查看结果。</li></ol><div className="ontology-guide-templates"><button type="button" className="button subtle" disabled={!selected || composing} onClick={() => insertTemplate('read')}>读取常用字段<ArrowRight size={13} /></button><button type="button" className="button subtle" disabled={!selected || composing} onClick={() => insertTemplate('filter')}>加一个筛选<ArrowRight size={13} /></button><button type="button" className="button subtle" disabled={!selected || composing} onClick={() => insertTemplate('parameter')}>使用参数<ArrowRight size={13} /></button></div><details><summary>语法速查</summary><p><code>"模型"."属性"</code><br />业务名称用双引号；双引号内转义为两个双引号。</p><p><code>'字符串'</code> · <code>TRUE / FALSE</code><br />字符串用单引号，数值不加引号。</p><p><code>:参数名</code><br />在参数面板填写，空字符串与待填写不同。</p><p><code>IS NULL</code> / <code>IS NOT NULL</code><br />请勿使用 <code>= NULL</code>。</p><p><code>STARTS_WITH("属性", :前缀)</code><br />按字面前缀匹配；% 与 _ 都是普通字符。</p><p><code>LIMIT 25</code><br />每页 1–100 条，使用结果下方“下一页”续页。</p></details><p className="muted ontology-support-note">支持单模型查询及同数据源、同数据库的 INNER Link 关联，最多 4 个 Link；使用 JOIN LINK 按已定义的关系连接模型。可添加条件和一个排序字段。默认平台 MySQL 单模型支持 COUNT、SUM、AVG、MIN、MAX 与 GROUP BY，最多 3 个分组属性、1000 组；暂不支持 HAVING、关联汇总与星号投影。</p></section>}
       <div className={`ontology-layout ${directory ? '' : 'without-directory'} ${fieldsPanel ? '' : 'without-fields'}`}>
         {directory && <aside className="card ontology-directory" aria-label="模型目录"><div className="ontology-panel-heading"><FolderTree size={16} /><strong>模型目录</strong><button className="button subtle" type="button" disabled={contextBusy} onClick={() => setContextRevision((value) => value + 1)}>刷新</button></div><label className="ontology-search"><Search size={15} /><input aria-label="搜索模型或字段" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索模型或字段" /></label>
           <p className="muted ontology-directory-note">单击查看右侧字段，双击生成查询；继续双击其他模型可选择关联路径。也可按 Shift+Enter。</p>
@@ -471,11 +475,11 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
     <section className="card query-results" aria-label="查询结果" aria-busy={busy}><div className="query-section-heading"><div><Database size={17} /><h2>查询结果</h2>{result && <span className="badge">本页 {rowCount} 条</span>}</div><span className="muted">{result?.rowMode ? `${executed?.query.rows?.nodes.length ?? 0} 个模型 · 关联行` : executed?.schema?.definition.name ?? '运行后展示真实数据'}</span></div>
       {stale && result && <div className="query-stale" role="status">结果对应上次查询：文本、参数或配置已改变，请重新运行。续页已停用。</div>}
       {result?.rowMode && <p className="ontology-row-grain muted">每行对应一组匹配的对象与关系路径。同一对象关联多个结果时保留多行，结果只读。</p>}
-      {!result ? <div className="empty-state query-result-empty"><Database size={27} /><h3>{busy ? '正在读取数据' : '运行查询后，在这里查看结果'}</h3><p className="muted">检查和补全只读取模型信息；点击运行才会查询业务数据。</p></div> : !rowCount ? <div className="empty-state query-result-empty"><Check size={27} /><h3>查询完成，没有匹配的数据</h3><p className="muted">可以修改条件或参数后重新运行。</p></div> : result.rowMode ? <RowResults result={result} query={executed!.query} /> : <div className="table-wrap"><table className="query-data-table"><thead><tr><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}<small className="muted">{field.dataType}</small></th>)}<th>操作</th></tr></thead><tbody>{result.data.map((instance) => <tr key={instance.id}><td><code>{instance.id}</code></td>{result.fields.map((field) => <td key={field.id} title={propertyValueText(field, instance.values[field.id])}><span className={field.dataType === 'longtext' ? 'query-longtext-preview' : ''}>{propertyValueText(field, instance.values[field.id])}</span></td>)}<td className="query-row-action"><div className="query-instance-actions"><button type="button" className="button subtle" disabled={stale} onClick={() => setDetailId(instance.id)}>查看</button><button type="button" className="button subtle" disabled={stale || !executed?.schema} onClick={() => setRelatedId(instance.id)}>关联数据</button></div></td></tr>)}</tbody></table></div>}
+      {!result ? <div className="empty-state query-result-empty"><Database size={27} /><h3>{busy ? '正在读取数据' : '运行查询后，在这里查看结果'}</h3><p className="muted">检查和补全只读取模型信息；点击运行才会查询业务数据。</p></div> : !rowCount ? <div className="empty-state query-result-empty"><Check size={27} /><h3>查询完成，没有匹配的数据</h3><p className="muted">可以修改条件或参数后重新运行。</p></div> : result.aggregateMode ? <AggregateResults result={result} /> : result.rowMode ? <RowResults result={result} query={executed!.query} /> : <div className="table-wrap"><table className="query-data-table"><thead><tr><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}<small className="muted">{field.dataType}</small></th>)}<th>操作</th></tr></thead><tbody>{result.data.map((instance) => <tr key={instance.id}><td><code>{instance.id}</code></td>{result.fields.map((field) => <td key={field.id} title={propertyValueText(field, instance.values[field.id])}><span className={field.dataType === 'longtext' ? 'query-longtext-preview' : ''}>{propertyValueText(field, instance.values[field.id])}</span></td>)}<td className="query-row-action"><div className="query-instance-actions"><button type="button" className="button subtle" disabled={stale} onClick={() => setDetailId(instance.id)}>查看</button><button type="button" className="button subtle" disabled={stale || !executed?.schema} onClick={() => setRelatedId(instance.id)}>关联数据</button></div></td></tr>)}</tbody></table></div>}
       {executed && <div className="query-result-footer"><span className="muted">第 {executed.page} 页 · {result?.hasMore ? '后面还有数据' : '已到结果末尾'}</span><button className="button" type="button" disabled={busy || stale || !result?.hasMore || !result.nextCursor} onClick={() => void run(true)}>下一页<ArrowRight size={15} /></button></div>}
     </section>
-    {detailId && executed && !executed.result.rowMode && <SQLInstanceDetails key={detailId} api={api} id={detailId} schemaId={executed.query.from.schemaId!} fields={executed.result.fields} onClose={() => setDetailId(undefined)} onForbidden={clearAuthorized} />}
-    {relatedId && executed?.schema && !executed.result.rowMode && <RelatedInstances key={relatedId} api={api} schema={executed.schema} instanceId={relatedId} onClose={() => setRelatedId(undefined)} onForbidden={clearAuthorized} />}
+    {detailId && executed && !executed.result.rowMode && !executed.result.aggregateMode && <SQLInstanceDetails key={detailId} api={api} id={detailId} schemaId={executed.query.from.schemaId!} fields={executed.result.fields} onClose={() => setDetailId(undefined)} onForbidden={clearAuthorized} />}
+    {relatedId && executed?.schema && !executed.result.rowMode && !executed.result.aggregateMode && <RelatedInstances key={relatedId} api={api} schema={executed.schema} instanceId={relatedId} onClose={() => setRelatedId(undefined)} onForbidden={clearAuthorized} />}
   </div>;
 });
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiClient, ApiError } from './api'
-import type { DefinitionInput, PermissionPolicy, Publication, QuerySpec, Session, UserGroup, UserGroupInput, UserInput } from './types'
+import type { DefinitionInput, PermissionPolicy, Publication, QuerySpec, SavedQueryInput, Session, UserGroup, UserGroupInput, UserInput } from './types'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const page = (data: unknown[], hasMore = false, nextCursor = '') => json({ data, hasMore, nextCursor })
@@ -67,6 +67,25 @@ describe('ApiClient transport and complete directories', () => {
 })
 
 describe('ApiClient writes and errors', () => {
+  it('保存查询编译不携带实参，CRUD使用强ETag，运行单独传参数与游标', async () => {
+    const input: SavedQueryInput = { name: '金额筛选', source: { kind: 'ontology-sql', text: 'SELECT 金额 FROM 订单 WHERE 金额 >= :最低金额', defaultCategoryId: 'category' }, query: { from: { schemaId: 'orders' }, select: ['amount'], where: { op: 'gte', field: 'amount', parameter: '最低金额' }, page: { limit: 25 } }, parameters: [{ name: '最低金额', dataType: 'decimal', nullable: false, precision: 24, scale: 6 }] }
+    const fetcher = vi.fn().mockImplementation(async () => json({ ...input, id: 'query / one', etag: 'strong' }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient(), signal = new AbortController().signal
+    await api.compileSavedQuery(input.source.text!, 'category', signal)
+    await api.createSavedQuery(input, signal)
+    await api.updateSavedQuery('query / one', { ...input, name: '新名称' }, 'strong', signal)
+    await api.executeSavedQuery('query / one', { 最低金额: '9007199254740993.000001' }, 'signed-cursor', signal)
+    await api.deleteSavedQuery('query / one', 'strong', signal)
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ text: input.source.text, defaultCategoryId: 'category' })
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual(input)
+    expect(fetcher.mock.calls[2][1]).toMatchObject({ method: 'PUT', headers: { 'If-Match': '"strong"' }, signal })
+    expect(fetcher.mock.calls[3][0]).toBe('/api/data/saved-queries/query%20%2F%20one/execute')
+    expect(JSON.parse(fetcher.mock.calls[3][1].body)).toEqual({ parameters: { 最低金额: '9007199254740993.000001' }, cursor: 'signed-cursor' })
+    expect(fetcher.mock.calls[4][1]).toMatchObject({ method: 'DELETE', headers: { 'If-Match': '"strong"' } })
+    await expect(api.deleteSavedQuery('query / one', 'W/"weak"')).rejects.toMatchObject({ code: 'invalid_etag' })
+    expect(fetcher).toHaveBeenCalledTimes(5)
+  })
   it('保存定义只提交枚举稳定引用，剔除服务端派生选项和摘要且不修改本地对象', async () => {
     const fetcher = vi.fn().mockImplementation(async () => json({ status: 'draft', etag: 'saved', definition: {} }))
     vi.stubGlobal('fetch', fetcher)
