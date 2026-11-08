@@ -130,8 +130,8 @@ func TestSourceVersionsHTTPConfigurationChecksAndLegacy(t *testing.T) {
 				t.Fatal("disabled saved source was opened")
 			}
 			input.Enabled = true
-			if w := request("PUT", "/data/sources/"+saved.ID, input, saved.ETag, ""); w.Code != 422 {
-				t.Fatal("unreachable source could be enabled")
+			if w := request("PUT", "/data/sources/"+saved.ID, input, saved.ETag, ""); w.Code != 403 || !strings.Contains(w.Body.String(), "source_network_denied") {
+				t.Fatal("unlisted destination was not rejected by the operator network policy")
 			}
 		})
 	}

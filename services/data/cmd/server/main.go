@@ -49,7 +49,11 @@ func run() error {
 		return fmt.Errorf("数据源加密密钥至少32字节，且必须独立于服务及游标密钥")
 	}
 	checker := &platform.RemoteSessionChecker{URL: metadataURL, ServiceToken: service}
-	app := data.NewHandler(data.Config{Engine: e, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, MetadataURL: metadataURL, ServiceToken: service, CursorSecret: cursor, DataSourceKey: sourceKey})
+	sourceNetwork, err := data.ParseSourceNetworkPolicy(os.Getenv("ONTOLOGY_SOURCE_NETWORK_RULES"))
+	if err != nil {
+		return err
+	}
+	app := data.NewHandler(data.Config{Engine: e, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, MetadataURL: metadataURL, ServiceToken: service, CursorSecret: cursor, DataSourceKey: sourceKey, SourceNetworkPolicy: sourceNetwork})
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18081"

@@ -183,7 +183,7 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if image == "" {
 		image = "python:3.12-alpine"
 	}
-	runner := &execution.DockerRunner{Image: image, JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE"), Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY")}
+	runner := &execution.DockerRunner{Isolation: "trusted", Image: image, JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE"), Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY")}
 	if _, err := runner.Ready(ctx); err != nil {
 		t.Fatal(err)
 	}

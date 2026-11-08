@@ -52,7 +52,7 @@ func TestSourceSQLToolsHTTPStaticOnlyAndDeliveryChecks(t *testing.T) {
 		}
 		return c.Session{User: user, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
 	})
-	app := NewHandler(Config{Engine: engine, SessionChecker: checker})
+	app := NewHandler(Config{SourceNetworkPolicy: testSourceNetworkPolicy(t), Engine: engine, SessionChecker: checker})
 	saveConfig := func() {
 		t.Helper()
 		body, _ := json.Marshal(source)

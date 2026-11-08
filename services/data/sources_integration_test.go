@@ -41,7 +41,7 @@ func TestMySQLSourceConfigurationLifecycleIsolationAndBoundEndpoint(t *testing.T
 		engine.DB().Exec("DELETE FROM af_data_gates WHERE tenant_id IN (?,?)", tenant, other)
 		engine.DB().Exec("DELETE FROM af_data_sources WHERE tenant_id IN (?,?)", tenant, other)
 	})
-	app := NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("integration-encryption-key", 2), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) {
+	app := NewHandler(Config{SourceNetworkPolicy: testSourceNetworkPolicy(t), Engine: engine, DataSourceKey: strings.Repeat("integration-encryption-key", 2), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) {
 		return c.Decision{Allow: true, State: "current"}, nil
 	})})
 	request := func(tenant, method, path string, input any, etag string, admin bool) *httptest.ResponseRecorder {
@@ -305,7 +305,7 @@ func TestSourceHTTPConnectionAndCatalogRealDrivers(t *testing.T) {
 		}
 		return c.Session{User: user, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
 	})
-	app := NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("source-http-fixture-key", 2), SessionChecker: checker})
+	app := NewHandler(Config{SourceNetworkPolicy: testSourceNetworkPolicy(t), Engine: engine, DataSourceKey: strings.Repeat("source-http-fixture-key", 2), SessionChecker: checker})
 	request := func(method, path string, input any) *httptest.ResponseRecorder {
 		t.Helper()
 		body, _ := json.Marshal(input)
@@ -493,7 +493,7 @@ func TestSourceHTTPConnectionAndCatalogRealDrivers(t *testing.T) {
 				}
 				return result, err
 			})
-			changedApp := NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("source-http-fixture-key", 2), SessionChecker: changingChecker})
+			changedApp := NewHandler(Config{SourceNetworkPolicy: testSourceNetworkPolicy(t), Engine: engine, DataSourceKey: strings.Repeat("source-http-fixture-key", 2), SessionChecker: changingChecker})
 			originalApp := app
 			app = changedApp
 			sessionCalls = 0

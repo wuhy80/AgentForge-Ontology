@@ -100,6 +100,9 @@ func match(r *http.Request, etag string) error {
 }
 
 func (s *Store) loginHTTP(w http.ResponseWriter, r *http.Request) error {
+	if !s.publicRequest(w, r, 0, 60, 600) {
+		return nil
+	}
 	if err := s.checkOrigin(r.Header.Get("Origin")); err != nil {
 		return err
 	}
@@ -109,7 +112,15 @@ func (s *Store) loginHTTP(w http.ResponseWriter, r *http.Request) error {
 	}
 	key := loginKey(r, input)
 	if err := s.loginBudget(key); err != nil {
+		w.Header().Set("Retry-After", "900")
 		return err
+	}
+	select {
+	case s.loginSlots <- struct{}{}:
+		defer func() { <-s.loginSlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		return problem(429, "login_busy", "登录请求较多，请稍后重试")
 	}
 	session, token, err := s.login(r.Context(), input)
 	if err != nil {

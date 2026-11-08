@@ -6,7 +6,7 @@
 
 Linux 单机的 Git 拉取、HTTPS 入口、systemd、备份及本地数据迁移方式见[部署与运维](docs/部署与运维.md#0-linux-单机部署2026-11-08)；单机验证与生产容量、扩容及恢复验收分别记录。
 
-本地开发需要 Go 1.22+、PowerShell 和运行中的 Docker Desktop；MCP 模块使用官方 Go SDK，需要 Go 1.25+（可通过 Go 自动工具链下载）。在仓库根目录执行：
+本地开发需要支持自动工具链的Go（或预装Go 1.26.10）、PowerShell和运行中的Docker Desktop；当前模块基线及公网部署前置条件见[开发指南](docs/开发指南.md)和[部署与运维](docs/部署与运维.md)。在仓库根目录执行：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-dev.ps1

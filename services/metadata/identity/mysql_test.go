@@ -60,7 +60,7 @@ func TestMySQLIdentityLifecycle(t *testing.T) {
 	store := identity.NewStore(engine.DB(), opa, "http://localhost:5173")
 	api := store.NewHandler()
 	tenant, otherTenant := "identity-"+contracts.NewID(), "identity-"+contracts.NewID()
-	const originalPassword = "123456"
+	const originalPassword = "OriginalIdentity!2026"
 	if err := store.Bootstrap(ctx, tenant, "admin", originalPassword); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestMySQLIdentityLifecycle(t *testing.T) {
 	// no implicit business grant from that administrator flag.
 	create := contracts.UserInput{Username: "manager", DisplayName: "权限管理员", Password: "12345", Enabled: true, Administrator: true, RoleIDs: []string{}}
 	check(request("POST", "/metadata/admin/users", &admin, "", create), 422)
-	create.Password = "654321"
+	create.Password = "ManagerIdentity!2026"
 	w := request("POST", "/metadata/admin/users", &admin, "", create)
 	check(w, 201)
 	var manager contracts.User
@@ -265,10 +265,10 @@ func TestMySQLIdentityLifecycle(t *testing.T) {
 		t.Fatal("disabled principal authorized")
 	}
 	// Self-service password change keeps only the newly rotated session.
-	secondManager := login(tenant, "manager", "654321")
-	check(request("PUT", "/metadata/auth/password", &managerBrowser, "", map[string]string{"currentPassword": "654321", "password": "12345"}), 422)
+	secondManager := login(tenant, "manager", "ManagerIdentity!2026")
+	check(request("PUT", "/metadata/auth/password", &managerBrowser, "", map[string]string{"currentPassword": "ManagerIdentity!2026", "password": "12345"}), 422)
 	check(request("GET", "/metadata/auth/session", &managerBrowser, "", nil), 200)
-	w = request("PUT", "/metadata/auth/password", &managerBrowser, "", map[string]string{"currentPassword": "654321", "password": "234567"})
+	w = request("PUT", "/metadata/auth/password", &managerBrowser, "", map[string]string{"currentPassword": "ManagerIdentity!2026", "password": "ChangedIdentity!2026"})
 	check(w, 200)
 	var changed contracts.Session
 	decode(w, &changed)
@@ -282,18 +282,18 @@ func TestMySQLIdentityLifecycle(t *testing.T) {
 	check(request("POST", "/metadata/auth/logout", &managerBrowser, "", nil), 204)
 	check(request("GET", "/metadata/auth/session", &managerBrowser, "", nil), 401)
 	// Admin password reset revokes every old session without disclosing the hash.
-	managerBrowser = login(tenant, "manager", "234567")
+	managerBrowser = login(tenant, "manager", "ChangedIdentity!2026")
 	w = request("GET", "/metadata/admin/users/"+manager.ID, &admin, "", nil)
 	check(w, 200)
 	decode(w, &manager)
 	reset := contracts.UserInput{Username: "manager", DisplayName: "权限管理员", Password: "12345", Enabled: true, Administrator: true, RoleIDs: []string{}}
 	check(request("PUT", "/metadata/admin/users/"+manager.ID, &admin, manager.ETag, reset), 422)
 	check(request("GET", "/metadata/auth/session", &managerBrowser, "", nil), 200)
-	reset.Password = "345678"
+	reset.Password = "ResetIdentity!2026"
 	w = request("PUT", "/metadata/admin/users/"+manager.ID, &admin, manager.ETag, reset)
 	check(w, 200)
 	check(request("GET", "/metadata/auth/session", &managerBrowser, "", nil), 401)
-	_ = login(tenant, "manager", "345678")
+	_ = login(tenant, "manager", "ResetIdentity!2026")
 	w = request("GET", "/metadata/admin/audit", &admin, "", nil)
 	check(w, 200)
 	if !strings.Contains(w.Body.String(), "policy.publish") || !strings.Contains(w.Body.String(), "auth.password") || strings.Contains(w.Body.String(), originalPassword) || strings.Contains(w.Body.String(), admin.cookie.Value) || strings.Contains(w.Body.String(), "password_hash") {

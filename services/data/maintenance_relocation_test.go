@@ -97,7 +97,7 @@ func newRelocationFixture(t *testing.T) *relocationFixture {
 	}
 	input := mappedTestSourceInput(t, "mysql", dsn, "迁移隔离源")
 	source := c.DataSource{ID: c.NewID(), TenantID: "relocation-" + c.NewID(), Name: input.Name, Driver: input.Driver, Host: input.Host, Port: input.Port, Database: input.Database, Username: input.Username, TLSMode: input.TLSMode, Enabled: true, PasswordSet: true, TenantIsolation: "dedicated", ETag: digest(c.NewID())}
-	f := &relocationFixture{t: t, ctx: ctx, cfg: Config{Engine: engine, DataSourceKey: strings.Repeat("relocation-test-key", 3)}, source: source}
+	f := &relocationFixture{t: t, ctx: ctx, cfg: Config{SourceNetworkPolicy: testSourceNetworkPolicy(t), Engine: engine, DataSourceKey: strings.Repeat("relocation-test-key", 3)}, source: source}
 	t.Cleanup(func() {
 		for _, table := range f.tables {
 			if _, err := engine.DB().Exec("DROP TABLE IF EXISTS " + quote(table)); err != nil {

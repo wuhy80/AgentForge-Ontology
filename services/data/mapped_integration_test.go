@@ -95,7 +95,7 @@ func newMappedIntegrationFixture(t *testing.T, secondaryDriver, secondaryDSN str
 		writeJSON(w, 200, record)
 	}))
 	t.Cleanup(metadata.Close)
-	f.app = NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("mapped-encryption-", 3), ServiceToken: f.service, CursorSecret: strings.Repeat("mapped-cursor-", 3), MetadataURL: metadata.URL, HTTPClient: metadata.Client(), Authorizer: authorizerFunc(func(_ context.Context, _ c.Principal, request c.AuthorizationRequest) (c.Decision, error) {
+	f.app = NewHandler(Config{SourceNetworkPolicy: testSourceNetworkPolicy(t), Engine: engine, DataSourceKey: strings.Repeat("mapped-encryption-", 3), ServiceToken: f.service, CursorSecret: strings.Repeat("mapped-cursor-", 3), MetadataURL: metadata.URL, HTTPClient: metadata.Client(), Authorizer: authorizerFunc(func(_ context.Context, _ c.Principal, request c.AuthorizationRequest) (c.Decision, error) {
 		if f.authorize != nil {
 			return f.authorize(request), nil
 		}

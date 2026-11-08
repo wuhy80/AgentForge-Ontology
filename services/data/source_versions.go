@@ -41,10 +41,10 @@ func (h *handler) sourceVersions(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func sourceConnector(s c.DataSource, password string) (driver.Connector, error) {
+func sourceConnector(s c.DataSource, password string, policy *SourceNetworkPolicy) (driver.Connector, error) {
 	if s.Driver == "mysql" {
 		cfg := mysql.NewConfig()
-		cfg.User, cfg.Passwd, cfg.Net, cfg.Addr, cfg.DBName = s.Username, password, "tcp", net.JoinHostPort(s.Host, strconv.Itoa(s.Port)), s.Database
+		cfg.User, cfg.Passwd, cfg.Net, cfg.Addr, cfg.DBName = s.Username, password, "ontology-source", net.JoinHostPort(s.Host, strconv.Itoa(s.Port)), s.Database
 		cfg.ParseTime, cfg.Loc, cfg.Timeout, cfg.ReadTimeout, cfg.WriteTimeout = true, time.UTC, 5*time.Second, 10*time.Second, 10*time.Second
 		cfg.Params = map[string]string{"charset": "utf8mb4"}
 		switch s.TLSMode {
@@ -53,7 +53,11 @@ func sourceConnector(s c.DataSource, password string) (driver.Connector, error) 
 		case "verify-full":
 			cfg.TLSConfig = "true"
 		}
-		return mysql.NewConnector(cfg)
+		base, err := mysql.NewConnector(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return sourcePolicyConnector{base, sourceDialScope{policy, s}}, nil
 	}
 	if s.Driver == "postgresql" {
 		u := url.URL{Scheme: "postgres", User: url.UserPassword(s.Username, password), Host: net.JoinHostPort(s.Host, strconv.Itoa(s.Port)), Path: "/" + s.Database}
@@ -62,6 +66,7 @@ func sourceConnector(s c.DataSource, password string) (driver.Connector, error) 
 		if err != nil {
 			return nil, sourceVersionError(err)
 		}
+		cfg.DialFunc = func(ctx context.Context, _, _ string) (net.Conn, error) { return policy.connect(ctx, s) }
 		return stdlib.GetConnector(*cfg), nil
 	}
 	return nil, problem(422, "unsupported_driver", "不支持的数据源类型")
@@ -119,9 +124,13 @@ func (b borrowedSourceConnector) Connect(context.Context) (driver.Conn, error) {
 }
 func (b borrowedSourceConn) Close() error { return nil }
 
-func connectSource(ctx context.Context, s c.DataSource, password string) (*sql.DB, *c.SourceCompatibility, error) {
+func connectSource(ctx context.Context, s c.DataSource, password string, policy *SourceNetworkPolicy) (*sql.DB, *c.SourceCompatibility, error) {
 	observed := &c.SourceCompatibility{CompatibilityStatus: "failed", Capabilities: []string{}, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	base, err := sourceConnector(s, password)
+	if _, err := policy.addresses(ctx, s); err != nil {
+		observed.Code, observed.Message = "source_network_denied", "数据源连接不在部署方允许范围"
+		return nil, observed, err
+	}
+	base, err := sourceConnector(s, password, policy)
 	if err != nil {
 		observed.Code, observed.Message = "invalid_source", "数据源连接配置不合法"
 		return nil, observed, sourceVersionError(err)

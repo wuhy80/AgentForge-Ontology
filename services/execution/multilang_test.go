@@ -17,7 +17,7 @@ func dockerLanguage(t *testing.T, language string) (*DockerRunner, string) {
 	if os.Getenv("EXECUTION_TEST_DOCKER") != "1" {
 		t.Skip("set EXECUTION_TEST_DOCKER=1 to run real isolated language containers")
 	}
-	runner := &DockerRunner{Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE"), Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY")}
+	runner := &DockerRunner{Isolation: "trusted", Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE"), Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY")}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	imageID, err := runner.ReadyRuntime(ctx, language)

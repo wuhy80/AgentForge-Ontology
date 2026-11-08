@@ -1,0 +1,17 @@
+[Unit]
+Description=Dedicated rootless Docker daemon for Ontology execution
+After=default.target
+
+[Service]
+Type=notify
+Environment=HOME=/var/lib/ontology-sandbox XDG_RUNTIME_DIR=/run/ontology-sandbox
+ExecStart=/usr/bin/dockerd-rootless.sh --config-file=/etc/agentforge-sandbox/daemon.json
+Restart=on-failure
+RestartSec=5
+Delegate=yes
+KillMode=mixed
+TimeoutStopSec=60
+UMask=0007
+
+[Install]
+WantedBy=default.target

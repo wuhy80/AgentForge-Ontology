@@ -100,7 +100,7 @@ func sourceConfig(input c.DataSourceInput) (c.DataSource, error) {
 		}
 	}
 	if s.TLSMode == "" {
-		s.TLSMode = "disable"
+		s.TLSMode = "verify-full"
 	}
 	if s.TenantIsolation == "" {
 		s.TenantIsolation = "column"
@@ -334,7 +334,7 @@ func (h *handler) saveSource(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	if s.Enabled {
-		db, observed, checkErr := connectSource(r.Context(), s, secret)
+		db, observed, checkErr := connectSource(r.Context(), s, secret, h.cfg.SourceNetworkPolicy)
 		if db != nil {
 			_ = db.Close()
 		}
@@ -442,7 +442,7 @@ func (h *handler) openSource(ctx context.Context, tenant, id string) (*sql.DB, c
 	if err != nil {
 		return nil, s, err
 	}
-	db, observed, err := connectSource(ctx, s, secret)
+	db, observed, err := connectSource(ctx, s, secret, h.cfg.SourceNetworkPolicy)
 	s.Compatibility = observed
 	return db, s, err
 }
@@ -505,7 +505,7 @@ func (h *handler) testSource(w http.ResponseWriter, r *http.Request) error {
 			secret = *input.Password
 		}
 	}
-	db, observed, checkErr := connectSource(r.Context(), s, secret)
+	db, observed, checkErr := connectSource(r.Context(), s, secret, h.cfg.SourceNetworkPolicy)
 	if db != nil {
 		_ = db.Close()
 	}

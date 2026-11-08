@@ -297,6 +297,9 @@ func validRedirect(raw string) bool {
 	return e == nil && len(raw) <= 2048 && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && u.Path != "" && (u.Scheme == "https" || u.Scheme == "http" && loopbackHost(u.Hostname()))
 }
 func (s *Store) oauthRegister(w http.ResponseWriter, r *http.Request) {
+	if !s.publicRequest(w, r, 1, 5, 60) {
+		return
+	}
 	var in struct {
 		Name                    string   `json:"client_name"`
 		RedirectURIs            []string `json:"redirect_uris"`
@@ -320,9 +323,38 @@ func (s *Store) oauthRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	id := c.NewID()
 	now := time.Now().Unix()
-	exp := now + 365*24*3600
-	if _, err := s.DB.ExecContext(r.Context(), "INSERT INTO af_identity_oauth_clients (id,name,redirect_uris,created_at,expires_at) VALUES (?,?,?,?,?)", id, in.Name, marshal(in.RedirectURIs), now, exp); err != nil {
+	exp := now + 30*24*3600
+	full := false
+	if err := s.transaction(r.Context(), func(tx *sql.Tx) error {
+		var guard int
+		if err := tx.QueryRowContext(r.Context(), "SELECT id FROM af_identity_oauth_registration_guard WHERE id=1 FOR UPDATE").Scan(&guard); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(r.Context(), "DELETE FROM af_identity_oauth_clients WHERE expires_at<=? LIMIT 1024", now); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(r.Context(), "DELETE FROM af_identity_oauth_codes WHERE expires_at<=? LIMIT 1024", now); err != nil {
+			return err
+		}
+		var count int
+		if err := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM af_identity_oauth_clients").Scan(&count); err != nil {
+			return err
+		}
+		if count >= 1024 {
+			// Commit bounded cleanup even if a legacy registry is still above
+			// quota, so subsequent requests can continue reclaiming old rows.
+			full = true
+			return nil
+		}
+		_, err := tx.ExecContext(r.Context(), "INSERT INTO af_identity_oauth_clients (id,name,redirect_uris,created_at,expires_at) VALUES (?,?,?,?,?)", id, in.Name, marshal(in.RedirectURIs), now, exp)
+		return err
+	}); err != nil {
 		oauthError(w, 503, "server_error")
+		return
+	}
+	if full {
+		w.Header().Set("Retry-After", "3600")
+		oauthError(w, 429, "temporarily_unavailable")
 		return
 	}
 	writeJSON(w, 201, map[string]any{"client_id": id, "client_name": in.Name, "redirect_uris": in.RedirectURIs, "client_id_issued_at": now, "token_endpoint_auth_method": "none", "grant_types": []string{"authorization_code"}, "response_types": []string{"code"}})
@@ -460,6 +492,16 @@ func (s *Store) oauthConsent(w http.ResponseWriter, r *http.Request) error {
 	}
 	now := time.Now().Unix()
 	if err = s.mutation(r, false, func(tx *sql.Tx, user c.User) error {
+		if _, e := tx.ExecContext(r.Context(), "DELETE FROM af_identity_oauth_codes WHERE tenant_id=? AND user_id=? AND expires_at<=? LIMIT 1024", user.TenantID, user.ID, now); e != nil {
+			return e
+		}
+		var pending int
+		if e := tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM af_identity_oauth_codes WHERE tenant_id=? AND user_id=? AND expires_at>? AND consumed_at=0", user.TenantID, user.ID, now).Scan(&pending); e != nil {
+			return e
+		}
+		if pending >= 100 {
+			return problem(429, "oauth_code_capacity", "待交换授权码过多，请稍后重试")
+		}
 		roleHash, e := accessRoleHash(r.Context(), tx, user)
 		if e != nil {
 			return e
@@ -502,6 +544,9 @@ func pkce(challenge, verifier string) bool {
 	return subtle.ConstantTimeCompare([]byte(challenge), []byte(base64.RawURLEncoding.EncodeToString(sum[:]))) == 1
 }
 func (s *Store) oauthToken(w http.ResponseWriter, r *http.Request) {
+	if !s.publicRequest(w, r, 2, 60, 600) {
+		return
+	}
 	var outToken string
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
@@ -562,6 +607,9 @@ func (s *Store) oauthToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Store) oauthRevoke(w http.ResponseWriter, r *http.Request) {
+	if !s.publicRequest(w, r, 3, 60, 600) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		oauthError(w, 400, "invalid_request")

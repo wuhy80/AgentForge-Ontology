@@ -1,17 +1,19 @@
 module github.com/wuhy80/AgentForge-Ontology/services/metadata
 
-go 1.22.0
+go 1.26.0
+
+toolchain go1.26.10
 
 require (
+	github.com/go-sql-driver/mysql v1.7.1
 	github.com/wuhy80/AgentForge-Ontology/contracts v0.0.0
 	github.com/wuhy80/AgentForge-Ontology/libs/platform v0.0.0
 	github.com/wuhy80/AgentForge-Ontology/libs/storage v0.0.0
-	golang.org/x/crypto v0.33.0
-	golang.org/x/text v0.22.0
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
+	golang.org/x/text v0.43.0
 )
 
 require (
-	github.com/go-sql-driver/mysql v1.7.1 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	gorm.io/driver/mysql v1.5.7 // indirect

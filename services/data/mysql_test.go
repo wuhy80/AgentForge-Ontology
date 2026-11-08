@@ -182,7 +182,7 @@ func TestMySQLDataIntegration(t *testing.T) {
 		defer decisionMu.RUnlock()
 		return decision, nil
 	})
-	h := NewHandler(Config{Engine: engine, Authorizer: auth, MetadataURL: meta.URL, ServiceToken: secret, CursorSecret: strings.Repeat("c", 32)})
+	h := NewHandler(Config{SourceNetworkPolicy: testSourceNetworkPolicy(t), Engine: engine, Authorizer: auth, MetadataURL: meta.URL, ServiceToken: secret, CursorSecret: strings.Repeat("c", 32)})
 	p := c.Principal{TenantID: d.TenantID, Subject: "test-user"}
 	call := func(handler http.Handler, method, path string, body any, etag string, internal bool, principal c.Principal) *httptest.ResponseRecorder {
 		t.Helper()
@@ -320,7 +320,7 @@ func TestMySQLDataIntegration(t *testing.T) {
 		}
 		return d, nil
 	})
-	changingHandler := NewHandler(Config{Engine: engine, Authorizer: changingAuth, MetadataURL: meta.URL, ServiceToken: secret, CursorSecret: strings.Repeat("c", 32)})
+	changingHandler := NewHandler(Config{SourceNetworkPolicy: testSourceNetworkPolicy(t), Engine: engine, Authorizer: changingAuth, MetadataURL: meta.URL, ServiceToken: secret, CursorSecret: strings.Repeat("c", 32)})
 	third := c.WriteRequest{Values: map[string]json.RawMessage{testFieldCode: raw("P3"), testFieldDept: raw("D1")}, IdempotencyKey: "rollback-on-revocation"}
 	expect(call(changingHandler, "POST", path, third, "", false, p), 409)
 	if err = engine.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM "+quote(tableName(d.ID))+" WHERE tenant_id=?", p.TenantID).Scan(&count); err != nil || count != 2 {

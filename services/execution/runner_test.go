@@ -21,7 +21,7 @@ func dockerTestRunner(t *testing.T) (*DockerRunner, string) {
 	if os.Getenv("EXECUTION_TEST_DOCKER") != "1" {
 		t.Skip("set EXECUTION_TEST_DOCKER=1 to run real isolated Python containers")
 	}
-	runner := &DockerRunner{Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY")}
+	runner := &DockerRunner{Isolation: "trusted", Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY")}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	imageID, err := runner.Ready(ctx)
@@ -162,7 +162,7 @@ func TestRunnerStopsAdmissionUntilContainerCleanupConfirmed(t *testing.T) {
 	cleanupFails := true
 	name := ""
 	creates := 0
-	runner := &DockerRunner{}
+	runner := &DockerRunner{Isolation: "trusted"}
 	runner.command = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		switch args[0] {
 		case "create":
@@ -218,7 +218,7 @@ func TestRunnerRecoversOnlyExpiredExecutionContainers(t *testing.T) {
 	oldName := "ontology-python-" + c.NewID()
 	liveName := "ontology-python-" + c.NewID()
 	removed := []string{}
-	runner := &DockerRunner{command: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+	runner := &DockerRunner{Isolation: "trusted", command: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		switch args[0] {
 		case "ps":
 			return helperCommand(ctx, 0, oldName+" "+strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10)+"\n"+liveName+" "+strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10)+"\n")

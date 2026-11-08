@@ -4,6 +4,8 @@
 
 ## 当前能力
 
+默认要求 `ONTOLOGY_EXECUTION_ISOLATION=sandbox` 的rootless Docker、runsc及cgroup v2资源预算；仅受控开发显式设为 `trusted` 时兼容普通Docker。缺少沙盒条件不会自动降级；`-check-isolation` 可单独检查环境。隔离协议唯一见[Function](../../docs/模块/Function.md)，单机准备和未部署边界见[部署与运维](../../docs/部署与运维.md#后续安全加固代码尚未部署)。
+
 - 同步执行已生效、`sideEffects: none`、配置`runtime`的Python、JavaScript、Go Function及直接源码Action。Action也可使用`functionId`绑定签名相同的已生效Function；绑定双方的中文参数名、类型、空值、默认值和必填语义须一致，参数ID可以各自独立。Action的内联源码、函数引用和制品引用互斥。
 - 入口由作者声明：Python默认`main(inputs)`，JavaScript默认同步`main(inputs)`，Go默认`Main(inputs map[string]any) (map[string]any, error)`；Go源码为含标准库导入的完整`package main`文件。三种语言均接受并返回以声明中文参数名为键的对象，HTTP输入、输出使用稳定参数ID。int64、decimal始终以字符串传递，精确计算及输出转换由作者显式完成。
 - 输入输出支持 string、text、longtext、uuid、int64、decimal、boolean、timestamp；单次输入/输出仍受 256 KiB 总预算。枚举引用、存储映射与复杂参数类型明确拒绝。可选输入缺省时不注入键，有默认值则使用默认值；null 仅在 nullable 时接受。
@@ -56,7 +58,7 @@ POST 请求使用 `contracts.InvocationRequest`，例如：
 
 ## 语言容器
 
-运行器只使用管理员准备的本地Linux镜像：Python默认`python:3.12-alpine`，JavaScript默认`node:22-alpine`，Go默认`agentforge-go:1.25`。每次执行先解析实际image ID并按该ID创建容器，使用`--pull=never`，不会因用户定义下载镜像或安装依赖。代码及输入通过stdin传入，不挂载宿主目录、不传入服务凭据或宿主环境变量。
+运行器只使用管理员准备的本地Linux镜像：Python默认`python:3.12-alpine`，JavaScript默认`node:22-alpine`，Go默认`agentforge-go:1.26.10`。每次执行先解析实际image ID并按该ID创建容器，使用`--pull=never`，不会因用户定义下载镜像或安装依赖。代码及输入通过stdin传入，不挂载宿主目录、不传入服务凭据或宿主环境变量。
 
 所有语言固定使用非root UID65534、只读根目录、禁用网络、移除Linux capabilities、no-new-privileges及1 CPU。Python/JS为64 PID、128 MiB内存、8 MiB不可执行tmpfs；Go编译与执行为128 PID、768 MiB内存、384 MiB可执行tmpfs。代码、入口与超时上限见契约校验；源码最多64KiB，运行时间1～30秒，Go预算包含编译。普通日志被丢弃，结果256KiB、诊断16KiB；错误不回传用户异常、编译器原文或路径。
 
@@ -88,12 +90,13 @@ go run ./cmd/server
 | `ONTOLOGY_LISTEN` | 默认 `127.0.0.1:18082` |
 | `ONTOLOGY_PYTHON_IMAGE` | 已准备的可信镜像，建议正式环境固定内容摘要 |
 | `ONTOLOGY_JAVASCRIPT_IMAGE` | 已准备的Node22镜像，默认`node:22-alpine` |
-| `ONTOLOGY_GO_IMAGE` | 含可信启动器的Go镜像，默认`agentforge-go:1.25` |
+| `ONTOLOGY_GO_IMAGE` | 含可信启动器的Go镜像，默认`agentforge-go:1.26.10` |
 | `ONTOLOGY_DOCKER_BINARY` | 可选的可信 Docker CLI 路径 |
+| `ONTOLOGY_EXECUTION_ISOLATION` | 默认sandbox；仅受控开发显式设trusted，具体边界见Function |
 | `ONTOLOGY_EXECUTION_MAX_CONCURRENT` | 每进程计算及源码工具并发上限，默认4，仅接受1～4 |
 | `ONTOLOGY_TRUSTED_PROXY_CIDRS` | 可选的可信TLS终止代理网段，默认不信任；规则见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07) |
 
-在仓库根目录显式准备默认镜像：`docker pull python:3.12-alpine`、`docker pull node:22-alpine`、`docker build -t agentforge-go:1.25 -f deploy/execution/go/Dockerfile deploy/execution/go`。`scripts/start-dev.ps1`包含这些准备步骤；`-DependenciesOnly`只启动数据库/OPA。管理员自选Go镜像须预先准备，普通服务启动和请求不构建镜像。
+在仓库根目录显式准备默认镜像：`docker pull python:3.12-alpine`、`docker pull node:22-alpine`、`docker build -t agentforge-go:1.26.10 -f deploy/execution/go/Dockerfile deploy/execution/go`。当前Dockerfile和默认标签均升级为Go 1.26.10；显式配置的旧镜像不会自动更新。`scripts/start-dev.ps1`包含这些准备步骤；`-DependenciesOnly`只启动数据库/OPA。管理员自选Go镜像须预先准备，普通服务启动和请求不构建镜像。
 
 ## 验证
 

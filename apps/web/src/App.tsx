@@ -670,6 +670,7 @@ function ChangePassword({ api, onClose, onUpdated }: { api: ApiClient; onClose: 
     event.preventDefault()
     if (busy) return
     if (password !== confirm) { setError('两次输入的新密码不一致'); return }
+    if (Array.from(password).length < 15 || new TextEncoder().encode(password).length > 72) { setError('密码至少15个字符，且不能超过72个UTF-8字节'); return }
     setBusy(true); setError('')
     try { const account = await api.changePassword(currentPassword, password); onUpdated(account); setCurrentPassword(''); setPassword(''); setConfirm(''); setSaved(true) }
     catch (failure) { setError(failure instanceof Error ? failure.message : '密码修改失败') }
@@ -680,7 +681,7 @@ function ChangePassword({ api, onClose, onUpdated }: { api: ApiClient; onClose: 
       : <form onSubmit={submit}>
         {error && <div className="notice notice-error" role="alert">{error}</div>}
         <label className="field">当前密码<input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label>
-        <label className="field">新密码<input type="password" autoComplete="new-password" minLength={6} maxLength={72} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+        <label className="field">新密码<input type="password" autoComplete="new-password" minLength={15} maxLength={72} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         <label className="field">确认新密码<input type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></label>
         <button className="button primary" disabled={busy}>{busy ? '正在保存…' : '保存密码'}</button>
       </form>}

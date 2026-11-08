@@ -1,0 +1,8 @@
+{
+  "hosts": ["unix:///run/ontology-sandbox/docker.sock"],
+  "data-root": "/var/lib/ontology-sandbox/docker",
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "runtimes": {"runsc": {"path": "/usr/local/bin/runsc"}},
+  "default-runtime": "runsc",
+  "log-driver": "none"
+}

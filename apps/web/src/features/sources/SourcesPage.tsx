@@ -5,7 +5,7 @@ import type { DataSource, DataSourceInput, SourceCompatibility, SourceTable, Sou
 import './sources.css'
 import { SourceManager } from './SourceManager'
 
-const newSource = (): DataSourceInput => ({ name: '', driver: 'mysql', host: '', port: 3306, database: '', username: '', password: '', tlsMode: 'require', enabled: true, tenantIsolation: 'column', versionPolicy: 'auto' })
+const newSource = (): DataSourceInput => ({ name: '', driver: 'mysql', host: '', port: 3306, database: '', username: '', password: '', tlsMode: 'verify-full', enabled: true, tenantIsolation: 'column', versionPolicy: 'auto' })
 const driverNames = { mysql: 'MySQL', postgresql: 'PostgreSQL' }
 const statusNames = { supported: '兼容', unsupported: '暂不支持', mismatch: '版本不匹配', failed: '检查失败', pending: '待检测' }
 const capabilityNames: Record<string, string> = { catalog: '目录读取', read: '实例读取', query: '数据查询', createTable: '建表', addColumn: '添加字段', createIndex: '创建索引' }
@@ -71,7 +71,7 @@ export function SourcesPage({ api, administrator, active = true }: { api: ApiCli
     setCompatibility(source === 'new' ? undefined : source.compatibility); setCheckContext(source === 'new' ? '当前编辑配置' : '已保存配置')
     setForm(source === 'new' ? newSource() : {
       name: source.name, driver: source.driver, host: source.host ?? '', port: source.port ?? (source.driver === 'mysql' ? 3306 : 5432),
-      database: source.database, username: source.username ?? '', password: '', tlsMode: source.tlsMode ?? 'require', enabled: source.enabled, tenantIsolation: source.tenantIsolation,
+      database: source.database, username: source.username ?? '', password: '', tlsMode: source.tlsMode ?? 'verify-full', enabled: source.enabled, tenantIsolation: source.tenantIsolation,
       versionPolicy: source.versionPolicy ?? 'auto', expectedVersionLine: source.expectedVersionLine,
     })
   }

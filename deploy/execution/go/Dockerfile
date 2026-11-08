@@ -1,4 +1,4 @@
-FROM golang:1.25-alpine
+FROM golang:1.26.10-alpine
 ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOENV=off GOTELEMETRY=off
 COPY runner.go /opt/ontology/runner.go
 RUN mkdir -p /opt/ontology/cache && \

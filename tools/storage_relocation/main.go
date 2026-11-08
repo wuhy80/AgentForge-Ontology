@@ -233,7 +233,11 @@ func run() error {
 	if err = metadata.ValidateDefaultStorageRelocation(ctx, metaEngine, value.Items); err != nil {
 		return err
 	}
-	config := data.Config{Engine: dataEngine, DataSourceKey: os.Getenv("ONTOLOGY_DATA_SOURCE_KEY")}
+	sourceNetwork, err := data.ParseSourceNetworkPolicy(os.Getenv("ONTOLOGY_SOURCE_NETWORK_RULES"))
+	if err != nil {
+		return err
+	}
+	config := data.Config{Engine: dataEngine, DataSourceKey: os.Getenv("ONTOLOGY_DATA_SOURCE_KEY"), SourceNetworkPolicy: sourceNetwork}
 	results, err := data.PlanDefaultStorageRelocation(ctx, config, value.Items)
 	if err != nil {
 		return err

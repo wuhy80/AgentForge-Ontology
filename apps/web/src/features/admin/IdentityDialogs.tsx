@@ -22,7 +22,7 @@ export function UserDialog({ api, user, roles, onClose, onSaved, onForbidden }: 
   const changed = !user || input.displayName !== user.displayName || input.enabled !== user.enabled || input.administrator !== user.administrator || Boolean(input.password) || JSON.stringify([...input.roleIds].sort()) !== JSON.stringify([...user.roleIds].sort())
   async function save() {
     if (!input.username.trim() || !input.displayName.trim() || !user && !input.password) { setError('请填写用户名、显示名称及新用户密码。'); return }
-    if (input.password && (new TextEncoder().encode(input.password).length < 6 || new TextEncoder().encode(input.password).length > 72)) { setError('密码需为 6 至 72 个 UTF-8 字节。'); return }
+    if (input.password && (Array.from(input.password).length < 15 || new TextEncoder().encode(input.password).length > 72)) { setError('密码至少15个字符，且不能超过72个UTF-8字节。'); return }
     if (busy || conflict || !changed) return
     setBusy(true); setError('')
     try {
@@ -41,8 +41,8 @@ export function UserDialog({ api, user, roles, onClose, onSaved, onForbidden }: 
       {error && <div role="alert" className="notice notice-error">{error}</div>}
       <div className="form-grid"><label className="field">用户名<input value={input.username} onChange={(event) => patch({ username: event.target.value })} disabled={busy || Boolean(user)} autoComplete="off" maxLength={128} /></label>
         <label className="field">显示名称<input value={input.displayName} onChange={(event) => patch({ displayName: event.target.value })} disabled={busy} maxLength={128} /></label></div>
-      <label className="field">{user ? '重置密码（留空则保留原密码）' : '初始密码'}<input type="password" value={input.password} onChange={(event) => patch({ password: event.target.value })} disabled={busy} autoComplete="new-password" minLength={6} maxLength={72} /></label>
-      <small className="muted">密码需为 6 至 72 个 UTF-8 字节，中文等字符可能占用多个字节。</small>
+      <label className="field">{user ? '重置密码（留空则保留原密码）' : '初始密码'}<input type="password" value={input.password} onChange={(event) => patch({ password: event.target.value })} disabled={busy} autoComplete="new-password" minLength={15} maxLength={72} /></label>
+      <small className="muted">密码至少15个字符，最多72个UTF-8字节；建议使用较长的口令短语。</small>
       <div className="admin-inline"><label className="admin-check"><input type="checkbox" checked={input.enabled} disabled={busy} onChange={(event) => patch({ enabled: event.target.checked })} />启用账户</label>
         <label className="admin-check"><input type="checkbox" checked={input.administrator} disabled={busy} onChange={(event) => patch({ administrator: event.target.checked })} />租户管理员</label></div>
       <fieldset className="admin-fieldset"><legend>分配角色</legend>{roles.length ? <div className="admin-field-checks">{roles.map((role) => <label className="admin-check" key={role.id}><input type="checkbox" checked={input.roleIds.includes(role.id)} disabled={busy} onChange={(event) => patch({ roleIds: event.target.checked ? [...input.roleIds, role.id] : input.roleIds.filter((id) => id !== role.id) })} />{role.name}</label>)}</div> : <p className="muted">尚未创建角色，可稍后分配。</p>}</fieldset>

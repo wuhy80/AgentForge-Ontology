@@ -44,4 +44,7 @@ var externalMigrations = []storage.Migration{
  consumed_at BIGINT NOT NULL DEFAULT 0,
  KEY ix_identity_oauth_codes_owner (tenant_id,user_id,expires_at)
 ) ENGINE=InnoDB`},
+	{ID: "018_identity_oauth_registration_guard", SQL: `CREATE TABLE af_identity_oauth_registration_guard (id TINYINT NOT NULL PRIMARY KEY) ENGINE=InnoDB`},
+	{ID: "019_identity_oauth_registration_guard_seed", SQL: `INSERT INTO af_identity_oauth_registration_guard (id) VALUES (1)`},
+	{ID: "020_identity_oauth_codes_expiry", SQL: `ALTER TABLE af_identity_oauth_codes ADD INDEX ix_identity_oauth_codes_expiry (expires_at)`},
 }

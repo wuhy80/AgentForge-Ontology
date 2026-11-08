@@ -1,6 +1,8 @@
 module github.com/wuhy80/AgentForge-Ontology/libs/storage
 
-go 1.22.0
+go 1.26.0
+
+toolchain go1.26.10
 
 require (
 	github.com/go-sql-driver/mysql v1.7.1
@@ -11,5 +13,5 @@ require (
 require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	golang.org/x/text v0.14.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )

@@ -17,17 +17,61 @@ flock -n 9 || { echo '另一个部署操作正在进行' >&2; exit 1; }
 compose() { docker compose --env-file "$config/compose.env" -f "$repo/deploy/single-host/compose.yaml" "$@"; }
 revision() { git -C "$repo" rev-parse HEAD; }
 release_path() { printf '%s/releases/%s' "$state" "$(revision)"; }
+check_tls() {
+    bash "$repo/deploy/single-host/check-tls.sh" "$config/tls/server.crt" "$config/tls/server.key" "${ONTOLOGY_TLS_HOST:-47.100.85.94}"
+}
+check_execution() {
+    local target
+    target=$(release_path)
+    (
+        set -a; source "$config/execution.env"; set +a
+        [[ "${ONTOLOGY_EXECUTION_ISOLATION:-sandbox}" == sandbox ]] || { echo '公网部署须使用sandbox执行隔离' >&2; exit 1; }
+        export DOCKER_HOST=unix:///run/ontology-sandbox/docker.sock
+        unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+        runuser --preserve-environment -u ontology-execution -- "$target/bin/execution" -check-isolation
+    )
+}
 configure_units() {
     install -d -m 755 "$state" "$state/releases" "$cache"
     install -d -m 700 "$state/backups" "$config"
     for service in "${services[@]}"; do
-        id "ontology-$service" &>/dev/null || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "ontology-$service"
+        getent group "ontology-$service" >/dev/null || groupadd --system "ontology-$service"
+        id "ontology-$service" &>/dev/null || useradd --system --gid "ontology-$service" --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "ontology-$service"
         [[ -s "$config/$service.env" ]] || { echo "缺少 $config/$service.env" >&2; exit 1; }
     done
     install -m 644 "$repo/deploy/single-host/agentforge-ontology@.service" /etc/systemd/system/
     install -d -m 755 /etc/systemd/system/agentforge-ontology@execution.service.d
-    printf '[Service]\nSupplementaryGroups=docker\n' > /etc/systemd/system/agentforge-ontology@execution.service.d/docker.conf
-    chmod 644 /etc/systemd/system/agentforge-ontology@execution.service.d/docker.conf
+    rm -f /etc/systemd/system/agentforge-ontology@execution.service.d/docker.conf
+    install -m 644 "$repo/deploy/single-host/security-headers.conf" "$config/nginx-security-headers.conf"
+    # Rootless Docker with cgroup v2 requires the dedicated user's systemd
+    # manager and bus. A system unit with User= is not a supported substitute.
+    local sandbox_uid sandbox_home=/var/lib/ontology-sandbox
+    id ontology-sandbox &>/dev/null || { echo '请先按部署文档准备ontology-sandbox用户、subuid/subgid、rootless Docker和runsc' >&2; exit 1; }
+    sandbox_uid=$(id -u ontology-sandbox)
+    [[ "$sandbox_uid" != 0 && " $(id -nG ontology-sandbox) " != *" docker "* ]] || { echo '沙箱用户不得具有root或宿主docker组权限' >&2; exit 1; }
+    [[ "$(id -g ontology-sandbox)" == "$(getent group ontology-execution | cut -d: -f3)" && "$(getent passwd ontology-sandbox | cut -d: -f6)" == "$sandbox_home" ]] || { echo '沙箱用户须使用文档指定的主目录及ontology-execution主组' >&2; exit 1; }
+    for binary in dockerd-rootless.sh rootlesskit newuidmap newgidmap; do
+        command -v "$binary" >/dev/null || { echo "缺少rootless执行依赖：$binary" >&2; exit 1; }
+    done
+    [[ -x /usr/local/bin/runsc ]] || { echo '缺少/usr/local/bin/runsc' >&2; exit 1; }
+    awk -F: -v user=ontology-sandbox '$1==user && $3+0 >= 65536 { found=1 } END { exit found ? 0 : 1 }' /etc/subuid || { echo 'ontology-sandbox没有至少65536个独立subuid' >&2; exit 1; }
+    awk -F: -v user=ontology-sandbox '$1==user && $3+0 >= 65536 { found=1 } END { exit found ? 0 : 1 }' /etc/subgid || { echo 'ontology-sandbox没有至少65536个独立subgid' >&2; exit 1; }
+    [[ " $(id -nG ontology-execution) " != *" docker "* ]] || gpasswd -d ontology-execution docker
+    install -d -m 700 -o ontology-sandbox -g ontology-execution "$sandbox_home" "$sandbox_home/.config" "$sandbox_home/.config/systemd" "$sandbox_home/.config/systemd/user"
+    install -m 644 -o ontology-sandbox -g ontology-execution "$repo/deploy/single-host/agentforge-sandbox.service" "$sandbox_home/.config/systemd/user/"
+    printf 'd /run/ontology-sandbox 0710 ontology-sandbox ontology-execution -\n' > /etc/tmpfiles.d/agentforge-sandbox.conf
+    systemd-tmpfiles --create /etc/tmpfiles.d/agentforge-sandbox.conf
+    install -d -m 755 /etc/agentforge-sandbox
+    install -m 644 "$repo/deploy/single-host/sandbox-daemon.json" /etc/agentforge-sandbox/daemon.json
+    install -d -m 755 "/etc/systemd/system/user@$sandbox_uid.service.d"
+    printf '[Service]\nDelegate=cpu cpuset io memory pids\n' > "/etc/systemd/system/user@$sandbox_uid.service.d/delegate.conf"
+    systemctl daemon-reload
+    loginctl enable-linger ontology-sandbox
+    systemctl start "user@$sandbox_uid.service"
+    runuser -u ontology-sandbox -- env "XDG_RUNTIME_DIR=/run/user/$sandbox_uid" "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$sandbox_uid/bus" systemctl --user daemon-reload
+    runuser -u ontology-sandbox -- env "XDG_RUNTIME_DIR=/run/user/$sandbox_uid" "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$sandbox_uid/bus" systemctl --user enable --now agentforge-sandbox.service
+    printf '[Unit]\nRequires=user@%s.service\nAfter=user@%s.service\n[Service]\nUnsetEnvironment=DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH\nEnvironment=DOCKER_HOST=unix:///run/ontology-sandbox/docker.sock ONTOLOGY_EXECUTION_ISOLATION=sandbox\n' "$sandbox_uid" "$sandbox_uid" > /etc/systemd/system/agentforge-ontology@execution.service.d/sandbox.conf
+    chmod 644 /etc/systemd/system/agentforge-ontology@execution.service.d/sandbox.conf
     systemctl daemon-reload
 }
 build_release() {
@@ -39,7 +83,7 @@ build_release() {
         -v "$repo:/src:ro" -v "$target:/out" -v "$cache/go:/cache" \
         -e GOWORK=off -e CGO_ENABLED=0 -e GOMAXPROCS=1 -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod \
         -e GOPROXY="${ONTOLOGY_BUILD_GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}" \
-        golang:1.25-alpine sh -ec '
+        golang:1.26.10-alpine sh -ec '
             for service in metadata data execution mcp; do
                 cd "/src/services/$service"
                 go build -p=1 -trimpath -ldflags="-s -w" -o "/out/bin/$service" ./cmd/server
@@ -77,6 +121,8 @@ migrate_release() {
 activate_release() {
     local target previous=''
     target=$(release_path)
+    check_tls
+    check_execution
     [[ -s "$target/complete" ]] || { echo '请先构建发布目录' >&2; exit 1; }
     [[ ! -L "$state/current" ]] || previous=$(readlink -f "$state/current")
     ln -sfn "$target" "$state/current.next"
@@ -120,8 +166,10 @@ case "$action" in
         exec bash "$repo/deploy/single-host/manage.sh" deploy
         ;;
     deploy)
+        check_tls
         build_release
         configure_units
+        check_execution
         systemctl stop "${units[@]}"
         backup_data
         migrate_release
@@ -134,5 +182,6 @@ case "$action" in
         systemctl --no-pager --full status "${units[@]}"
         ready
         ;;
-    *) echo '用法：manage.sh prepare|build|migrate|activate|backup|stop|start|update|status' >&2; exit 2 ;;
+    check-tls) check_tls ;;
+    *) echo '用法：manage.sh prepare|build|migrate|activate|backup|stop|start|update|status|check-tls' >&2; exit 2 ;;
 esac

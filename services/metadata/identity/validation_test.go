@@ -11,9 +11,14 @@ import (
 )
 
 func TestPasswordsAndTypedPolicyValues(t *testing.T) {
-	for _, password := range []string{"short", string(make([]byte, 73))} {
+	for _, password := range []string{"short", "123456", "123456789012345", "passwordpassword", strings.Repeat("a", 20), string(make([]byte, 73))} {
 		if validPassword(password) == nil {
 			t.Fatal("unsupported password accepted")
+		}
+	}
+	for _, password := range []string{"Correct horse battery staple", "春日山川与星河共明照长夜安眠好梦"} {
+		if err := validPassword(password); err != nil {
+			t.Fatal(err)
 		}
 	}
 	for _, tc := range []struct {
@@ -47,13 +52,11 @@ func TestLoginBudgetHasBoundedMemoryAndTypedErrors(t *testing.T) {
 	if !errors.As(store.loginBudget("subject"), &access) || access.Status != 429 {
 		t.Fatal("login limit lacks public error status")
 	}
-	for id := 0; id < 1023; id++ {
-		if err := store.loginBudget(string(rune(id)) + "other"); err != nil {
-			t.Fatal(err)
-		}
+	for id := 0; id < 1024; id++ {
+		_ = store.loginBudget(string(rune(id)) + "other")
 	}
-	if store.loginBudget("new-over-budget") == nil || len(store.loginAttempts) != 1024 {
-		t.Fatal("login map exceeded bounded memory")
+	if store.loginBudget("unrelated-user") != nil {
+		t.Fatal("invented names blocked an unrelated user")
 	}
 	store.resetLoginBudget("subject")
 	if err := store.loginBudget("subject"); err != nil {

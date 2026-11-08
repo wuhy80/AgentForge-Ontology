@@ -9,6 +9,20 @@ import (
 )
 
 type proxyHTTPSContextKey struct{}
+type proxyClientAddressKey struct{}
+
+// ClientAddress uses only the TCP peer unless a configured proxy supplies a
+// single valid X-Real-IP. The edge must overwrite that header.
+func ClientAddress(r *http.Request) string {
+	if address, ok := r.Context().Value(proxyClientAddressKey{}).(string); ok {
+		return address
+	}
+	peer, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return "unknown"
+	}
+	return peer.Addr().Unmap().String()
+}
 
 // TrustTLSProxy recognizes TLS termination only from explicitly configured
 // network peers. Host and Origin remain untouched; X-Forwarded-Host and client
@@ -32,10 +46,20 @@ func TrustTLSProxy(app http.Handler, cidrs string) (http.Handler, error) {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		proto := r.Header.Values("X-Forwarded-Proto")
 		peer, err := netip.ParseAddrPort(r.RemoteAddr)
-		if r.TLS == nil && err == nil && len(proto) == 1 && proto[0] == "https" {
+		if err == nil {
 			for _, prefix := range prefixes {
 				if prefix.Contains(peer.Addr().Unmap()) {
-					r = r.WithContext(context.WithValue(r.Context(), proxyHTTPSContextKey{}, true))
+					ctx := r.Context()
+					if r.TLS == nil && len(proto) == 1 && proto[0] == "https" {
+						ctx = context.WithValue(ctx, proxyHTTPSContextKey{}, true)
+					}
+					addresses := r.Header.Values("X-Real-IP")
+					if len(addresses) == 1 {
+						if address, err := netip.ParseAddr(addresses[0]); err == nil && address.Zone() == "" {
+							ctx = context.WithValue(ctx, proxyClientAddressKey{}, address.Unmap().String())
+						}
+					}
+					r = r.WithContext(ctx)
 					break
 				}
 			}

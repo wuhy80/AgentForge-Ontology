@@ -47,12 +47,14 @@ if (-not (Test-Path -LiteralPath $adminFile)) {
 }
 $initialAdmin = Get-Content -LiteralPath $adminFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
-$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_EXECUTION_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_ADDITIONAL_PUBLIC_ORIGINS','ONTOLOGY_AUTH_ISSUER','ONTOLOGY_MCP_RESOURCE','ONTOLOGY_MCP_LISTEN','ONTOLOGY_MCP_ALLOWED_ORIGINS','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD','ONTOLOGY_PYTHON_IMAGE','ONTOLOGY_JAVASCRIPT_IMAGE','ONTOLOGY_GO_IMAGE')
+$envNames = @('ONTOLOGY_SOURCE_NETWORK_RULES','ONTOLOGY_EXECUTION_ISOLATION','GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_EXECUTION_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_ADDITIONAL_PUBLIC_ORIGINS','ONTOLOGY_AUTH_ISSUER','ONTOLOGY_MCP_RESOURCE','ONTOLOGY_MCP_LISTEN','ONTOLOGY_MCP_ALLOWED_ORIGINS','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD','ONTOLOGY_PYTHON_IMAGE','ONTOLOGY_JAVASCRIPT_IMAGE','ONTOLOGY_GO_IMAGE')
 $savedEnvironment = @{}
 foreach ($name in $envNames) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
     $env:GOCACHE = Join-Path $repoRoot '.cache/go-build'
     $env:GOWORK = 'off'
+    $env:ONTOLOGY_EXECUTION_ISOLATION = 'trusted'
+    $env:ONTOLOGY_SOURCE_NETWORK_RULES = '[{"cidr":"127.0.0.1/32","ports":[23306,23307,25432],"allowInsecureTLS":true}]'
     $env:ONTOLOGY_AUTH_SECRET = $secrets.AuthSecret
     $env:ONTOLOGY_SERVICE_TOKEN = $secrets.ServiceToken
     $env:ONTOLOGY_CURSOR_SECRET = $secrets.CursorSecret
@@ -69,7 +71,7 @@ try {
     $env:ONTOLOGY_MCP_ALLOWED_ORIGINS = $env:ONTOLOGY_PUBLIC_ORIGIN
     if (-not $env:ONTOLOGY_PYTHON_IMAGE) { $env:ONTOLOGY_PYTHON_IMAGE = 'python:3.12-alpine' }
     if (-not $env:ONTOLOGY_JAVASCRIPT_IMAGE) { $env:ONTOLOGY_JAVASCRIPT_IMAGE = 'node:22-alpine' }
-    if (-not $env:ONTOLOGY_GO_IMAGE) { $env:ONTOLOGY_GO_IMAGE = 'agentforge-go:1.25' }
+    if (-not $env:ONTOLOGY_GO_IMAGE) { $env:ONTOLOGY_GO_IMAGE = 'agentforge-go:1.26.10' }
     foreach ($runtimeImage in @($env:ONTOLOGY_PYTHON_IMAGE, $env:ONTOLOGY_JAVASCRIPT_IMAGE)) {
         $imageProbePreference = $ErrorActionPreference
         try {
@@ -84,7 +86,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "Runtime image $runtimeImage is unavailable; inspect the image setting and Docker access." }
         }
     }
-    if ($env:ONTOLOGY_GO_IMAGE -eq 'agentforge-go:1.25') {
+    if ($env:ONTOLOGY_GO_IMAGE -eq 'agentforge-go:1.26.10') {
         # Explicit development setup rebuilds the trusted launcher when its
         # source changes; ordinary service startup and requests never build.
         & docker build -t $env:ONTOLOGY_GO_IMAGE -f (Join-Path $repoRoot 'deploy/execution/go/Dockerfile') (Join-Path $repoRoot 'deploy/execution/go')

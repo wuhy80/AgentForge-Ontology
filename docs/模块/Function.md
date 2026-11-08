@@ -29,6 +29,8 @@ def main(inputs):
 
 运行器使用部署方配置的Python 3.12镜像，启动时解析为实际本地镜像ID后执行；请求不能指定镜像、Docker参数或宿主命令。每次调用使用独立容器、非root用户、只读根文件系统和有限临时目录，关闭网络、移除Linux capabilities，限制CPU、内存、进程数及时间；不挂载宿主目录，不传入平台数据库或服务凭据，不降级到宿主Python。容器限制属于本地开发与受控代码的首批隔离措施，不据此认证恶意多租户代码沙盒或生产隔离。
 
+2026-11-08安全加固代码另将默认执行模式设为 `sandbox`（`ONTOLOGY_EXECUTION_ISOLATION` 留空时同样适用），要求专用rootless Docker、已登记runsc及cgroup v2 CPU/内存/PID预算。就绪和实际调用均检查条件，每次创建显式选择 `--runtime=runsc`；缺少条件明确不可用，不回退runc。仅受控本地开发可显式选择 `trusted` 使用既有Docker，开发脚本和真实容器测试显式采用该模式。未知模式拒绝；检查通过只表明部署条件满足，不代表恶意代码隔离或生产安全已验收。运维准备及现网发布状态见[部署与运维](../部署与运维.md#后续安全加固代码尚未部署)。
+
 标准输出、标准错误和异常堆栈不作为公共结果返回；只接受受限JSON输出并按声明类型再次校验。容器中的Python print不构成业务结果。代码摘要、实际镜像ID和本次定义快照由Execution保存用于核对；结果、重试和清理规则以[执行与调度](../执行与调度.md)为准。工作台分别提供当前定义运行与下文已保存草稿试运行，二者不互相替换代码。
 
 ### 独立源码编辑（2026-11-07用户确认）
@@ -59,7 +61,7 @@ Execution可返回受控的源码诊断，字段为`code`、固定公共`message
 
 已确认沿用`runtime.source`、`entrypoint`、`timeoutSeconds`及唯一当前态/草稿流程；语言标识为`python`、`javascript`、`go`，不把`js`作为静默别名或退回Python。源码继续限制为64 KiB，超时为1～30秒；API须显式提供合法入口和超时，不从源码自动发现入口。入口名为1～64字符的ASCII普通函数标识，不能以双下划线开头或使用所选语言的保留名称；入口接收并返回中文参数名为键的JSON对象，HTTP与测试样例继续绑定稳定参数ID，int64和decimal必须使用字符串。新增语言不开放平台数据访问、联网、第三方依赖安装、任意镜像或外部副作用，绑定Action仍使用被引用Function的当前实现和调用权限。
 
-JavaScript采用Node 22容器执行同步普通函数，默认入口`main`；仅提供ECMAScript内建对象及静默`console`，不开放Node模块、`require`或`process`，不接收ES模块、npm依赖或Promise结果。Go使用隔离容器内的Go 1.25标准工具链编译并执行单文件`package main`源码，入口签名为`func Main(inputs map[string]any) (map[string]any, error)`，默认`Main`，可使用标准库import；`main`、`init`及语言关键字不能作为入口。Go源码不调用宿主编译器，不联网解析或下载模块。两种语言与Python共用执行记录、幂等、输入输出检查、草稿ETag及结果交付复核；编译也属于受限执行，不以编译成功代替函数输出或权限验收。以下为本轮已确认的用户源码示例，实际容器执行结果单独验证：
+JavaScript采用Node 22容器执行同步普通函数，默认入口`main`；仅提供ECMAScript内建对象及静默`console`，不开放Node模块、`require`或`process`，不接收ES模块、npm依赖或Promise结果。Go使用隔离容器内的Go 1.26.10标准工具链编译并执行单文件`package main`源码，入口签名为`func Main(inputs map[string]any) (map[string]any, error)`，默认`Main`，可使用标准库import；`main`、`init`及语言关键字不能作为入口。Go源码不调用宿主编译器，不联网解析或下载模块。两种语言与Python共用执行记录、幂等、输入输出检查、草稿ETag及结果交付复核；编译也属于受限执行，不以编译成功代替函数输出或权限验收。以下为本轮已确认的用户源码示例，实际容器执行结果单独验证：
 
 ```javascript
 function main(inputs) {
@@ -82,7 +84,7 @@ func Main(inputs map[string]any) (map[string]any, error) {
 
 输出按公共标量协议检查，不能利用JSON序列化将非有限数值、BigInt、undefined、函数或Promise静默转换成另一种业务值。Go入口返回非nil错误或任一语言抛出异常时，公共结果只包含受控错误与合法源码坐标，不返回原错误消息、堆栈、源码或编译器完整输出。
 
-镜像只由部署方配置：`ONTOLOGY_PYTHON_IMAGE`沿用Python镜像，`ONTOLOGY_JAVASCRIPT_IMAGE`默认`node:22-alpine`，`ONTOLOGY_GO_IMAGE`默认管理员构建的`agentforge-go:1.25`。Go专用镜像包含可信启动器和只读预热标准库缓存，每次编译将缓存复制到本次独立临时目录，不跨调用共享可写缓存；构建和使用步骤唯一见[Execution服务](../../services/execution/README.md)。请求不自动拉取镜像。能力接口按实际可用语言报告，单一镜像不可用时明确拒绝该语言请求，不阻断已就绪语言，也不退回另一种实现。
+镜像只由部署方配置：`ONTOLOGY_PYTHON_IMAGE`沿用Python镜像，`ONTOLOGY_JAVASCRIPT_IMAGE`默认`node:22-alpine`，`ONTOLOGY_GO_IMAGE`默认管理员构建的`agentforge-go:1.26.10`。Go专用镜像包含可信启动器和只读预热标准库缓存，每次编译将缓存复制到本次独立临时目录，不跨调用共享可写缓存；构建和使用步骤唯一见[Execution服务](../../services/execution/README.md)。请求不自动拉取镜像。能力接口按实际可用语言报告，单一镜像不可用时明确拒绝该语言请求，不阻断已就绪语言，也不退回另一种实现。
 
 已确认按语言设置固定预算：Python和JavaScript为1 CPU、128 MiB内存、64个进程/线程及8 MiB不可执行tmpfs；Go编译执行为1 CPU、768 MiB内存、128个进程/线程及384 MiB可执行tmpfs。Go临时目录允许执行本次编译的二进制，其根文件系统仍只读，容器仍非root、无宿主挂载和平台凭据、网络关闭。工作台模板初始超时为Python/JavaScript 5秒、Go 30秒，编译、缓存准备和用户计算共用本次配置时限；不因编译消耗时间而额外延长用户运行。资源与工具最终实测结果见项目总览，以上限制不表示生产恶意代码隔离验收。
 

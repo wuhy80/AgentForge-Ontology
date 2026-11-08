@@ -26,9 +26,13 @@ func main() {
 }
 func run() error {
 	migrate := flag.Bool("migrate", false, "显式应用Execution平台迁移后退出")
+	checkIsolation := flag.Bool("check-isolation", false, "只检查执行隔离环境后退出")
 	flag.Parse()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *checkIsolation {
+		return (&execution.DockerRunner{Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Isolation: os.Getenv("ONTOLOGY_EXECUTION_ISOLATION")}).CheckIsolation(ctx)
+	}
 	start, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	engine, err := storage.Open(start, storage.Config{Driver: "mysql", DSN: os.Getenv("ONTOLOGY_MYSQL_DSN"), MaxOpen: 10, MaxIdle: 5})
@@ -44,6 +48,10 @@ func run() error {
 		return fmt.Errorf("须配置Metadata地址及至少32字节的内部服务凭据")
 	}
 	checker := &platform.RemoteSessionChecker{URL: metadataURL, ServiceToken: service}
+	isolation := os.Getenv("ONTOLOGY_EXECUTION_ISOLATION")
+	if err := execution.ValidateIsolationMode(isolation); err != nil {
+		return err
+	}
 	maxConcurrent := 4
 	if raw := os.Getenv("ONTOLOGY_EXECUTION_MAX_CONCURRENT"); raw != "" {
 		maxConcurrent, err = strconv.Atoi(raw)
@@ -51,7 +59,7 @@ func run() error {
 			return fmt.Errorf("ONTOLOGY_EXECUTION_MAX_CONCURRENT须为1到4的整数")
 		}
 	}
-	app := execution.NewHandler(execution.Config{Store: &execution.SQLStore{DB: engine.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metadataURL, ServiceToken: service}, Runner: &execution.DockerRunner{Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE")}, MaxConcurrent: maxConcurrent})
+	app := execution.NewHandler(execution.Config{Store: &execution.SQLStore{DB: engine.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metadataURL, ServiceToken: service}, Runner: &execution.DockerRunner{Isolation: isolation, Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE")}, MaxConcurrent: maxConcurrent})
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18082"

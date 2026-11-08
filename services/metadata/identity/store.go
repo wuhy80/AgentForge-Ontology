@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"hash/maphash"
 	"sort"
 	"strings"
 	"sync"
@@ -34,11 +35,15 @@ type Store struct {
 	OAuthIssuer       string
 	MCPResource       string
 	loginMu           sync.Mutex
-	loginAttempts     map[string]loginAttempt
+	abuseSeed         maphash.Seed
+	loginAttempts     [16384]loginAttempt
+	publicAttempts    [4096]loginAttempt
+	publicTotals      [4]loginAttempt
+	loginSlots        chan struct{}
 }
 
 func NewStore(db *sql.DB, opa *platform.OPAAuthorizer, origin string) *Store {
-	return &Store{DB: db, OPA: opa, Origin: strings.TrimRight(origin, "/")}
+	return &Store{DB: db, OPA: opa, Origin: strings.TrimRight(origin, "/"), abuseSeed: maphash.MakeSeed(), loginSlots: make(chan struct{}, 4)}
 }
 
 func problem(status int, code, message string) error {
@@ -60,6 +65,9 @@ func tokenHash(value string) string {
 func marshal(value any) string { raw, _ := json.Marshal(value); return string(raw) }
 
 func normalizedName(value string) (string, []byte, error) {
+	if !utf8.ValidString(value) || len(value) > 1024 {
+		return "", nil, problem(422, "invalid_name", "名称必须为1到128个字符")
+	}
 	value = norm.NFC.String(strings.TrimSpace(value))
 	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 128 {
 		return "", nil, problem(422, "invalid_name", "名称必须为1到128个字符")
@@ -73,8 +81,21 @@ func normalizedName(value string) (string, []byte, error) {
 }
 
 func validPassword(value string) error {
-	if len(value) < 6 || len(value) > 72 || !utf8.ValidString(value) {
-		return problem(422, "invalid_password", "密码必须为6到72字节")
+	if !utf8.ValidString(value) || utf8.RuneCountInString(value) < 15 || len(value) > 72 {
+		return problem(422, "invalid_password", "密码至少15个字符，且不能超过72个UTF-8字节")
+	}
+	weak := strings.ToLower(strings.TrimSpace(value))
+	for _, common := range []string{"123456789012345", "1234567890123456", "passwordpassword", "password123456789", "qwertyuiopasdfgh", "letmeinletmeinletmein"} {
+		if weak == common {
+			return problem(422, "weak_password", "请使用难以猜测的密码或较长的口令短语")
+		}
+	}
+	chars := map[rune]bool{}
+	for _, char := range value {
+		chars[char] = true
+	}
+	if len(chars) < 4 {
+		return problem(422, "weak_password", "请使用难以猜测的密码或较长的口令短语")
 	}
 	return nil
 }

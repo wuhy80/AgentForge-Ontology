@@ -38,6 +38,7 @@ func (e *DiagnosticRunError) Unwrap() error { return e.RunError }
 // is resolved to its actual local image ID before each admitted invocation.
 type DockerRunner struct {
 	Binary, Image, JavaScriptImage, GoImage string
+	Isolation                               string
 	mu                                      sync.Mutex
 	pending                                 map[string]bool
 	command                                 func(context.Context, string, ...string) *exec.Cmd
@@ -76,7 +77,7 @@ func (d *DockerRunner) imageFor(language string) string {
 		if d.GoImage != "" {
 			return d.GoImage
 		}
-		return "agentforge-go:1.25"
+		return "agentforge-go:1.26.10"
 	}
 	return ""
 }
@@ -91,6 +92,9 @@ func (d *DockerRunner) ReadyRuntime(ctx context.Context, language string) (strin
 	image := d.imageFor(language)
 	if image == "" {
 		return "", errors.New("unsupported runtime")
+	}
+	if err := d.CheckIsolation(ctx); err != nil {
+		return "", err
 	}
 	if err := d.recoverContainers(ctx); err != nil {
 		return "", err
@@ -351,6 +355,12 @@ func (d *DockerRunner) run(ctx context.Context, runtime *c.ScriptRuntime, input 
 	// are fixed by the service, never by a callable definition or HTTP input.
 	deadline := time.Now().Add(time.Duration(runtime.TimeoutSeconds)*time.Second + 90*time.Second).Unix()
 	args := runtimeContainerArgs(runtime.Language, imageID, name, deadline)
+	if d.CheckIsolation(ctx) != nil {
+		return nil, &RunError{"failed", "isolation_unavailable", "安全执行环境尚未就绪，请联系平台管理员"}
+	}
+	if d.Isolation != "trusted" {
+		args = append([]string{"create", "--runtime=runsc"}, args[1:]...)
+	}
 	// Complete creation separately before starting user code. Browser
 	// cancellation cannot race a successful create response and its cleanup.
 	createCtx, stopCreate := context.WithTimeout(context.Background(), 5*time.Second)

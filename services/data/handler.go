@@ -20,14 +20,15 @@ import (
 )
 
 type Config struct {
-	Engine         *storage.Engine
-	Authorizer     platform.Authorizer
-	SessionChecker platform.SessionChecker
-	MetadataURL    string
-	ServiceToken   string
-	CursorSecret   string
-	HTTPClient     *http.Client
-	DataSourceKey  string
+	Engine              *storage.Engine
+	Authorizer          platform.Authorizer
+	SessionChecker      platform.SessionChecker
+	MetadataURL         string
+	ServiceToken        string
+	CursorSecret        string
+	HTTPClient          *http.Client
+	DataSourceKey       string
+	SourceNetworkPolicy *SourceNetworkPolicy
 }
 
 type handler struct {
