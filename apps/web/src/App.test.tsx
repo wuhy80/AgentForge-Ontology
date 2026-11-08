@@ -19,6 +19,7 @@ vi.mock('./lib/api', async (original) => {
 })
 vi.mock('./features/model/ModelsPage', () => ({ ModelsPage: ({ categoryId }: { categoryId: string }) => <p data-testid="model-category">{categoryId}</p> }))
 vi.mock('./features/query/QueryPage', () => ({ QueryPage: ({ categoryId, schemas }: { categoryId: string; schemas: { definition: { id: string } }[] }) => <p data-testid="query-category">{categoryId}:{schemas.map((item) => item.definition.id).join(',')}</p> }))
+vi.mock('./features/ontology/OntologyPage', () => ({ OntologyPage: ({ categoryId, onQuery }: { categoryId: string; onQuery: (id: string, category: string) => void }) => <div data-testid="ontology-category">{categoryId}<button type="button" onClick={() => onQuery('schema-1', 'category-b')}>查看跨分类数据</button></div> }))
 vi.mock('./features/admin/AdminPage', () => ({ AdminPage: () => <p>用户管理页面</p> }))
 vi.mock('./features/organizations/OrganizationsPage', () => ({ OrganizationsPage: ({ categoryId }: { categoryId: string }) => <p data-testid="organization-category">{categoryId || '暂无分类'}</p> }))
 vi.mock('./features/sources/SourcesPage', () => ({ SourcesPage: () => <p>数据源配置页面</p> }))
@@ -120,6 +121,23 @@ it('restores a valid preference after reload and isolates it by tenant and accou
   render(<App />)
   await waitFor(() => expect((screen.getByRole('combobox', { name: '当前分类' }) as HTMLSelectElement).value).toBe('category-a'))
   expect(sessionStorage.getItem(key)).toBe('category-b')
+})
+
+it('adds the ontology entry after workspace and shares category context on direct routes and query jumps', async () => {
+  window.location.hash = '#ontology'
+  mocks.getSession.mockResolvedValue(session)
+  mocks.listCategories.mockResolvedValue(categories)
+  mocks.listDefinitions.mockImplementation(async (filters: { view: string }) => filters.view === 'current' ? records : [])
+  render(<App />)
+  const page = await screen.findByTestId('ontology-category')
+  expect(page.textContent).toContain('category-a')
+  const navigation = screen.getByRole('navigation', { name: '工作台导航' })
+  expect(Array.from(navigation.querySelectorAll('a')).slice(0, 2).map((item) => item.textContent)).toEqual(['工作空间', '本体全景'])
+  expect(screen.getByRole('link', { name: '本体全景' }).getAttribute('aria-current')).toBe('page')
+  fireEvent.click(screen.getByRole('button', { name: '查看跨分类数据' }))
+  expect((await screen.findByTestId('query-category')).textContent).toBe('category-b:schema-1')
+  expect((screen.getByRole('combobox', { name: '当前分类' }) as HTMLSelectElement).value).toBe('category-b')
+  expect(screen.queryByTestId('ontology-category')).toBeNull()
 })
 
 it('validates a saved category against the authorized directory and provides an empty setup entry', async () => {

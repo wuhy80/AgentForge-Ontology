@@ -42,6 +42,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [Schema 映射](src/features/model/SchemaStorageEditor.tsx) | 两种建模方向、主表稳定身份及逐属性跨源/跨表目录选择；默认平台存储也展示实际生效表列，草稿与生效映射分开标识；反向导入保留已有属性身份 |
 | [Link 映射](src/features/model/LinkStorageEditor.tsx) | 区分纯定义、平台关系表、已有外部关联表和外键；可视化表列选择、关系示意、一次性补绑定 |
 | [关系可视化](src/features/model/RelationOverview.tsx)、[关系详情](src/features/model/LinkVisualEditor.tsx) | `#models?view=graph`查看当前分类关系，选线侧栏编辑；详情及对象Link页共用画布，支持拖线创建、个人布局、草稿/预览/发布与当前态双向数据预览；[主要规则](../../docs/模块/Link.md#关系可视化管理2026-11-08首批已实现) |
+| [本体全景](src/features/ontology/OntologyPage.tsx) | `#ontology`只读浏览当前分类的五类生效定义，提供对象关系图、定义依赖图、详情联动、搜索筛选、稳定个人布局及既有定义/数据跳转；实现边界与验证见[本体全景](../../docs/本体全景.md) |
 | [源码编辑器](src/components/PythonSourceEditor.tsx) | Function及直接源码Action独立使用的CodeMirror编辑器；Python、JavaScript、Go高亮、中文参数补全、语法辅助、格式化及参数改名引用提醒；共同边界见[Function](../../docs/模块/Function.md#javascript与go扩展2026-11-08已确认) |
 | [数据源配置](src/features/sources/SourcesPage.tsx) | 表格列出连接及兼容状态，每行测试/编辑/管理；密码只写入，编辑沿用版本、TLS、租户隔离及ETag |
 | [数据库管理](src/features/sources/SourceManager.tsx) | 基础信息与真实指标、每页20条目录及字段/主键列计数、默认值/注释/索引；进入专属预览Tab自动刷新，缩窄目录与暖杏SQL编辑器/只读工具，默认字段页不查行，共享来源禁用物理业务行读取；[主要规则](../../docs/数据源.md#数据库管理工作台2026-11-08已确认) |

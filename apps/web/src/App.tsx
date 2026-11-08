@@ -33,8 +33,9 @@ import { OrganizationsPage } from './features/organizations/OrganizationsPage'
 import { SourcesPage } from './features/sources/SourcesPage'
 
 const QueryPage = lazy(() => import('./features/query/QueryPage').then((module) => ({ default: module.QueryPage })))
+const OntologyPage = lazy(() => import('./features/ontology/OntologyPage').then((module) => ({ default: module.OntologyPage })))
 
-type View = 'overview' | 'organizations' | 'sources' | 'models' | 'query' | 'admin'
+type View = 'overview' | 'ontology' | 'organizations' | 'sources' | 'models' | 'query' | 'admin'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
 type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
@@ -42,6 +43,7 @@ type NavItem = { route: string; view: View; name: string; icon: typeof Box; kind
 const navGroups: { name: string; items: NavItem[] }[] = [
   { name: '工作台', items: [
     { route: 'overview', view: 'overview', name: '工作空间', icon: LayoutDashboard },
+    { route: 'ontology', view: 'ontology', name: '本体全景', icon: Layers3 },
   ] },
   { name: '本体建模', items: [
     { route: modelListRoute('schema'), view: 'models', kind: 'schema', name: kindLabels.schema, icon: Box },
@@ -60,7 +62,7 @@ const navGroups: { name: string; items: NavItem[] }[] = [
 
 function currentView(route = window.location.hash.slice(1)): View {
   const hash = route.split(/[/?]/)[0]
-  return hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' ? hash : 'overview'
+  return hash === 'ontology' || hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' ? hash : 'overview'
 }
 
 function Brand({ light = false }: { light?: boolean }) {
@@ -589,6 +591,11 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                   <OrganizationsPage api={session.api} categories={categories} categoryId={categoryId} onSelectCategory={selectCategory} onRefresh={refresh} />
                 </DialogScope>
               </section>
+              {view === 'ontology' && <Suspense fallback={<p className="muted">正在加载本体全景…</p>}><OntologyPage
+                api={session.api} categoryId={categoryId} categories={categories} layoutScope={`${session.identity.tenantId}:${session.account.user.id}`}
+                onOpenDefinition={(id, targetCategory) => { selectCategory(targetCategory); navigate(`models/${encodeURIComponent(id)}`) }}
+                onQuery={(id, targetCategory) => { selectCategory(targetCategory); query(id) }}
+              /></Suspense>}
               <section hidden={view !== 'models'}>
                 <DialogScope active={view === 'models'}>
                   <ModelsPage
