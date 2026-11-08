@@ -243,7 +243,8 @@ describe('对象编辑页签', () => {
     expect(within(panel).queryByRole('link')).toBeNull()
     expect(panel.textContent).toMatch(/暂无|尚未/)
     const links = await selectTab('Link 信息')
-    expect(within(links).queryByRole('link')).toBeNull()
+    expect(within(links).queryAllByRole('link').filter((item) => item.getAttribute('href')?.startsWith('#models/'))).toHaveLength(0)
+    expect(within(links).getByRole('link', { name: '打开分类关系图' }).getAttribute('href')).toBe('#models?view=graph')
     expect(links.textContent).toMatch(/暂无|尚未/)
   })
 

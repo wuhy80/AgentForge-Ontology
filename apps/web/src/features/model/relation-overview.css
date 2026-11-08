@@ -1,0 +1,37 @@
+.relation-overview { min-width: 0; }
+.relation-overview-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 8px 0 18px; }
+.relation-overview-heading h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; font-size: 17px; }
+.relation-overview-heading p { margin: 0; color: #829186; font-size: 12px; }
+.relation-overview-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; font-size: 12px; }
+.relation-overview-filters > label { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.relation-overview-filters select { width: auto; max-width: 170px; font-size: 12px; padding: 7px; }
+.relation-overview-search { border: 1px solid #dfe8df; border-radius: 7px; padding: 8px 10px; background: white; }
+.relation-overview-search input { min-width: 0; width: 160px; border: 0; outline: 0; font: inherit; }
+.relation-overview-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; align-items: start; }
+.relation-overview-workspace.has-editor { grid-template-columns: minmax(0, 1fr) minmax(330px, 39%); }
+.relation-overview-explorer, .relation-overview-canvas { min-width: 0; }
+.relation-overview-inspector { min-width: 0; border: 1px solid #e1e8e0; border-radius: 10px; background: white; overflow: hidden; }
+.relation-overview-selection { display: flex; align-items: flex-start; flex-direction: column; gap: 12px; padding: 25px; }
+.relation-overview-selection > svg { color: #79a28c; }
+.relation-overview-selection h3 { margin: 0; font-size: 16px; }
+.relation-overview-selection p { margin: 0; font-size: 12px; line-height: 1.8; color: #7b8b80; overflow-wrap: anywhere; }
+.relation-overview-directory, .relation-overview-schema-list { padding: 12px 0; font-size: 12px; }
+.relation-overview-directory summary, .relation-overview-schema-list summary { cursor: pointer; color: #506e5a; }
+.relation-overview-directory > div { display: grid; gap: 5px; margin-top: 10px; max-height: 260px; overflow: auto; }
+.relation-overview-directory > div > button { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e6ebe4; border-radius: 6px; background: white; text-align: left; font: inherit; color: #466451; cursor: pointer; }
+.relation-overview-directory > div > button.is-selected { background: #edf6ef; border-color: #91b59e; }
+.relation-overview-directory > div > button > span:first-of-type { flex: 1; min-width: 0; }
+.relation-overview-directory strong, .relation-overview-directory small { display: block; overflow-wrap: anywhere; }
+.relation-overview-directory small { font-size: 10px; color: #89988d; margin-top: 3px; }
+.relation-overview-schema-list > div { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+.relation-overview-schema-list .button { font-size: 11px; }
+@media (max-width: 1100px) { .relation-overview-workspace, .relation-overview-workspace.has-editor { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) {
+  .relation-overview-heading { align-items: flex-start; }
+  .relation-overview-heading .button { flex-shrink: 0; font-size: 11px; padding: 8px; }
+  .relation-overview-filters { gap: 10px; }
+  .relation-overview-search { width: 100%; }
+  .relation-overview-search input { flex: 1; width: 0; }
+  .relation-overview-filters select { max-width: 125px; }
+  .relation-overview-directory > div > button { padding: 8px; gap: 6px; }
+}

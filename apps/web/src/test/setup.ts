@@ -1,6 +1,14 @@
 import { afterEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 
+// JSDOM has no layout engine. Canvas geometry is covered in a real browser;
+// component tests still mount the real graph beside the configuration forms.
+if (!globalThis.ResizeObserver) globalThis.ResizeObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
 // jsdom does not lay out text ranges. Supply only missing geometry methods so
 // CodeMirror can schedule measurements; actual layout is verified in a browser.
 if (!Range.prototype.getClientRects) {

@@ -575,6 +575,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                 <DialogScope active={view === 'models'}>
                   <ModelsPage
                     api={session.api}
+                    layoutScope={`${session.identity.tenantId}:${session.account.user.id}`}
                     active={view === 'models'}
                     route={route}
                     onNavigate={navigateModel}

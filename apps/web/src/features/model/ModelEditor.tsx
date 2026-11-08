@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type KeyboardEvent } from 'react'
+import { lazy, Suspense, useEffect, useId, useState, type KeyboardEvent } from 'react'
 import { AlertCircle, ArrowLeft, ArrowRight, Check, FileCode2, LoaderCircle, Plus, RefreshCw, Save, Send, Trash2 } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { Definition, DefinitionRecord, Index, Kind, Link, Organization, Preview, Publication } from '../../lib/types'
@@ -12,6 +12,8 @@ import { LinkStorageEditor, validateLinkStorage } from './LinkStorageEditor'
 import { CallableImplementationEditor } from './CallableImplementationEditor'
 import { CallableRunner } from './CallableRunner'
 import { activeEntries, cloneDefinition, kindDescriptions, kindLabels, MAX_SCHEMA_INDEXES, MAX_SCHEMA_PROPERTIES, newDefinition, validateDefinition } from './model-helpers'
+
+const LinkVisualEditor = lazy(() => import('./LinkVisualEditor').then((module) => ({ default: module.LinkVisualEditor })))
 
 export interface PendingPublication {
   record: DefinitionRecord
@@ -28,7 +30,7 @@ const schemaTabs = [
 ] as const
 type EditorTab = typeof schemaTabs[number]['id']
 
-export function ModelEditor({ api, categoryId, categories, entries, currentEntries, initialRecord, initialKind, pending, onClose, onOrganizations, onSources, onSaved, onPending, onPublished, onNavigationGuard, active = true }: {
+export interface ModelEditorProps {
   api: ApiClient
   categoryId: string
   categories: Organization[]
@@ -45,7 +47,20 @@ export function ModelEditor({ api, categoryId, categories, entries, currentEntri
   onPublished: (record: DefinitionRecord) => Promise<void>
   onNavigationGuard?: (guard?: () => boolean) => void
   active?: boolean
-}) {
+  initialLink?: { sourceSchemaId: string; targetSchemaId: string }
+  onGraph?: () => void
+  layoutScope?: string
+  embedded?: boolean
+  onDefinitionChange?: (definition: Definition, dirty: boolean) => void
+}
+
+export function ModelEditor(props: ModelEditorProps) {
+  return props.initialRecord?.definition.link || props.initialKind === 'link'
+    ? <Suspense fallback={<p className="muted" role="status">正在加载关系编辑器…</p>}><LinkVisualEditor {...props} /></Suspense>
+    : <LegacyModelEditor {...props} />
+}
+
+function LegacyModelEditor({ api, categoryId, categories, entries, currentEntries, initialRecord, initialKind, pending, onClose, onOrganizations, onSources, onSaved, onPending, onPublished, onNavigationGuard, active = true }: ModelEditorProps) {
   const [record, setRecord] = useState(initialRecord)
   const [definition, setDefinition] = useState(() => initialRecord ? cloneDefinition(initialRecord.definition) : newDefinition(initialKind, categoryId))
   const [initialDefinition] = useState(() => initialRecord ? cloneDefinition(initialRecord.definition) : newDefinition(initialKind, categoryId))

@@ -24,8 +24,9 @@ describe('Link物理映射', () => {
       publish: vi.fn().mockResolvedValue({ id: 'publication', tenantId: 'tenant', definitionId: 'note-tags', status: 'succeeded' }),
     }
     render(<ModelEditor api={api as unknown as ApiClient} categoryId="category" categories={[{ id: 'category', tenantId: 'tenant', name: '知识库' }]} entries={[...schemas, initialRecord]} currentEntries={[...schemas, initialRecord]} initialKind="link" initialRecord={initialRecord} onClose={vi.fn()} onOrganizations={vi.fn()} onSaved={vi.fn().mockResolvedValue(undefined)} onPending={vi.fn()} onPublished={vi.fn().mockResolvedValue(undefined)} />)
+    expect((await screen.findByLabelText('来源模型') as HTMLSelectElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('tab', { name: '数据映射' }))
     expect(screen.getByText(/当前只有关系定义/)).toBeTruthy()
-    expect((screen.getByLabelText('来源模型') as HTMLSelectElement).disabled).toBe(true)
     fireEvent.change(screen.getByLabelText('关系存储方式'), { target: { value: 'managed' } })
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalled())

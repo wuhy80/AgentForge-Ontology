@@ -1,0 +1,58 @@
+.link-visual-editor { min-width: 0; }
+.link-visual-editor .model-editor-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.link-editor-body { min-width: 0; }
+.link-editor-workspace { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(330px, 1fr); border: 1px solid #e0e8de; border-radius: 10px; overflow: hidden; min-width: 0; background: #fff; }
+.link-editor-canvas { min-width: 0; background: #f8faf7; border-right: 1px solid #e0e8de; }
+.link-canvas-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 13px 14px; border-bottom: 1px solid #e4eae1; font-size: 11px; }
+.link-canvas-toolbar .button { min-height: 29px; padding: 4px 7px; font-size: 11px; }
+.link-view-switch { display: inline-flex; padding: 3px; background: #eaf0e6; border-radius: 6px; }
+.link-view-switch button { border: 0; border-radius: 4px; background: transparent; padding: 6px 9px; color: #6d806d; font: inherit; cursor: pointer; }
+.link-view-switch button[aria-pressed="true"] { background: #fff; color: #275c46; box-shadow: 0 1px 4px #244b3810; }
+.link-neighbors { display: flex; align-items: center; gap: 4px; margin-left: auto; color: #738472; }
+.link-neighbors input { accent-color: #277154; }
+.link-canvas-help { padding: 12px 15px; margin: 0; font-size: 11px; line-height: 1.7; border-top: 1px solid #e4eae1; }
+.link-editor-config { min-width: 0; }
+.link-editor-tabs { padding: 0 16px; margin: 0; gap: 0; }
+.link-editor-tabs button { flex: 1; padding: 14px 5px; justify-content: center; white-space: nowrap; }
+.link-config-panel { padding: 19px 17px; min-width: 0; }
+.link-config-panel[hidden] { display: none; }
+.link-config-panel .form-grid { gap: 13px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.link-config-panel label { min-width: 0; font-size: 11px; }
+.link-config-panel .field { min-width: 0; width: 100%; font-size: 12px; }
+.link-config-panel .model-section-heading { margin-top: 22px; margin-bottom: 13px; }
+.link-config-panel h3 { font-size: 13px; }
+.link-config-panel .model-link-storage > .model-section-heading { margin-top: 0; }
+.link-config-panel .model-link-diagram { flex-wrap: wrap; gap: 8px; padding: 14px; }
+.link-config-panel .model-link-diagram small { overflow-wrap: anywhere; }
+.link-config-panel .notice { margin-top: 12px; padding: 12px; font-size: 11px; }
+.link-cardinality-hint { background: #f0f6ed; border-radius: 6px; padding: 10px 12px; font-size: 11px; color: #5b755b; line-height: 1.8; }
+.link-definition-only { line-height: 1.8; }
+.link-selected-schema { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px; background: #eaf3e7; font-size: 11px; border-top: 1px solid #dce6d8; }
+.link-selected-schema span { color: #778a75; }
+.link-selected-schema a { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #35694c; }
+.link-editor-footer { position: static !important; margin-top: 0; padding-bottom: 0; }
+.link-physical-canvas { min-height: 500px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; color: #648064; text-align: center; gap: 12px; }
+.link-physical-canvas h3 { font-size: 15px; margin: 0; }
+.link-physical-canvas > p { font-size: 11px; line-height: 1.9; max-width: 360px; }
+.link-physical-chain { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; width: 100%; }
+.link-physical-step { display: flex; align-items: center; min-width: 0; gap: 10px; }
+.link-physical-card { display: grid; gap: 9px; min-width: 130px; max-width: 220px; padding: 20px 15px; border: 1px solid #cbdcc4; border-radius: 9px; background: #fff; box-shadow: 0 3px 10px #284a3010; }
+.link-physical-card strong { color: #36553c; font-size: 13px; }
+.link-physical-card code { overflow-wrap: anywhere; color: #7a8b75; font-size: 10px; }
+.link-data-preview { display: grid; gap: 13px; min-width: 0; }
+.link-data-preview > p { font-size: 11px; line-height: 1.8; margin: 0; }
+.link-data-preview > label, .link-preview-stage > label { display: grid; gap: 7px; }
+.link-preview-stage { display: grid; gap: 12px; min-width: 0; padding-top: 12px; border-top: 1px solid #e7ece4; }
+.link-preview-stage > strong { font-size: 12px; color: #4d6b52; }
+.link-preview-stage .table-wrap { max-width: 100%; }
+.link-preview-stage td code { font-size: 10px; overflow-wrap: anywhere; }
+.link-editor-embedded > .model-editor { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.link-editor-embedded .link-editor-workspace { display: block; border: 0; border-top: 1px solid #e0e8de; border-radius: 0; }
+.link-editor-embedded .model-editor-meta { padding: 13px 16px 0; margin-bottom: 12px; flex-wrap: wrap; }
+.link-editor-embedded .model-editor > .notice { margin: 0 14px 12px; }
+.link-editor-embedded .link-editor-footer { flex-direction: column; align-items: stretch; padding: 15px; border-top: 1px solid #e0e8de; }
+.link-editor-embedded .link-editor-footer .model-inline-actions { justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.link-editor-embedded .link-editor-footer .button { font-size: 11px; padding: 6px 9px; }
+.link-editor-embedded .model-preview { margin: 12px; padding: 12px; }
+@media (max-width: 1150px) { .link-editor-workspace { grid-template-columns: minmax(0, 1fr); } .link-editor-canvas { border-right: 0; border-bottom: 1px solid #e0e8de; } .link-editor-config .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .link-visual-editor .model-editor-page-heading { align-items: flex-start; flex-direction: column; } .link-visual-editor > .model-editor { padding: 12px; } .link-config-panel { padding: 16px 12px; } .link-canvas-toolbar { padding: 10px; } .link-neighbors { margin-left: 0; } .link-physical-canvas { min-height: 350px; padding: 20px 12px; } .link-physical-chain { flex-direction: column; } .link-physical-step { flex-direction: column; width: 100%; } .link-physical-step > svg { transform: rotate(90deg); } .link-physical-card { width: 100%; max-width: 240px; } .link-editor-footer .model-inline-actions { flex-wrap: wrap; justify-content: flex-end; } .link-editor-footer .button { padding: 6px 8px; font-size: 11px; } .link-editor-embedded > .model-editor { padding: 0; } }
