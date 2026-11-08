@@ -77,6 +77,20 @@ type DataSourceTestResult struct {
 	Compatibility SourceCompatibility `json:"compatibility"`
 }
 
+// SourceQuery is a bounded, read-only physical-table query for tenant admins.
+// It is distinct from business-model OntologySQL and requires a dedicated source.
+type SourceQuery struct {
+	SQL string `json:"sql"`
+}
+
+type SourceQueryResult struct {
+	Columns   []string    `json:"columns"`
+	Rows      [][]*string `json:"rows"`
+	HasMore   bool        `json:"hasMore"`
+	Limit     int         `json:"limit"`
+	ElapsedMS int64       `json:"elapsedMs"`
+}
+
 // SourceCompatibility is a server observation, never a client assertion. Saved
 // observations belong to the source configuration ETag and do not change it.
 type SourceCompatibility struct {

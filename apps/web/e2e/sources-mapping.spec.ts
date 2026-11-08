@@ -8,6 +8,7 @@ async function mappingFixture(page: Page) {
   const sources: DataSource[] = []
   const sourceWrites: DataSourceInput[] = []
   const sourceTests: { input: DataSourceInput; etag: string | undefined }[] = []
+  const sourceQueries: { sql: string; etag: string; csrf: string }[] = []
   const definitions: Definition[] = []
   const unhandled: string[] = []
   const compatibility = (input: DataSourceInput): SourceCompatibility => ({ connected: true, compatibilityStatus: 'supported', detectedProduct: input.driver, serverVersion: input.driver === 'mysql' ? '26.7.0' : '17.6', versionLine: input.driver === 'mysql' ? '26.7' : '17', capabilities: ['catalog', 'read', 'query', 'createTable', 'addColumn', 'createIndex'], checkedAt: '2026-11-07T08:00:00Z' })
@@ -62,13 +63,19 @@ async function mappingFixture(page: Page) {
       return reply(source, 201)
     }
     if (/^\/api\/data\/sources\/source-\d\/test$/.test(path)) {
-      const input = request.postDataJSON() as DataSourceInput
+      const input = (request.postDataJSON() || sources.find((source) => path.includes(`/${source.id}/`))) as DataSourceInput
       sourceTests.push({ input: structuredClone(input), etag: request.headers()['if-match'] })
       const checked = compatibility(input)
       if (input.host === 'different-version.invalid') {
         checked.compatibilityStatus = 'mismatch'; checked.serverVersion = '8.4.7'; checked.versionLine = '8.4'; checked.message = '预期MySQL 26.7，实际为8.4。'
       }
       return reply({ success: checked.compatibilityStatus === 'supported', serverVersion: checked.serverVersion, compatibility: checked })
+    }
+    const sourcePath = path.match(/^\/api\/data\/sources\/(source-\d)$/)
+    if (sourcePath && method === 'GET') return reply(sources.find((source) => source.id === sourcePath[1]))
+    if (/^\/api\/data\/sources\/source-\d\/query$/.test(path)) {
+      sourceQueries.push({ sql: request.postDataJSON().sql, etag: request.headers()['if-match'], csrf: request.headers()['x-csrf-token'] })
+      return reply({ columns: ['金额', '备注'], rows: [['9007199254740993.0001', '中文记录'], [null, '']], limit: 100, hasMore: false, elapsedMs: 2 })
     }
     const tablePath = path.match(/^\/api\/data\/sources\/(source-\d)\/tables(?:\/([^/]+))?$/)
     if (tablePath) {
@@ -78,8 +85,47 @@ async function mappingFixture(page: Page) {
     unhandled.push(`${method} ${path}`)
     return reply({ error: { code: 'unhandled', message: '未定义的隔离接口' } }, 404)
   })
-  return { sources, sourceWrites, sourceTests, definitions, unhandled }
+  return { sources, sourceWrites, sourceTests, sourceQueries, definitions, unhandled }
 }
+
+test('数据源表格提供测试、编辑和管理，管理查看字段索引并执行只读SQL，宽窄屏均可用', async ({ page }) => {
+  const state = await mappingFixture(page)
+  state.sources.push({ id: 'source-0', tenantId: 'mapping-fixture', name: '独立业务库', driver: 'mysql', host: 'fixture.invalid', port: 3306, database: 'main', username: 'reader', tlsMode: 'disable', tenantIsolation: 'dedicated', enabled: true, passwordSet: true, etag: 'source-etag' })
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.goto('/#sources')
+  const directory = page.getByRole('region', { name: '已配置的数据源' })
+  const row = directory.getByRole('row', { name: /独立业务库/ })
+  await expect(directory.getByRole('columnheader', { name: '操作', exact: true })).toBeVisible()
+  await row.getByRole('button', { name: '测试', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('连接成功')
+  await expect(page.getByRole('region', { name: '数据源连接配置' })).toHaveCount(0)
+  await row.getByRole('button', { name: '编辑 独立业务库', exact: true }).click()
+  await expect(page.getByLabel('数据库主机', { exact: true })).toHaveValue('fixture.invalid')
+  await page.getByRole('button', { name: '关闭连接编辑' }).click()
+  await row.getByRole('button', { name: '管理', exact: true }).click()
+  await expect(page.getByRole('region', { name: '数据库基础信息' })).toContainText('main')
+  await page.getByRole('button', { name: 'main.equipment', exact: true }).click()
+  await expect(page.getByRole('region', { name: '数据源表结构' }).getByRole('cell', { name: 'PRIMARY', exact: true })).toBeVisible()
+  await expect(page.getByLabel('SQL 语句')).toHaveValue('SELECT * FROM `main`.`equipment` LIMIT 100;')
+  await page.getByRole('button', { name: '执行 SQL', exact: true }).click()
+  const results = page.getByRole('region', { name: 'SQL 查询结果' })
+  await expect(results.getByRole('cell', { name: '9007199254740993.0001', exact: true })).toBeVisible()
+  await expect(results.getByRole('cell', { name: 'NULL', exact: true })).toBeVisible()
+  await expect(results.getByRole('cell', { name: '空字符串', exact: true })).toBeVisible()
+  expect(state.sourceQueries).toEqual([{ sql: 'SELECT * FROM `main`.`equipment` LIMIT 100;', etag: '"source-etag"', csrf: 'fixture-csrf' }])
+  for (const width of [1920, 1440, 760, 390]) {
+    await page.setViewportSize({ width, height: 1000 })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  }
+  await page.getByLabel('SQL 语句').fill('SELECT name FROM equipment LIMIT 2;')
+  await expect(results).toHaveCount(0)
+  await page.getByRole('button', { name: '返回数据源列表' }).click()
+  await expect(directory).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  expect(state.unhandled).toEqual([])
+  expect(errors).toEqual([])
+})
 
 test('数据源独立配置后，模型逐属性跨源映射并从数据库读取属性', async ({ page }) => {
   const state = await mappingFixture(page)

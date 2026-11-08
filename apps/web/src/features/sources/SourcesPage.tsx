@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Check, Database, LoaderCircle, Plus, RefreshCw, Save, Unplug } from 'lucide-react'
+import { Check, Database, LoaderCircle, Plus, RefreshCw, Save, Unplug, Pencil, Settings2, X } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { DataSource, DataSourceInput, SourceCompatibility, SourceTable, SourceTableInfo, SourceVersionOption } from '../../lib/types'
 import './sources.css'
+import { SourceManager } from './SourceManager'
 
 const newSource = (): DataSourceInput => ({ name: '', driver: 'mysql', host: '', port: 3306, database: '', username: '', password: '', tlsMode: 'require', enabled: true, tenantIsolation: 'column', versionPolicy: 'auto' })
 const driverNames = { mysql: 'MySQL', postgresql: 'PostgreSQL' }
@@ -28,6 +29,7 @@ export function SourcesPage({ api, administrator, active = true }: { api: ApiCli
   const [sources, setSources] = useState<DataSource[]>([])
   const [versions, setVersions] = useState<SourceVersionOption[]>([])
   const [editing, setEditing] = useState<DataSource | 'new'>()
+  const [managing, setManaging] = useState<DataSource>()
   const [form, setForm] = useState<DataSourceInput>(newSource)
   const [clearPassword, setClearPassword] = useState(false)
   const [busy, setBusy] = useState('')
@@ -43,13 +45,14 @@ export function SourcesPage({ api, administrator, active = true }: { api: ApiCli
   function report(cause: unknown) {
     setError(cause instanceof Error ? cause.message : '数据源操作失败。')
     if (cause instanceof ApiError && (cause.status === 401 || cause.status === 403)) {
-      setSources([]); setVersions([]); setEditing(undefined); setForm(newSource()); setTables([]); setTable(undefined); setCompatibility(undefined)
+      setSources([]); setVersions([]); setEditing(undefined); setManaging(undefined); setForm(newSource()); setTables([]); setTable(undefined); setCompatibility(undefined)
     }
   }
   useEffect(() => {
     const controller = new AbortController()
     if (!active || !administrator) {
       sequence.current++
+      setBusy('')
       setForm((value) => ({ ...value, password: '' }))
       setCompatibility(undefined); setMessage('')
       return
@@ -71,6 +74,25 @@ export function SourcesPage({ api, administrator, active = true }: { api: ApiCli
       database: source.database, username: source.username ?? '', password: '', tlsMode: source.tlsMode ?? 'require', enabled: source.enabled, tenantIsolation: source.tenantIsolation,
       versionPolicy: source.versionPolicy ?? 'auto', expectedVersionLine: source.expectedVersionLine,
     })
+  }
+  function closeEditor() {
+    sequence.current++; setEditing(undefined); setForm(newSource()); setCompatibility(undefined); setTables([]); setTable(undefined); setError(''); setMessage('')
+  }
+  function manage(source: DataSource) {
+    closeEditor(); setManaging(source)
+  }
+  async function testSaved(source: DataSource) {
+    if (busy) return
+    const request = ++sequence.current
+    setBusy(`test:${source.id}`); setError(''); setMessage('')
+    try {
+      const result = await api.testDataSource(source.id)
+      if (request !== sequence.current) return
+      setSources((items) => items.map((item) => item.id === source.id ? { ...item, compatibility: result.compatibility } : item))
+      if (result.success && result.compatibility.compatibilityStatus === 'supported') setMessage(`${source.name}：连接成功 · ${driverNames[source.driver]} ${result.serverVersion}`)
+      else setError(`${source.name}：${result.compatibility.message || statusNames[result.compatibility.compatibilityStatus]}`)
+    } catch (cause) { if (request === sequence.current) report(cause) }
+    finally { if (request === sequence.current) setBusy('') }
   }
   function changeConnection(patch: Partial<DataSourceInput>) {
     setForm((value) => ({ ...value, ...patch })); setCompatibility(undefined); setCheckContext('当前编辑配置'); setMessage(''); setError(''); setTables([]); setTable(undefined)
@@ -124,6 +146,7 @@ export function SourcesPage({ api, administrator, active = true }: { api: ApiCli
     catch (cause) { if (request === sequence.current) report(cause) }
     finally { if (request === sequence.current) setBusy('') }
   }
+  if (administrator && managing) return <SourceManager key={managing.id} api={api} source={managing} active={active} onBack={() => { setManaging(undefined); setRevision((value) => value + 1) }} onDenied={report} />
   return <div className="sources-page">
     <div className="sources-heading"><div><h1>数据源配置</h1><p className="muted">管理数据库连接，供对象模型选择主表及属性来源。</p></div>{administrator && <div className="sources-actions"><button type="button" className="button subtle" disabled={!!busy} aria-label="刷新数据源" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} /></button><button type="button" className="button primary" disabled={!!busy} onClick={() => edit('new')}><Plus size={16} />添加数据源</button></div>}</div>
     {!administrator ? <div className="card empty-state"><Database size={30} /><h2>数据源由租户管理员配置</h2><p className="muted">模型编辑可选择已获授权的数据源与表列。</p></div> : <>
@@ -131,9 +154,15 @@ export function SourcesPage({ api, administrator, active = true }: { api: ApiCli
       {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
       <div className="sources-layout">
         <section className="card sources-directory" aria-label="已配置的数据源"><h2>已配置的数据源 <span className="muted">{sources.length}</span></h2>
-          {!sources.length ? <p className="muted">{busy === 'load' ? '正在读取…' : '尚未配置数据源。'}</p> : <ul>{sources.map((source) => <li key={source.id}><button type="button" disabled={!!busy} className={editing !== 'new' && editing?.id === source.id ? 'is-active' : ''} onClick={() => edit(source)}><Database size={17} /><span><strong>{source.name}</strong><small>{driverNames[source.driver]} · {source.database}</small><small>{source.compatibility?.serverVersion || '版本待识别'} · {source.compatibility ? statusNames[source.compatibility.compatibilityStatus] : '待检测'}</small></span><span className={`badge ${source.enabled ? '' : 'muted'}`}>{source.enabled ? '启用' : '停用'}</span></button></li>)}</ul>}
+          <div className="table-wrap"><table className="sources-list"><thead><tr><th>数据源名称</th><th>类型</th><th>主机 / 端口</th><th>数据库</th><th>版本 / 兼容状态</th><th>状态</th><th>操作</th></tr></thead><tbody>
+            {!sources.length ? <tr><td colSpan={7} className="sources-list-empty">{busy === 'load' ? '正在读取…' : '尚未配置数据源，点击“添加数据源”开始。'}</td></tr> : sources.map((source) => <tr key={source.id} className={editing !== 'new' && editing?.id === source.id ? 'is-active' : ''}>
+              <td><strong>{source.name}</strong></td><td>{driverNames[source.driver]}</td><td>{source.host || '—'}:{source.port || (source.driver === 'mysql' ? 3306 : 5432)}</td><td>{source.database}</td>
+              <td>{source.compatibility?.serverVersion || '版本待识别'} · {source.compatibility ? statusNames[source.compatibility.compatibilityStatus] : '待检测'}</td><td><span className={`badge ${source.enabled ? '' : 'muted'}`}>{source.enabled ? '启用' : '停用'}</span></td>
+              <td><div className="sources-row-actions"><button type="button" className="button subtle" disabled={!!busy || !source.enabled} onClick={() => void testSaved(source)}>{busy === `test:${source.id}` ? <LoaderCircle size={14} className="spin" /> : <Unplug size={14} />}测试</button><button type="button" className="button subtle" aria-label={`编辑 ${source.name}`} disabled={!!busy} onClick={() => edit(source)}><Pencil size={14} />编辑</button><button type="button" className="button subtle" disabled={!!busy || !source.enabled} onClick={() => manage(source)}><Settings2 size={14} />管理</button></div></td>
+            </tr>)}
+          </tbody></table></div>
         </section>
-        {editing ? <section className="card sources-editor" aria-label="数据源连接配置"><h2>{editing === 'new' ? '添加数据源' : editing.name}</h2><form onSubmit={(event) => void save(event)}>
+        {editing && <section className="card sources-editor" aria-label="数据源连接配置"><div className="sources-panel-heading"><h2>{editing === 'new' ? '添加数据源' : `编辑 ${editing.name}`}</h2><button type="button" className="button subtle" disabled={!!busy} aria-label="关闭连接编辑" onClick={closeEditor}><X size={16} />收起</button></div><form onSubmit={(event) => void save(event)}>
           <fieldset disabled={!!busy} className="sources-fields"><label>数据源名称<input className="field" aria-label="数据源名称" required maxLength={128} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
             <label>数据库类型<select className="field" aria-label="数据库类型" value={form.driver} onChange={(event) => { const driver = event.target.value as DataSourceInput['driver']; changeConnection({ driver, port: driver === 'mysql' ? 3306 : 5432, versionPolicy: 'auto', expectedVersionLine: undefined }) }}><option value="mysql">MySQL</option><option value="postgresql">PostgreSQL</option></select></label>
             <label>数据库版本<select className="field" aria-label="数据库版本" value={form.versionPolicy === 'pinned' ? form.expectedVersionLine ?? '' : 'auto'} onChange={(event) => changeConnection({ versionPolicy: event.target.value === 'auto' ? 'auto' : 'pinned', expectedVersionLine: event.target.value === 'auto' ? undefined : event.target.value })}><option value="auto">自动识别</option>{form.versionPolicy === 'pinned' && !versions.some((option) => option.driver === form.driver && option.versionLine === form.expectedVersionLine) && <option value={form.expectedVersionLine ?? ''} disabled>{form.expectedVersionLine || '未指定版本'}（未登记）</option>}{versions.filter((option) => option.driver === form.driver).map((option) => <option key={option.versionLine} value={option.versionLine} disabled={option.status !== 'supported'}>{option.label}{option.status === 'pending' ? '（待适配）' : ''}</option>)}</select><small className="muted">指定版本会核对真实服务器；自动识别也仅开放已适配范围。</small></label>
@@ -152,7 +181,7 @@ export function SourcesPage({ api, administrator, active = true }: { api: ApiCli
         </form>
           {tables.length > 0 && <section className="sources-tables" aria-label="数据源表目录"><h3>数据库表</h3><div className="sources-table-buttons">{tables.map((item) => <button type="button" className="button subtle" disabled={!!busy} key={`${item.namespace}:${item.name}`} onClick={() => void inspect(item)}>{item.namespace}.{item.name}</button>)}</div></section>}
           {table && <section className="sources-tables" aria-label="数据源表结构"><h3>{table.namespace}.{table.name}</h3><div className="table-wrap"><table><thead><tr><th>列</th><th>数据库类型</th><th>模型类型</th><th>约束</th></tr></thead><tbody>{table.columns.map((column) => <tr key={column.name}><td>{column.name}</td><td>{column.databaseType}</td><td>{column.dataType || '暂不支持'}</td><td>{[column.primaryKey ? '主键' : '', column.nullable ? '可空' : '非空', column.generated ? '生成列' : ''].filter(Boolean).join(' · ')}</td></tr>)}</tbody></table></div></section>}
-        </section> : <section className="card empty-state"><Database size={32} /><h2>选择或添加数据源</h2><p className="muted">支持 MySQL 与 PostgreSQL 的连接配置及表结构发现。</p></section>}
+        </section>}
       </div>
     </>}
   </div>

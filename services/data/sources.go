@@ -41,6 +41,7 @@ func (h *handler) registerSources(mux *http.ServeMux) {
 	mux.HandleFunc("POST /data/sources/{id}/test", wrap(h.testSource))
 	mux.HandleFunc("GET /data/sources/{id}/tables", wrap(h.listSourceTablesHTTP))
 	mux.HandleFunc("GET /data/sources/{id}/tables/{table}", wrap(h.sourceTableHTTP))
+	mux.HandleFunc("POST /data/sources/{id}/query", wrap(h.sourceQueryHTTP))
 }
 
 func (h *handler) sourceAdmin(r *http.Request) (c.Principal, error) {

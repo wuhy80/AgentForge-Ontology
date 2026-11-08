@@ -2,7 +2,7 @@ import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
-  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SchemaStorageMapping, SourceVersionOption,
+  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SourceQueryResult, SchemaStorageMapping, SourceVersionOption,
   SchemaLink, LinkInstance,
   QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
   QueryPathsRequest, QueryPathsResult, QueryFieldInsertionRequest, QueryFieldInsertionResult,
@@ -217,6 +217,12 @@ export class ApiClient {
   }
   createDataSource(input: DataSourceInput): Promise<DataSource> {
     return this.request('/api/data/sources', { method: 'POST', body: input })
+  }
+  getDataSource(id: string, signal?: AbortSignal): Promise<DataSource> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}`, { signal })
+  }
+  queryDataSource(id: string, sql: string, etag: string, signal?: AbortSignal): Promise<SourceQueryResult> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}/query`, { method: 'POST', body: { sql }, etag, signal })
   }
   updateDataSource(id: string, input: DataSourceInput, etag: string): Promise<DataSource> {
     return this.request(`/api/data/sources/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag })

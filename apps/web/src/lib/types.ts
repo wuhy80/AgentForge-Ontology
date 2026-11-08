@@ -116,6 +116,7 @@ export interface SourceColumn {
 export interface SourceIndex { name: string; unique: boolean; primary: boolean; columns: string[]; predicate?: string }
 export interface SourceTable { namespace: string; name: string; columns: SourceColumn[]; indexes: SourceIndex[]; signature: string }
 export interface SourceTestResult { success: boolean; serverVersion: string; compatibility: SourceCompatibility }
+export interface SourceQueryResult { columns: string[]; rows: (string | null)[][]; hasMore: boolean; limit: number; elapsedMs: number }
 export interface StorageMappingTable {
   dataSourceId?: string
   dataSourceName: string

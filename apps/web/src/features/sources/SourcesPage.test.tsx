@@ -134,11 +134,11 @@ describe('数据源配置', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存数据源' }))
     await screen.findByText('数据源已保存。可测试连接并查看表结构。')
     expect(updateDataSource).toHaveBeenCalledWith('source-a', expect.objectContaining({ versionPolicy: 'pinned', expectedVersionLine: '26.7' }), 'source-etag')
-    expect(screen.getByRole('button', { name: /设备数据源/ }).textContent).toContain('26.7.0 · 兼容')
+    expect(screen.getByRole('row', { name: /设备数据源/ }).textContent).toContain('26.7.0 · 兼容')
     expect(screen.getByLabelText('实际数据库版本').textContent).toBe('26.7.0')
     fireEvent.change(screen.getByLabelText('数据库密码'), { target: { value: 'new-secret' } })
     expect(screen.getByLabelText('兼容状态').textContent).toBe('待检测')
-    expect(screen.getByRole('button', { name: /设备数据源/ }).textContent).toContain('26.7.0 · 兼容')
+    expect(screen.getByRole('row', { name: /设备数据源/ }).textContent).toContain('26.7.0 · 兼容')
   })
 
   it('页面离开后不接受迟到的连接检查结果', async () => {

@@ -32,6 +32,7 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `GET /data/source-versions` | 管理员或模型作者读取服务端版本系列和supported/pending状态 |
 | `POST /data/sources/test`、`POST /data/sources/{id}/test` | 管理员测试连接与兼容状态；已有源可提交完整表单及If-Match并复用省略密码，空体/null沿用已保存配置测试 |
 | `GET /data/sources/{id}/tables`、`GET /data/sources/{id}/tables/{table}` | 只读表、列及索引目录；可选 namespace 参数 |
+| `POST /data/sources/{id}/query` | 当前租户管理员携带来源配置If-Match及`contracts.SourceQuery`，查询专属来源；有界单表SELECT，返回`SourceQueryResult`。实际语法、限额及共享来源拒绝规则见[数据源配置](../../docs/数据源.md#列表与数据库管理2026-11-07) |
 | `GET /data/schemas/{schemaId}/storage-mapping` | 按对象 `definition.edit` 授权读取当前生效的主表及逐属性物理映射，含实际目录的列类型、存在状态；不返回凭据或业务行 |
 | `POST /data/schemas/{schemaId}/instances` | 显式创建；必须提交幂等键 |
 | `GET /data/schemas/{schemaId}/instances/{entityId}` | 按当前行列授权读取 |

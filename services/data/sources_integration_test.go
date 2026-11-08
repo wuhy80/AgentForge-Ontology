@@ -71,6 +71,19 @@ func TestMySQLSourceConfigurationLifecycleIsolationAndBoundEndpoint(t *testing.T
 	if json.Unmarshal(w.Body.Bytes(), &source) != nil || !source.PasswordSet {
 		t.Fatal("source creation response missing safe credential marker")
 	}
+	query := c.SourceQuery{SQL: "SELECT * FROM orders LIMIT 1"}
+	for _, check := range []struct {
+		tenant, etag string
+		admin        bool
+		status       int
+	}{
+		{tenant, source.ETag, false, 403}, {other, source.ETag, true, 404},
+		{tenant, "", true, 428}, {tenant, "stale", true, 412}, {tenant, source.ETag, true, 409},
+	} {
+		if response := request(check.tenant, "POST", "/data/sources/"+source.ID+"/query", query, check.etag, check.admin); response.Code != check.status {
+			t.Fatalf("query tenant/admin/etag/disabled boundary: got %d want %d", response.Code, check.status)
+		}
+	}
 	var persisted string
 	if err = engine.DB().QueryRowContext(ctx, "SELECT CONCAT(config_json,secret_cipher) FROM af_data_sources WHERE tenant_id=? AND id=?", tenant, source.ID).Scan(&persisted); err != nil || strings.Contains(persisted, *input.Password) {
 		t.Fatal("plaintext database password was persisted")
