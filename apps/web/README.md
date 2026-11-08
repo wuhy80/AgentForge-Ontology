@@ -44,7 +44,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [关系可视化](src/features/model/RelationOverview.tsx)、[关系详情](src/features/model/LinkVisualEditor.tsx) | `#models?view=graph`查看当前分类关系，选线侧栏编辑；详情及对象Link页共用画布，支持拖线创建、个人布局、草稿/预览/发布与当前态双向数据预览；[主要规则](../../docs/模块/Link.md#关系可视化管理2026-11-08首批已实现) |
 | [源码编辑器](src/components/PythonSourceEditor.tsx) | Function及直接源码Action独立使用的CodeMirror编辑器；Python、JavaScript、Go高亮、中文参数补全、语法辅助、格式化及参数改名引用提醒；共同边界见[Function](../../docs/模块/Function.md#javascript与go扩展2026-11-08已确认) |
 | [数据源配置](src/features/sources/SourcesPage.tsx) | 表格列出连接及兼容状态，每行测试/编辑/管理；密码只写入，编辑沿用版本、TLS、租户隔离及ETag |
-| [数据库管理](src/features/sources/SourceManager.tsx) | 重新读取数据库基础信息、搜索表目录、查看字段及索引；专属来源执行有界单表只读SQL并展示结果，共享来源通过模型查询；实际权限与SQL范围见[数据源](../../docs/数据源.md#列表与数据库管理2026-11-07) |
+| [数据库管理](src/features/sources/SourceManager.tsx) | 基础信息与真实指标网格、每页20条表目录、字段/主键列计数、默认值/注释/索引及字段/预览/SQL Tab；专属来源显式执行有界只读查询，共享来源禁用物理业务行读取；[主要规则](../../docs/数据源.md#数据库管理工作台2026-11-08已确认) |
 | [数据探索](src/features/query/QueryPage.tsx) | 默认OntologySQL，顶部指导、左侧模型/右侧字段、双击与键盘插入、CodeMirror懒加载、参数、服务端补全/诊断、结果详情/关联及续页；保留可视化完整子集转换 |
 | [实例详情](src/features/query/InstanceDialog.tsx) | 单条创建/读取/修改/确认删除，保持精度、幂等及并发凭证 |
 | [用户与权限](src/features/admin/AdminPage.tsx) | 管理员创建/编辑账号、启停与密码重置、直接角色与用户组、权限草稿/生效/试算及最近200条审计 |
@@ -64,6 +64,10 @@ npm.cmd run test:e2e -- workspace.spec.ts
 首次登录检查两个服务的能力接口；退出、过期或401清除本会话页面数据。查询及实例访问收到403时清除对应旧结果；草稿目录拒绝或对象被过滤时清除私有候选，恢复未确认发布前重新验证读取权限，不用旧缓存替代当前授权。
 
 对象页的 Tab 规则统一见 [Schema](../../docs/模块/Schema.md#2-建模方向与预览)。关联关系由两端稳定 ID 筛选，关联动作使用 [Action](../../docs/模块/Action.md) 的目标对象 ID；相关列表包含授权可见的当前定义及草稿，不把关联动作当作可执行按钮。
+
+2026-11-08已完善数据库管理：顶部信息网格与真实指标，下方为每页20条的表目录及右侧“字段详情/表数据预览/SQL控制台”Tab，默认字段详情。字段/主键列计数、默认值、注释与索引来自真实目录；预览须管理员显式加载，仅专属来源可用，切表、切Tab、刷新或离开取消旧请求并清理业务结果。指标不可用显示原因，MySQL实例QPS和存储估算按实际口径展示，PostgreSQL不以TPS替代QPS。协议见[数据源](../../docs/数据源.md#数据库管理工作台2026-11-08已确认)。
+
+本轮全量40个文件/360项单元与交互测试通过；补充指标缺失及并行403竞态后，SourceManager定向16项通过，最终TypeScript/Vite构建通过。新增[管理布局](e2e/source-manager-layout.spec.ts)3条及既有[数据源映射](e2e/sources-mapping.spec.ts)3条隔离Edge用例通过，并人工核对1440px/390px截图。浏览器使用模拟API；真实浏览器登录尝试因本地缓存账号返回401未取得会话，该项未完成，未重置账号或密码。真实数据库和HTTP边界结果分别见项目总览。
 
 Link 编辑页可配置实际数据库映射，数据探索从每条结果的“关联数据”进入单跳正反查询并分页；平台关系可添加/移除，已有外部关系只读。未绑定关系显示仅定义，不把“已生效”展示成已有事实。操作使用独立 `link.query/create/delete`，现有租户由管理员在权限配置中显式添加并生效；两端对象仍独立授权。协议与当前限制见 [Link](../../docs/模块/Link.md#当前关系数据库实现2026-11-07)，同库能力不代表跨源关系、多跳或图查询已经开放。
 

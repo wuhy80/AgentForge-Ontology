@@ -100,7 +100,25 @@ export interface DataSourceInput {
   versionPolicy?: SourceVersionPolicy
   expectedVersionLine?: string
 }
-export interface SourceTableInfo { namespace: string; name: string; type: string }
+export interface SourceDatabaseMetric {
+  available: boolean
+  value?: string
+  unit: 'connections' | 'bytes' | 'queries/s'
+  scope: 'instance' | 'database'
+  basis: string
+  sampleWindowMs?: number
+  reason?: string
+}
+export interface SourceOverview {
+  sourceId: string
+  etag: string
+  checkedAt: string
+  serverVersion: string
+  database: string
+  charset?: string
+  metrics: { connections: SourceDatabaseMetric; storageBytes: SourceDatabaseMetric; qps: SourceDatabaseMetric }
+}
+export interface SourceTableInfo { namespace: string; name: string; type: string; columnCount?: number; primaryKeyCount?: number }
 export interface SourceColumn {
   name: string
   databaseType: string
@@ -112,6 +130,8 @@ export interface SourceColumn {
   scale?: number
   maxLength?: number
   position: number
+  defaultValue?: string | null
+  comment?: string
 }
 export interface SourceIndex { name: string; unique: boolean; primary: boolean; columns: string[]; predicate?: string }
 export interface SourceTable { namespace: string; name: string; columns: SourceColumn[]; indexes: SourceIndex[]; signature: string }

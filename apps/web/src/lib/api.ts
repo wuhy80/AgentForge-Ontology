@@ -2,7 +2,7 @@ import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation, ScriptRuntime, SourceToolResult,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
-  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SourceQueryResult, SchemaStorageMapping, SourceVersionOption,
+  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SourceQueryResult, SchemaStorageMapping, SourceVersionOption, SourceOverview,
   SchemaLink, LinkInstance,
   QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
   QueryPathsRequest, QueryPathsResult, QueryFieldInsertionRequest, QueryFieldInsertionResult,
@@ -226,6 +226,9 @@ export class ApiClient {
   }
   getDataSource(id: string, signal?: AbortSignal): Promise<DataSource> {
     return this.request(`/api/data/sources/${encodeURIComponent(id)}`, { signal })
+  }
+  getSourceOverview(id: string, signal?: AbortSignal): Promise<SourceOverview> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}/overview`, { signal })
   }
   queryDataSource(id: string, sql: string, etag: string, signal?: AbortSignal): Promise<SourceQueryResult> {
     return this.request(`/api/data/sources/${encodeURIComponent(id)}/query`, { method: 'POST', body: { sql }, etag, signal })

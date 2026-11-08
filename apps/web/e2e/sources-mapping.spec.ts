@@ -73,6 +73,12 @@ async function mappingFixture(page: Page) {
     }
     const sourcePath = path.match(/^\/api\/data\/sources\/(source-\d)$/)
     if (sourcePath && method === 'GET') return reply(sources.find((source) => source.id === sourcePath[1]))
+    const overviewPath = path.match(/^\/api\/data\/sources\/(source-\d)\/overview$/)
+    if (overviewPath && method === 'GET') {
+      const source = sources.find((source) => source.id === overviewPath[1])!
+      const metric = (unit: string) => ({ available: false, unit, scope: 'database', basis: '隔离浏览器测试不连接数据库', reason: '此用例未提供数据库指标' })
+      return reply({ sourceId: source.id, etag: source.etag, database: source.database, serverVersion: source.compatibility?.serverVersion || '26.7.0', charset: 'utf8mb4', checkedAt: '2026-11-08T02:00:00Z', metrics: { connections: metric('connections'), storageBytes: metric('bytes'), qps: metric('queries/s') } })
+    }
     if (/^\/api\/data\/sources\/source-\d\/query$/.test(path)) {
       sourceQueries.push({ sql: request.postDataJSON().sql, etag: request.headers()['if-match'], csrf: request.headers()['x-csrf-token'] })
       return reply({ columns: ['金额', '备注'], rows: [['9007199254740993.0001', '中文记录'], [null, '']], limit: 100, hasMore: false, elapsedMs: 2 })
@@ -107,6 +113,7 @@ test('数据源表格提供测试、编辑和管理，管理查看字段索引�
   await expect(page.getByRole('region', { name: '数据库基础信息' })).toContainText('main')
   await page.getByRole('button', { name: 'main.equipment', exact: true }).click()
   await expect(page.getByRole('region', { name: '数据源表结构' }).getByRole('cell', { name: 'PRIMARY', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'SQL控制台', exact: true }).click()
   await expect(page.getByLabel('SQL 语句')).toHaveValue('SELECT * FROM `main`.`equipment` LIMIT 100;')
   await page.getByRole('button', { name: '执行 SQL', exact: true }).click()
   const results = page.getByRole('region', { name: 'SQL 查询结果' })

@@ -3,9 +3,11 @@ package data
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -95,7 +97,64 @@ func listSourceTables(ctx context.Context, db *sql.DB, source c.DataSource, name
 	if rows.Err() != nil {
 		return nil, problem(422, "source_catalog_failed", "数据源表目录读取中断")
 	}
+	// Close the base cursor before optional aggregate queries, so a single-slot
+	// source pool does not block. Directory enrichment stays bounded and never
+	// inspects each table separately.
+	_ = rows.Close()
+	enrichSourceTableCounts(ctx, db, source, namespace, out)
 	return out, nil
+}
+
+func enrichSourceTableCounts(ctx context.Context, db *sql.DB, source c.DataSource, namespace string, tables []c.TableInfo) {
+	queries := []string{
+		`SELECT TABLE_NAME,COUNT(*) FROM information_schema.columns WHERE TABLE_SCHEMA=? GROUP BY TABLE_NAME LIMIT 1001`,
+		`SELECT TABLE_NAME,COUNT(*) FROM information_schema.statistics WHERE TABLE_SCHEMA=? AND INDEX_NAME='PRIMARY' GROUP BY TABLE_NAME LIMIT 1001`,
+	}
+	if source.Driver == "postgresql" {
+		queries = []string{
+			`SELECT table_name,COUNT(*) FROM information_schema.columns WHERE table_schema=$1 GROUP BY table_name LIMIT 1001`,
+			`SELECT t.relname,SUM(i.indnkeyatts) FROM pg_catalog.pg_class t JOIN pg_catalog.pg_namespace n ON n.oid=t.relnamespace JOIN pg_catalog.pg_index i ON i.indrelid=t.oid AND i.indisprimary AND i.indisvalid AND i.indisready WHERE n.nspname=$1 GROUP BY t.relname LIMIT 1001`,
+		}
+	}
+	for index, query := range queries {
+		counts, ok := readSourceTableCounts(ctx, db, query, namespace)
+		if !ok {
+			continue
+		}
+		for i := range tables {
+			count, returned := counts[tables[i].Name]
+			if index == 0 {
+				if returned {
+					tables[i].ColumnCount = &count
+				}
+			} else {
+				// A completed primary-index catalog query has no row for a
+				// table without a primary key. Column visibility can differ
+				// from table visibility, so absent column counts stay unknown.
+				tables[i].PrimaryKeyCount = &count
+			}
+		}
+	}
+}
+
+func readSourceTableCounts(ctx context.Context, db *sql.DB, query, namespace string) (map[string]int, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, query, namespace)
+	if err != nil {
+		return nil, false
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var name string
+		var count int
+		if rows.Scan(&name, &count) != nil || count < 0 || len(counts) >= 1000 {
+			return nil, false
+		}
+		counts[name] = count
+	}
+	return counts, rows.Err() == nil
 }
 
 func readSourceTable(ctx context.Context, db *sql.DB, source c.DataSource, namespace, table string) (c.SourceTable, error) {
@@ -154,16 +213,21 @@ func readSourceTable(ctx context.Context, db *sql.DB, source c.DataSource, names
 			}
 		}
 	}
+	structuralColumns := append([]c.SourceColumn{}, out.Columns...)
+	for i := range structuralColumns {
+		structuralColumns[i].DefaultValue = nil
+		structuralColumns[i].Comment = ""
+	}
 	out.Signature = digest(struct {
 		Columns []c.SourceColumn
 		Indexes []c.SourceIndex
 		Version string
-	}{out.Columns, out.Indexes, sourceVersionSignature(source)})
+	}{structuralColumns, out.Indexes, sourceVersionSignature(source)})
 	return out, nil
 }
 
 func readMySQLColumns(ctx context.Context, db *sql.DB, out *c.SourceTable) error {
-	rows, err := db.QueryContext(ctx, `SELECT COLUMN_NAME,COLUMN_TYPE,DATA_TYPE,IS_NULLABLE,EXTRA,COALESCE(NUMERIC_PRECISION,0),COALESCE(NUMERIC_SCALE,0),COALESCE(CHARACTER_MAXIMUM_LENGTH,0),ORDINAL_POSITION FROM information_schema.columns WHERE table_schema=? AND table_name=? ORDER BY ORDINAL_POSITION LIMIT 257`, out.Namespace, out.Name)
+	rows, err := db.QueryContext(ctx, `SELECT COLUMN_NAME,COLUMN_TYPE,DATA_TYPE,IS_NULLABLE,EXTRA,COALESCE(NUMERIC_PRECISION,0),COALESCE(NUMERIC_SCALE,0),COALESCE(CHARACTER_MAXIMUM_LENGTH,0),ORDINAL_POSITION,COLUMN_DEFAULT,COLUMN_COMMENT FROM information_schema.columns WHERE table_schema=? AND table_name=? ORDER BY ORDINAL_POSITION LIMIT 257`, out.Namespace, out.Name)
 	if err != nil {
 		return problem(422, "source_catalog_failed", "无法读取MySQL源列目录")
 	}
@@ -171,11 +235,13 @@ func readMySQLColumns(ctx context.Context, db *sql.DB, out *c.SourceTable) error
 	for rows.Next() {
 		var col c.SourceColumn
 		var native, nullable, extra string
-		if err = rows.Scan(&col.Name, &col.DatabaseType, &native, &nullable, &extra, &col.Precision, &col.Scale, &col.MaxLength, &col.Position); err != nil {
+		var defaultValue, comment sql.NullString
+		if err = rows.Scan(&col.Name, &col.DatabaseType, &native, &nullable, &extra, &col.Precision, &col.Scale, &col.MaxLength, &col.Position, &defaultValue, &comment); err != nil {
 			return problem(422, "source_catalog_failed", "MySQL源列目录格式无法识别")
 		}
 		col.Nullable, col.Generated = nullable == "YES", strings.Contains(strings.ToLower(extra), "generated") || strings.Contains(strings.ToLower(extra), "auto_increment")
 		col.DataType = sourceLogicalType("mysql", native, col.DatabaseType, col.MaxLength)
+		setSourceColumnDisplay(&col, defaultValue, comment)
 		out.Columns = append(out.Columns, col)
 		if len(out.Columns) > 256 {
 			return problem(422, "budget_exceeded", "源表列数超过256项发现预算")
@@ -188,7 +254,7 @@ func readMySQLColumns(ctx context.Context, db *sql.DB, out *c.SourceTable) error
 }
 
 func readPostgreSQLColumns(ctx context.Context, db *sql.DB, out *c.SourceTable) error {
-	rows, err := db.QueryContext(ctx, `SELECT c.column_name,pg_catalog.format_type(a.atttypid,a.atttypmod),c.udt_name,c.is_nullable,c.is_generated,c.is_identity,COALESCE(c.numeric_precision,0),COALESCE(c.numeric_scale,0),COALESCE(c.character_maximum_length,0),c.ordinal_position FROM information_schema.columns c JOIN pg_catalog.pg_namespace n ON n.nspname=c.table_schema JOIN pg_catalog.pg_class t ON t.relnamespace=n.oid AND t.relname=c.table_name JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid AND a.attname=c.column_name WHERE c.table_schema=$1 AND c.table_name=$2 ORDER BY c.ordinal_position LIMIT 257`, out.Namespace, out.Name)
+	rows, err := db.QueryContext(ctx, `SELECT c.column_name,pg_catalog.format_type(a.atttypid,a.atttypmod),c.udt_name,c.is_nullable,c.is_generated,c.is_identity,COALESCE(c.numeric_precision,0),COALESCE(c.numeric_scale,0),COALESCE(c.character_maximum_length,0),c.ordinal_position,c.column_default,pg_catalog.col_description(t.oid,a.attnum) FROM information_schema.columns c JOIN pg_catalog.pg_namespace n ON n.nspname=c.table_schema JOIN pg_catalog.pg_class t ON t.relnamespace=n.oid AND t.relname=c.table_name JOIN pg_catalog.pg_attribute a ON a.attrelid=t.oid AND a.attname=c.column_name WHERE c.table_schema=$1 AND c.table_name=$2 ORDER BY c.ordinal_position LIMIT 257`, out.Namespace, out.Name)
 	if err != nil {
 		return problem(422, "source_catalog_failed", "无法读取PostgreSQL源列目录")
 	}
@@ -196,11 +262,13 @@ func readPostgreSQLColumns(ctx context.Context, db *sql.DB, out *c.SourceTable) 
 	for rows.Next() {
 		var col c.SourceColumn
 		var native, nullable, generated, identity string
-		if err = rows.Scan(&col.Name, &col.DatabaseType, &native, &nullable, &generated, &identity, &col.Precision, &col.Scale, &col.MaxLength, &col.Position); err != nil {
+		var defaultValue, comment sql.NullString
+		if err = rows.Scan(&col.Name, &col.DatabaseType, &native, &nullable, &generated, &identity, &col.Precision, &col.Scale, &col.MaxLength, &col.Position, &defaultValue, &comment); err != nil {
 			return problem(422, "source_catalog_failed", "PostgreSQL源列目录格式无法识别")
 		}
 		col.Nullable, col.Generated = nullable == "YES", generated != "NEVER" || identity == "YES"
 		col.DataType = sourceLogicalType("postgresql", native, col.DatabaseType, col.MaxLength)
+		setSourceColumnDisplay(&col, defaultValue, comment)
 		out.Columns = append(out.Columns, col)
 		if len(out.Columns) > 256 {
 			return problem(422, "budget_exceeded", "源表列数超过256项发现预算")
@@ -210,6 +278,17 @@ func readPostgreSQLColumns(ctx context.Context, db *sql.DB, out *c.SourceTable) 
 		return problem(422, "source_catalog_failed", "PostgreSQL源列目录读取中断")
 	}
 	return nil
+}
+
+func setSourceColumnDisplay(col *c.SourceColumn, defaultValue, comment sql.NullString) {
+	if !defaultValue.Valid {
+		col.DefaultValue = json.RawMessage("null")
+	} else if utf8.ValidString(defaultValue.String) && len(defaultValue.String) <= 64<<10 {
+		col.DefaultValue, _ = json.Marshal(defaultValue.String)
+	}
+	if comment.Valid && utf8.ValidString(comment.String) && len(comment.String) <= 64<<10 {
+		col.Comment = comment.String
+	}
 }
 
 func sourceLogicalType(driver, native, complete string, maxLength int64) string {

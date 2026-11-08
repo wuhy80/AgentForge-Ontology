@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -199,11 +200,18 @@ func TestSourceCatalogRealDrivers(t *testing.T) {
 			qualified, _ := sourceQuote(source.Driver, namespace)
 			quoted, _ := sourceQuote(source.Driver, name)
 			qualified += "." + quoted
-			statement := "CREATE TABLE " + qualified + " (id BIGINT NOT NULL PRIMARY KEY, account VARCHAR(100) NOT NULL UNIQUE, part_a BIGINT NOT NULL, part_b BIGINT NOT NULL, amount DECIMAL(20,4), UNIQUE (part_a,part_b))"
+			statement := "CREATE TABLE " + qualified + " (id BIGINT NOT NULL PRIMARY KEY, account VARCHAR(100) NOT NULL DEFAULT 'seed' UNIQUE, part_a BIGINT NOT NULL, part_b BIGINT NOT NULL, amount DECIMAL(20,4), UNIQUE (part_a,part_b))"
 			if _, err = db.ExecContext(ctx, statement); err != nil {
 				t.Fatal(err)
 			}
 			defer db.ExecContext(context.Background(), "DROP TABLE "+qualified)
+			commentSQL := "ALTER TABLE " + qualified + " MODIFY COLUMN account VARCHAR(100) NOT NULL DEFAULT 'seed' COMMENT '业务账号'"
+			if source.Driver == "postgresql" {
+				commentSQL = "COMMENT ON COLUMN " + qualified + ".account IS '业务账号'"
+			}
+			if _, err = db.ExecContext(ctx, commentSQL); err != nil {
+				t.Fatal(err)
+			}
 			if source.Driver == "postgresql" {
 				idx, _ := sourceQuote(source.Driver, name+"_partial")
 				if _, err = db.ExecContext(ctx, "CREATE UNIQUE INDEX "+idx+" ON "+qualified+" (part_a) WHERE part_b>0"); err != nil {
@@ -216,6 +224,9 @@ func TestSourceCatalogRealDrivers(t *testing.T) {
 			}
 			if len(table.Columns) != 5 || !table.Columns[0].PrimaryKey || table.Columns[0].DataType != "int64" || table.Columns[4].Precision != 20 || table.Columns[4].Scale != 4 || !table.Columns[4].Nullable {
 				t.Fatalf("source types or constraints were lost: %#v", table.Columns)
+			}
+			if !strings.Contains(string(table.Columns[1].DefaultValue), "seed") || string(table.Columns[4].DefaultValue) != "null" || table.Columns[1].Comment != "业务账号" {
+				t.Fatalf("catalog default/comment missing: %+v", table.Columns)
 			}
 			primary, unique, composite, partial := false, false, false, false
 			for _, index := range table.Indexes {
@@ -231,6 +242,18 @@ func TestSourceCatalogRealDrivers(t *testing.T) {
 			if err != nil || again.Signature != table.Signature {
 				t.Fatal("repeated discovery changed stable structure digest")
 			}
+			if source.Driver == "postgresql" {
+				commentSQL = "COMMENT ON COLUMN " + qualified + ".account IS '更新说明'"
+			} else {
+				commentSQL = "ALTER TABLE " + qualified + " MODIFY COLUMN account VARCHAR(100) NOT NULL DEFAULT 'changed' COMMENT '更新说明'"
+			}
+			if _, err = db.ExecContext(ctx, commentSQL); err != nil {
+				t.Fatal(err)
+			}
+			again, err = readSourceTable(ctx, db, source, namespace, name)
+			if err != nil || again.Signature != table.Signature || again.Columns[1].Comment != "更新说明" {
+				t.Fatal("display-only catalog changes broke mapping signature", err)
+			}
 			items, err := listSourceTables(ctx, db, source, namespace)
 			if err != nil {
 				t.Fatal(err)
@@ -238,6 +261,9 @@ func TestSourceCatalogRealDrivers(t *testing.T) {
 			found := false
 			for _, item := range items {
 				found = found || item.Name == name
+				if item.Name == name && (item.ColumnCount == nil || *item.ColumnCount != 5 || item.PrimaryKeyCount == nil || *item.PrimaryKeyCount != 1) {
+					t.Fatalf("batch table counts missing: %+v", item)
+				}
 				if strings.HasPrefix(item.Name, "af_") {
 					t.Fatal("platform private table leaked into source selector")
 				}
@@ -266,12 +292,25 @@ func TestSourceHTTPConnectionAndCatalogRealDrivers(t *testing.T) {
 	}
 	tenant := c.NewID()
 	t.Cleanup(func() { engine.DB().Exec("DELETE FROM af_data_sources WHERE tenant_id=?", tenant) })
-	app := NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("source-http-fixture-key", 2)})
+	requestTenant, sessionMode, sessionCalls := tenant, "", 0
+	checker := sourceSessionCheckerFunc(func(_ context.Context, _ c.SessionCheck) (c.Session, error) {
+		sessionCalls++
+		user := c.User{ID: "source-http-admin", TenantID: requestTenant, Administrator: true, Enabled: true}
+		if sessionCalls == 2 && sessionMode == "revoke" {
+			user.Administrator = false
+		}
+		if sessionCalls == 2 && sessionMode == "logout" {
+			return c.Session{}, &platform.AccessError{Status: 401, Code: "unauthenticated", Message: "会话已撤销"}
+		}
+		return c.Session{User: user, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
+	})
+	app := NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("source-http-fixture-key", 2), SessionChecker: checker})
 	request := func(method, path string, input any) *httptest.ResponseRecorder {
 		t.Helper()
 		body, _ := json.Marshal(input)
 		r := httptest.NewRequest(method, path, bytes.NewReader(body))
-		p := c.Principal{TenantID: tenant, Subject: "source-http-admin"}
+		r.AddCookie(&http.Cookie{Name: platform.SessionCookieName, Value: strings.Repeat("s", 48)})
+		p := c.Principal{TenantID: requestTenant, Subject: "source-http-admin"}
 		ctx := platform.WithSessionUser(platform.WithPrincipal(ctx, p), c.User{ID: p.Subject, TenantID: p.TenantID, Administrator: true, Enabled: true})
 		w := httptest.NewRecorder()
 		app.ServeHTTP(w, r.WithContext(ctx))
@@ -365,6 +404,56 @@ func TestSourceHTTPConnectionAndCatalogRealDrivers(t *testing.T) {
 			w = request("GET", "/data/sources/"+saved.ID+"/tables/af_identity_users", nil)
 			if w.Code != 422 {
 				t.Fatal("HTTP catalog allowed platform-private source mapping")
+			}
+			sessionCalls = 0
+			w = request("GET", "/data/sources/"+saved.ID+"/overview", nil)
+			var overview c.SourceOverview
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &overview) != nil || overview.SourceID != saved.ID || overview.ETag != saved.ETag || overview.ServerVersion == "" || overview.Charset == "" || !overview.Metrics.Connections.Available || !overview.Metrics.StorageBytes.Available || sessionCalls != 2 {
+				t.Fatalf("live overview failed: %d %s", w.Code, w.Body)
+			}
+			if backend.driver == "mysql" && (!overview.Metrics.QPS.Available || overview.Metrics.QPS.SampleWindowMS < 250 || overview.Metrics.QPS.Scope != "instance") {
+				t.Fatalf("MySQL live QPS sampling wrong: %+v", overview.Metrics.QPS)
+			}
+			if backend.driver == "postgresql" && (overview.Metrics.QPS.Available || overview.Metrics.QPS.Value != "" || overview.Metrics.QPS.Reason == "") {
+				t.Fatalf("PG fabricated QPS: %+v", overview.Metrics.QPS)
+			}
+			requestTenant = c.NewID()
+			sessionCalls = 0
+			if w = request("GET", "/data/sources/"+saved.ID+"/overview", nil); w.Code != 404 {
+				t.Fatalf("overview crossed tenant boundary: %d %s", w.Code, w.Body)
+			}
+			requestTenant = tenant
+			for _, mode := range []string{"revoke", "logout"} {
+				sessionMode = mode
+				sessionCalls = 0
+				w = request("GET", "/data/sources/"+saved.ID+"/overview", nil)
+				want := 403
+				if mode == "logout" {
+					want = 401
+				}
+				if w.Code != want || strings.Contains(w.Body.String(), "serverVersion") {
+					t.Fatalf("overview delivered after %s: %d %s", mode, w.Code, w.Body)
+				}
+			}
+			sessionMode = ""
+			changingChecker := sourceSessionCheckerFunc(func(_ context.Context, check c.SessionCheck) (c.Session, error) {
+				result, err := checker.CheckSession(ctx, check)
+				if sessionCalls == 2 {
+					_, updateErr := engine.DB().ExecContext(ctx, "UPDATE af_data_sources SET etag=? WHERE tenant_id=? AND id=?", digest(c.NewID()), tenant, saved.ID)
+					if updateErr != nil {
+						t.Fatal(updateErr)
+					}
+				}
+				return result, err
+			})
+			changedApp := NewHandler(Config{Engine: engine, DataSourceKey: strings.Repeat("source-http-fixture-key", 2), SessionChecker: changingChecker})
+			originalApp := app
+			app = changedApp
+			sessionCalls = 0
+			w = request("GET", "/data/sources/"+saved.ID+"/overview", nil)
+			app = originalApp
+			if w.Code != 412 || strings.Contains(w.Body.String(), "serverVersion") {
+				t.Fatalf("overview delivered after source change: %d %s", w.Code, w.Body)
 			}
 		})
 	}

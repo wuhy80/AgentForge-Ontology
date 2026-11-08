@@ -1,5 +1,7 @@
 package contracts
 
+import "encoding/json"
+
 // DataSource credentials belong to Data. Passwords are write-only and encrypted
 // at rest; definitions refer only to stable source IDs and physical mappings.
 type DataSource struct {
@@ -37,9 +39,12 @@ type DataSourceInput struct {
 }
 
 type TableInfo struct {
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	ColumnCount *int   `json:"columnCount,omitempty"`
+	// PrimaryKeyCount counts key columns, including all columns of a composite key.
+	PrimaryKeyCount *int `json:"primaryKeyCount,omitempty"`
 }
 
 type SourceColumn struct {
@@ -53,6 +58,36 @@ type SourceColumn struct {
 	Scale        int    `json:"scale,omitempty"`
 	MaxLength    int64  `json:"maxLength,omitempty"`
 	Position     int    `json:"position"`
+	// nil means not returned; JSON null means the catalog returned SQL NULL.
+	// These display-only fields do not participate in physical mapping signatures.
+	DefaultValue json.RawMessage `json:"defaultValue,omitempty"`
+	Comment      string          `json:"comment,omitempty"`
+}
+
+type SourceOverviewMetric struct {
+	Available      bool   `json:"available"`
+	Value          string `json:"value,omitempty"`
+	Unit           string `json:"unit"`
+	Scope          string `json:"scope"`
+	Basis          string `json:"basis"`
+	SampleWindowMS int64  `json:"sampleWindowMs,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+}
+
+type SourceOverviewMetrics struct {
+	Connections  SourceOverviewMetric `json:"connections"`
+	StorageBytes SourceOverviewMetric `json:"storageBytes"`
+	QPS          SourceOverviewMetric `json:"qps"`
+}
+
+type SourceOverview struct {
+	SourceID      string                `json:"sourceId"`
+	ETag          string                `json:"etag"`
+	CheckedAt     string                `json:"checkedAt"`
+	ServerVersion string                `json:"serverVersion"`
+	Database      string                `json:"database"`
+	Charset       string                `json:"charset,omitempty"`
+	Metrics       SourceOverviewMetrics `json:"metrics"`
 }
 
 type SourceIndex struct {
