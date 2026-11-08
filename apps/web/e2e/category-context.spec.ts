@@ -3,7 +3,7 @@ import type { DefinitionRecord, Organization } from '../src/lib/types'
 
 // Browser interaction coverage with an isolated in-memory HTTP fixture. This
 // suite never signs into or writes to the developer's real databases.
-async function fixture(page: Page) {
+async function fixture(page: Page, administrator = false) {
   const tenantId = 'browser-fixture'
   const categories: Organization[] = [{ id: 'category-a', tenantId, name: '生产管理' }, { id: 'category-b', tenantId, name: '质量管理' }]
   const groups: Organization[] = categories.map((category, index) => ({ id: `group-${index}`, tenantId, categoryId: category.id, name: index ? '质检模型' : '生产模型' }))
@@ -14,7 +14,7 @@ async function fixture(page: Page) {
   const drafts: DefinitionRecord[] = []
   const writes: Record<string, unknown>[] = []
   let queries = 0
-  const account = { user: { id: 'fixture-user', tenantId, username: 'operator', displayName: '操作员', administrator: false, enabled: true, roleIds: [], etag: 'user-etag' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture-csrf' }
+  const account = { user: { id: 'fixture-user', tenantId, username: 'operator', displayName: '操作员', administrator, enabled: true, roleIds: [], etag: 'user-etag' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture-csrf' }
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname
@@ -61,11 +61,72 @@ async function fixture(page: Page) {
   return { writes, current, groups, queryCount: () => queries }
 }
 
+test('本体建模分组独立导航五类定义及数据源，刷新、返回与未保存保护保留类型', async ({ page }) => {
+  const state = await fixture(page, true)
+  for (const [kind, name] of [['enum', '设备状态'], ['link', '设备关联'], ['action', '设备操作'], ['function', '设备计算']] as const) {
+    state.current.push({ etag: `${kind}-etag`, status: 'active', definition: {
+      id: `${kind}-item`, tenantId: 'browser-fixture', categoryId: 'category-a', groupId: 'group-0', kind, name,
+      ...(kind === 'enum' ? { enum: { values: [{ code: 'running', label: '运行中' }] } } : {}),
+      ...(kind === 'link' ? { link: { sourceSchemaId: 'schema-0', targetSchemaId: 'schema-0', forwardName: '关联设备', reverseName: '来源设备', cardinality: '1:N', onDelete: 'restrict' } as const } : {}),
+      ...(kind === 'action' ? { action: { input: [], output: [], sideEffects: 'none' } as const } : {}),
+      ...(kind === 'function' ? { function: { input: [], output: [], sideEffects: 'none' } as const } : {}),
+    } })
+  }
+  await page.goto('/#models')
+  const navigation = page.getByRole('navigation', { name: '工作台导航' })
+  const modeling = navigation.getByRole('group', { name: '本体建模', exact: true })
+  await expect(modeling.getByRole('link')).toHaveText(['对象模型', '枚举', '关系', '动作', '函数', '数据源配置'])
+  await expect(page.getByRole('group', { name: '定义类型', exact: true })).toHaveCount(0)
+  for (const [name, record] of [['对象模型', '生产设备'], ['枚举', '设备状态'], ['关系', '设备关联'], ['动作', '设备操作'], ['函数', '设备计算']]) {
+    await modeling.getByRole('link', { name, exact: true }).click()
+    await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
+    await expect(modeling.getByRole('link', { name, exact: true })).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('table', { name: '按分组排列的业务模型' }).locator('.model-list-row')).toHaveCount(1)
+    await expect(page.getByRole('button', { name: record, exact: true })).toBeVisible()
+  }
+  await modeling.getByRole('link', { name: '对象模型', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '对象模型', exact: true })).toBeVisible()
+  await page.screenshot({ path: '../../.cache/model-navigation-desktop.png', fullPage: true })
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    await expect(modeling.getByRole('link', { name: '数据源配置', exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    if (width === 390) await page.screenshot({ path: '../../.cache/model-navigation-mobile.png', fullPage: true })
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await modeling.getByRole('link', { name: '枚举', exact: true }).click()
+  await page.getByRole('button', { name: '设备状态', exact: true }).click()
+  await expect(page).toHaveURL(/#models\/enum-item$/)
+  await expect(page.getByRole('region', { name: '模型编辑', exact: true })).toBeVisible()
+  await page.reload()
+  await expect(modeling.getByRole('link', { name: '枚举', exact: true })).toHaveAttribute('aria-current', 'page')
+  const editor = page.getByRole('region', { name: '模型编辑', exact: true })
+  await editor.getByRole('button', { name: '返回模型列表', exact: true }).click()
+  await expect(page).toHaveURL(/#models\?kind=enum$/)
+  await page.getByRole('button', { name: '新建定义', exact: true }).click()
+  await expect(editor.getByRole('combobox', { name: '类型', exact: true })).toHaveValue('enum')
+  await editor.getByLabel('业务名称', { exact: true }).fill('尚未保存的枚举')
+  page.once('dialog', (dialog) => dialog.dismiss())
+  await modeling.getByRole('link', { name: '函数', exact: true }).click()
+  await expect(editor.getByLabel('业务名称', { exact: true })).toHaveValue('尚未保存的枚举')
+  page.once('dialog', (dialog) => dialog.accept())
+  await modeling.getByRole('link', { name: '函数', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '函数', exact: true })).toBeVisible()
+  await modeling.getByRole('link', { name: '数据源配置', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '数据源配置', exact: true })).toBeVisible()
+  await modeling.getByRole('link', { name: '枚举', exact: true }).click()
+  await page.getByLabel('当前分类', { exact: true }).selectOption('category-b')
+  await expect(modeling.getByRole('link', { name: '枚举', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('button', { name: '设备状态', exact: true })).toHaveCount(0)
+  expect(state.writes).toEqual([])
+})
+
 test('统一管理页创建目录，模型只选择当前分类下的分组', async ({ page }) => {
   const state = await fixture(page)
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/')
+  await expect(page.getByRole('group', { name: '本体建模', exact: true }).getByRole('link', { name: '数据源配置', exact: true })).toHaveCount(0)
   await page.getByRole('link', { name: '分类与分组', exact: true }).click()
   await page.getByLabel('新分类名称').fill('售后管理')
   await page.getByRole('button', { name: '创建分类', exact: true }).click()
@@ -73,7 +134,7 @@ test('统一管理页创建目录，模型只选择当前分类下的分组', as
   await page.getByLabel('新分组名称').fill('售后模型')
   await page.getByRole('button', { name: '创建分组', exact: true }).click()
   await expect(page.getByText('售后模型', { exact: true })).toBeVisible()
-  await page.getByRole('link', { name: '模型管理', exact: true }).click()
+  await page.getByRole('link', { name: '对象模型', exact: true }).click()
   await expect(page.getByRole('button', { name: '管理分类', exact: true })).toHaveCount(0)
   await page.getByRole('button', { name: '新建定义', exact: true }).click()
   const dialog = page.getByRole('region', { name: '模型编辑', exact: true })
@@ -106,7 +167,7 @@ test('顶部分类跨页面共享、刷新恢复，切换清除查询结果与�
   await page.getByRole('tab', { name: '可视化查询', exact: true }).click()
   await expect(page.getByRole('combobox', { name: '查询模型', exact: true }).locator('option')).toHaveText(['质量管理 / 质量设备'])
   expect(state.queryCount()).toBe(1)
-  await page.getByRole('link', { name: '模型管理', exact: true }).click()
+  await page.getByRole('link', { name: '对象模型', exact: true }).click()
   await expect(page.getByRole('button', { name: '质量设备', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '生产设备', exact: true })).toHaveCount(0)
   await page.reload()
@@ -125,7 +186,7 @@ test('模型表单前往统一页补充分组后，返回刷新候选并保留�
   await page.getByLabel('新分类名称').fill('待建目录')
   await page.getByRole('button', { name: '创建分类', exact: true }).click()
   await expect(page.getByLabel('当前分类', { exact: true })).toHaveValue('category-2')
-  await page.getByRole('link', { name: '模型管理', exact: true }).click()
+  await page.getByRole('link', { name: '对象模型', exact: true }).click()
   await page.getByRole('button', { name: '新建定义', exact: true }).click()
   let dialog = page.getByRole('region', { name: '模型编辑', exact: true })
   await dialog.getByLabel('业务名称', { exact: true }).fill('保留的设备草稿')
@@ -134,7 +195,7 @@ test('模型表单前往统一页补充分组后，返回刷新候选并保留�
   await page.getByLabel('新分组名称').fill('补充的分组')
   await page.getByRole('button', { name: '创建分组', exact: true }).click()
   await expect(page.getByText('补充的分组', { exact: true })).toBeVisible()
-  await page.getByRole('link', { name: '模型管理', exact: true }).click()
+  await page.getByRole('link', { name: '对象模型', exact: true }).click()
   dialog = page.getByRole('region', { name: '模型编辑', exact: true })
   await expect(dialog.getByLabel('业务名称', { exact: true })).toHaveValue('保留的设备草稿')
   await dialog.getByRole('combobox', { name: '分组', exact: true }).selectOption({ label: '补充的分组' })
@@ -157,16 +218,15 @@ test('模型默认按分组紧凑行显示，折叠、筛选与视图切换保�
   })
   await page.goto('/#models')
   await expect(page.getByRole('button', { name: '列表视图', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await expect(page.getByRole('button', { name: /^对象模型\s*10$/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('link', { name: '对象模型', exact: true })).toHaveAttribute('aria-current', 'page')
   const table = page.getByRole('table', { name: '按分组排列的业务模型' })
   await expect(table.locator('.model-list-row')).toHaveCount(10)
   await expect(table.getByRole('button', { name: '设备状态', exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: /^全部定义\s*11$/ }).click()
   const production = table.getByRole('rowgroup', { name: '生产模型', exact: true })
   const dictionary = table.getByRole('rowgroup', { name: '设备字典', exact: true })
   await expect(production.getByRole('button', { name: '生产设备', exact: true })).toBeVisible()
-  await expect(dictionary.getByRole('button', { name: '设备状态', exact: true })).toBeVisible()
-  await expect(table.locator('.model-list-row')).toHaveCount(11)
+  await expect(dictionary.getByRole('button', { name: '扩展设备0', exact: true })).toBeVisible()
+  await expect(table.locator('.model-list-row')).toHaveCount(10)
   await expect(table.getByRole('button', { name: '质量设备', exact: true })).toHaveCount(0)
   const rows = await table.locator('.model-list-row').evaluateAll((elements) => elements.map((element) => {
     const rect = element.getBoundingClientRect()
@@ -174,14 +234,14 @@ test('模型默认按分组紧凑行显示，折叠、筛选与视图切换保�
   }))
   expect(rows.every((row) => row.height <= 40 && row.bottom <= page.viewportSize()!.height)).toBe(true)
   await page.getByRole('button', { name: '收起分组：设备字典', exact: true }).click()
-  await expect(dictionary.getByRole('button', { name: '设备状态', exact: true })).toHaveCount(0)
+  await expect(dictionary.getByRole('button', { name: '扩展设备0', exact: true })).toHaveCount(0)
   await expect(production.getByRole('button', { name: '生产设备', exact: true })).toBeVisible()
-  await page.getByLabel('搜索业务模型', { exact: true }).fill('设备状态')
-  await expect(dictionary.getByRole('button', { name: '设备状态', exact: true })).toBeVisible()
+  await page.getByLabel('搜索业务模型', { exact: true }).fill('扩展设备0')
+  await expect(dictionary.getByRole('button', { name: '扩展设备0', exact: true })).toBeVisible()
   await expect(production).toHaveCount(0)
   await page.getByLabel('搜索业务模型', { exact: true }).fill('')
   await page.getByRole('button', { name: '网格视图', exact: true }).click()
-  await expect(page.getByRole('region', { name: '设备字典', exact: true }).getByRole('button', { name: '设备状态', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: '设备字典', exact: true }).getByRole('button', { name: '扩展设备0', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '列表视图', exact: true }).click()
   for (const width of [760, 390]) {
     await page.setViewportSize({ width, height: 844 })
@@ -215,7 +275,7 @@ test('模型独立编辑地址支持刷新、直接打开与未保存离开保�
   await page.getByRole('link', { name: '数据探索', exact: true }).click()
   await expect(page).toHaveURL(/#query$/)
   await expect(editor).toBeHidden()
-  await page.getByRole('link', { name: '模型管理', exact: true }).click()
+  await page.getByRole('link', { name: '对象模型', exact: true }).click()
   await expect(editor.getByLabel('业务名称', { exact: true })).toHaveValue('生产设备')
   await editor.getByRole('button', { name: '返回模型列表', exact: true }).click()
   await page.getByRole('button', { name: '生产设备', exact: true }).click()

@@ -152,7 +152,7 @@ test('数据源独立配置后，模型逐属性跨源映射并从数据库读�
   await page.getByRole('button', { name: '查看数据库表', exact: true }).click()
   await page.getByRole('button', { name: 'public.asset_details', exact: true }).click()
   await expect(page.getByRole('region', { name: '数据源表结构' }).getByRole('cell', { name: 'asset_name', exact: true })).toBeVisible()
-  await page.getByRole('link', { name: '模型管理', exact: true }).click()
+  await page.getByRole('link', { name: '对象模型', exact: true }).click()
   await page.getByRole('button', { name: '设备对象', exact: true }).click()
   const editor = page.getByRole('region', { name: '模型编辑', exact: true })
   await expect(page).toHaveURL(/#models\/equipment-model$/)

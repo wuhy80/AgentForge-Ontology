@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowRight, Box, Braces, Check, ChevronDown, ChevronRight, CircleDashed, Database, FilePenLine, Folder, FolderCog, GitBranch, LayoutGrid, List, LoaderCircle, Plus, RefreshCw, Search, Shapes, Workflow } from 'lucide-react'
+import { ArrowRight, Box, Braces, Check, ChevronDown, ChevronRight, CircleDashed, Database, FilePenLine, Folder, FolderCog, GitBranch, LayoutGrid, List, LoaderCircle, Plus, RefreshCw, Search, Workflow } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { Definition, DefinitionRecord, Kind, Organization } from '../../lib/types'
 import { ModelEditor, type PendingPublication } from './ModelEditor'
 import { kindDescriptions, kindLabels } from './model-helpers'
+import { modelListRoute, modelRouteKind } from './model-routes'
 import './model.css'
 
 const RelationOverview = lazy(() => import('./RelationOverview').then((module) => ({ default: module.RelationOverview })))
@@ -36,7 +37,7 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
   draftDirectoryDenied?: boolean
   active?: boolean
 }) {
-  const [kind, setKind] = useState<Kind | 'all'>('schema')
+  const kind = modelRouteKind(route, entries)
   const [search, setSearch] = useState('')
   const [layout, setLayout] = useState<'grid' | 'list' | 'graph'>(() => new URLSearchParams(route?.split('?')[1]).get('view') === 'graph' ? 'graph' : 'list')
   const [groupDirectory, setGroupDirectory] = useState<{ api: ApiClient; categoryId: string; items: Organization[]; error: string; loading: boolean }>()
@@ -62,10 +63,12 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
   const directoryRef = useRef({ entries, draftDirectoryDenied })
   directoryRef.current = { entries, draftDirectoryDenied }
   const category = categories.find((item) => item.id === categoryId)
+  const listRoute = (value = kind) => layout === 'graph' ? 'models?view=graph' : modelListRoute(value)
 
   function closeEditor(navigate = true) {
+    const closingKind = editorRef.current?.kind ?? kind
     editorSequence.current++; setEditor(undefined); setGraphPreview(undefined)
-    if (navigate) onNavigate?.(layout === 'graph' ? 'models?view=graph' : 'models')
+    if (navigate) onNavigate?.(listRoute(closingKind))
   }
   function launchEditor(value: { record?: DefinitionRecord; kind: Kind; initialLink?: { sourceSchemaId: string; targetSchemaId: string } }, navigate = true) {
     openingSequence.current++
@@ -86,13 +89,15 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
     if (editor && editorGuard.current && !editorGuard.current()) return
     setLayout(value)
     if (editor) closeEditor(false)
-    onNavigate?.(value === 'graph' ? 'models?view=graph' : 'models')
+    onNavigate?.(value === 'graph' ? 'models?view=graph' : modelListRoute(kind))
   }
 
   useEffect(() => {
     openingSequence.current++
-    setOpening(''); setRefreshing(false); setError(''); setSearch(''); setKind('schema'); closeEditor(false)
+    setOpening(''); setRefreshing(false); setError(''); setSearch(''); closeEditor(false)
   }, [categoryId])
+
+  useEffect(() => { setSearch('') }, [kind])
 
   useEffect(() => () => { openingSequence.current++; editorSequence.current++ }, [])
   function clearPending(id: string) {
@@ -127,11 +132,11 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
     return [...merged.values()]
   }, [entries, localEntries])
   const scopedModels = models.filter((entry) => entry.definition.categoryId === categoryId)
-  const scopedPending = Object.values(pending).filter((item) => item.record.definition.categoryId === categoryId)
+  const scopedPending = Object.values(pending).filter((item) => item.record.definition.categoryId === categoryId && (layout === 'graph' || item.record.definition.kind === kind))
   const visible = scopedModels.filter((entry) => {
     const definition = entry.definition
     const term = search.trim().toLocaleLowerCase()
-    return (kind === 'all' || kind === definition.kind) && (!term || `${definition.name} ${definition.description ?? ''}`.toLocaleLowerCase().includes(term))
+    return kind === definition.kind && (!term || `${definition.name} ${definition.description ?? ''}`.toLocaleLowerCase().includes(term))
   })
   const hasModels = scopedModels.length > 0
   useEffect(() => {
@@ -223,18 +228,20 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
     previousRoute.current = route
     if (route === undefined || !active) return
     const [path, query] = route.split('?')
-    if (new URLSearchParams(query).get('view') === 'graph') setLayout('graph')
+    const graph = new URLSearchParams(query).get('view') === 'graph'
+    if (graph) setLayout('graph')
+    else setLayout((value) => value === 'graph' ? 'list' : value)
     const target = path.startsWith('models/') ? path.slice(7) : ''
     const current = editorRef.current
     if (!target) {
-      if (current && previous && !previous.startsWith('models')) {
+      if (current && current.kind === kind && previous && !previous.startsWith('models')) {
         onNavigate?.(current.record ? `models/${encodeURIComponent(current.record.definition.id)}` : `models/new?kind=${current.kind}`, true)
       } else if (current) closeEditor(false)
       return
     }
     if (!category) return
     if (target === 'new') {
-      if (current && !current.record && current.categoryId === categoryId) return
+      if (current && !current.record && current.categoryId === categoryId && current.kind === kind) return
       const requested = new URLSearchParams(query).get('kind') as Kind
       const params = new URLSearchParams(query)
       launchEditor({ kind: requested in kindLabels ? requested : 'schema', initialLink: requested === 'link' ? { sourceSchemaId: params.get('source') ?? '', targetSchemaId: params.get('target') ?? '' } : undefined }, false)
@@ -287,17 +294,13 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
   if (route?.startsWith('models/') && !editing && layout !== 'graph') return <section className="model-editor-page" aria-label="模型编辑状态"><button type="button" className="button subtle" onClick={() => closeEditor()}>返回模型列表</button>{error ? <div className="notice notice-error" role="alert">{error}</div> : <div className="loading-state" role="status"><LoaderCircle className="model-spin" size={24} /><p>正在读取模型…</p></div>}</section>
 
   return <div className={`model-page model-page-${layout}`}>
-    <div className="model-page-heading"><div><div className="model-eyebrow">ONTOLOGY WORKSPACE</div><h1>业务模型</h1><p className="muted">从业务语言出发，把对象、关系与规则连接起来。</p></div><div className="model-inline-actions">{layout !== 'graph' && <button type="button" className="button primary" disabled={!category} onClick={() => launchEditor({ kind: kind === 'all' ? 'schema' : kind })}><Plus size={18} />新建定义</button>}</div></div>
+    <div className="model-page-heading"><div><div className="model-eyebrow">ONTOLOGY WORKSPACE</div><h1>{layout === 'graph' ? '关系' : kindLabels[kind]}</h1><p className="muted">{kindDescriptions[layout === 'graph' ? 'link' : kind]}</p></div><div className="model-inline-actions">{layout !== 'graph' && <button type="button" className="button primary" disabled={!category} onClick={() => launchEditor({ kind })}><Plus size={18} />新建定义</button>}</div></div>
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     {scopedPending.length > 0 && <section className="model-pending-panel" aria-label="待恢复的发布"><div className="model-pending-heading"><RefreshCw size={18} /><strong>有 {scopedPending.length} 项发布等待恢复</strong><span>保留原始发布内容，可安全重试；切换分类后仍可返回恢复。</span></div>{scopedPending.map((item) => <button key={item.record.definition.id} type="button" className="model-pending-row" disabled={!!opening} onClick={() => void open(item.record)}><span>{item.record.definition.name}</span><span className="muted">{item.publication.status === 'activation_pending' ? '等待激活' : '等待确认'}</span><span>恢复发布<ArrowRight size={15} /></span></button>)}</section>}
-    {layout !== 'graph' && <div className="model-kind-tabs" role="group" aria-label="定义类型">
-      <button type="button" aria-pressed={kind === 'all'} className={kind === 'all' ? 'is-active' : ''} onClick={() => setKind('all')}><Shapes size={17} />全部定义<span>{scopedModels.length}</span></button>
-      {(Object.keys(kindLabels) as Kind[]).map((value) => { const Icon = icons[value]; return <button type="button" key={value} aria-pressed={kind === value} className={kind === value ? 'is-active' : ''} onClick={() => setKind(value)}><Icon size={17} />{kindLabels[value]}<span>{scopedModels.filter((entry) => entry.definition.kind === value).length}</span></button> })}
-    </div>}
-    <div className="model-toolbar"><div className="model-filter-controls">{layout !== 'graph' && <label className="model-search"><Search size={17} /><input aria-label="搜索业务模型" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索名称或描述…" /></label>}</div><div className="model-inline-actions"><span className="model-loaded-count">{scopedModels.length} 个已加载定义</span><button type="button" className="button subtle model-icon-button" title="刷新目录" aria-label="刷新目录" disabled={refreshing} onClick={() => void refresh()}><RefreshCw size={16} className={refreshing ? 'model-spin' : ''} /></button><div className="model-layout-toggle"><button type="button" aria-label="关系图" title="关系图" aria-pressed={layout === 'graph'} className={layout === 'graph' ? 'is-active' : ''} onClick={() => switchLayout('graph')}><GitBranch size={17} /></button><button type="button" aria-label="网格视图" aria-pressed={layout === 'grid'} className={layout === 'grid' ? 'is-active' : ''} onClick={() => switchLayout('grid')}><LayoutGrid size={16} /></button><button type="button" aria-label="列表视图" aria-pressed={layout === 'list'} className={layout === 'list' ? 'is-active' : ''} onClick={() => switchLayout('list')}><List size={17} /></button></div></div></div>
+    <div className="model-toolbar"><div className="model-filter-controls">{layout !== 'graph' && <label className="model-search"><Search size={17} /><input aria-label="搜索业务模型" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索名称或描述…" /></label>}</div><div className="model-inline-actions"><span className="model-loaded-count">{scopedModels.filter((entry) => entry.definition.kind === (layout === 'graph' ? 'link' : kind)).length} 个已加载定义</span><button type="button" className="button subtle model-icon-button" title="刷新目录" aria-label="刷新目录" disabled={refreshing} onClick={() => void refresh()}><RefreshCw size={16} className={refreshing ? 'model-spin' : ''} /></button><div className="model-layout-toggle"><button type="button" aria-label="关系图" title="关系图" aria-pressed={layout === 'graph'} className={layout === 'graph' ? 'is-active' : ''} onClick={() => switchLayout('graph')}><GitBranch size={17} /></button><button type="button" aria-label="网格视图" aria-pressed={layout === 'grid'} className={layout === 'grid' ? 'is-active' : ''} onClick={() => switchLayout('grid')}><LayoutGrid size={16} /></button><button type="button" aria-label="列表视图" aria-pressed={layout === 'list'} className={layout === 'list' ? 'is-active' : ''} onClick={() => switchLayout('list')}><List size={17} /></button></div></div></div>
     {!category && <div className="notice model-start-notice"><FolderCog size={20} /><div><strong>{categories.length ? '先选择当前业务分类' : '先建立你的业务分类'}</strong><p>{categories.length ? '请在顶部选择当前分类，或前往「分类与分组」维护业务目录。' : '请前往「分类与分组」创建分类和分组，再开始定义业务模型。'}</p></div><button type="button" className="button" onClick={onOrganizations}>前往分类与分组<ChevronRight size={15} /></button></div>}
     {currentGroups?.error && <div className="notice model-group-error" role="alert">分组名称暂不可用：{currentGroups.error}。可刷新目录重试，模型暂列于“其他分组”。</div>}
-    {layout === 'graph' ? <Suspense fallback={<p className="muted" role="status">正在加载关系画布…</p>}><RelationOverview key={categoryId} entries={models} currentEntries={currentEntries} categories={categories} categoryId={categoryId} groups={currentGroups?.items ?? []} selectedLinkId={editor?.record?.definition.id} preview={editor?.kind === 'link' && graphPreview ? { definition: { ...graphPreview.definition, id: graphPreview.definition.id || `unsaved:${editor.token}`, tenantId: category?.tenantId ?? '' }, etag: editor.record?.etag ?? 'unsaved', status: graphPreview.dirty || !editor.record ? 'draft' : editor.record.status } : undefined} onSelectLink={(record) => void open(record)} onSelectSchema={(record) => void open(record)} onCreateLink={createRelation} editor={editing} layoutScope={layoutScope} disabled={!!opening || refreshing} /></Suspense> : visible.length === 0 ? <div className="empty-state model-empty"><div className="model-empty-icon"><Box size={30} /></div><h2>{search ? '没有匹配的业务定义' : scopedModels.length ? '此类型还没有定义' : '从第一个业务对象开始'}</h2><p className="muted">{search ? '调整搜索词，查看当前分类下的其他业务定义。' : '将业务概念转化为可管理、可查询的模型。'}</p>{!search && category && <button type="button" className="button primary" onClick={() => launchEditor({ kind: kind === 'all' ? 'schema' : kind })}><Plus size={17} />新建{kind === 'all' ? '业务定义' : kindLabels[kind]}</button>}</div> : layout === 'list' ? <div className="model-list-wrap"><table className="model-list-table" aria-label="按分组排列的业务模型">
+    {layout === 'graph' ? <Suspense fallback={<p className="muted" role="status">正在加载关系画布…</p>}><RelationOverview key={categoryId} entries={models} currentEntries={currentEntries} categories={categories} categoryId={categoryId} groups={currentGroups?.items ?? []} selectedLinkId={editor?.record?.definition.id} preview={editor?.kind === 'link' && graphPreview ? { definition: { ...graphPreview.definition, id: graphPreview.definition.id || `unsaved:${editor.token}`, tenantId: category?.tenantId ?? '' }, etag: editor.record?.etag ?? 'unsaved', status: graphPreview.dirty || !editor.record ? 'draft' : editor.record.status } : undefined} onSelectLink={(record) => void open(record)} onSelectSchema={(record) => void open(record)} onCreateLink={createRelation} editor={editing} layoutScope={layoutScope} disabled={!!opening || refreshing} /></Suspense> : visible.length === 0 ? <div className="empty-state model-empty"><div className="model-empty-icon"><Box size={30} /></div><h2>{search ? '没有匹配的业务定义' : scopedModels.length ? '此类型还没有定义' : '从第一个业务对象开始'}</h2><p className="muted">{search ? '调整搜索词，查看当前分类下的其他业务定义。' : '将业务概念转化为可管理、可查询的模型。'}</p>{!search && category && <button type="button" className="button primary" onClick={() => launchEditor({ kind })}><Plus size={17} />新建{kindLabels[kind]}</button>}</div> : layout === 'list' ? <div className="model-list-wrap"><table className="model-list-table" aria-label="按分组排列的业务模型">
       <thead><tr><th className="model-list-name">模型名称</th><th className="model-list-type">类型</th><th className="model-list-status">状态</th><th className="model-list-description">描述</th><th className="model-list-details">概要</th><th className="model-list-actions">操作</th></tr></thead>
       {visibleGroups.map((group) => <tbody key={group.id} aria-label={group.name}>
         <tr className="model-group-heading-row"><th colSpan={6} scope="rowgroup">{groupHeading(group)}</th></tr>

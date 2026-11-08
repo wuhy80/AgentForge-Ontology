@@ -13,6 +13,7 @@ import {
   Layers3,
   LayoutDashboard,
   LoaderCircle,
+  List,
   LogOut,
   Search,
   ShieldCheck,
@@ -21,8 +22,10 @@ import {
   Users,
 } from 'lucide-react'
 import { ApiClient, ApiError } from './lib/api'
-import type { DataCapabilities, DefinitionRecord, MetadataCapabilities, Organization, Session as AccountSession } from './lib/types'
+import type { DataCapabilities, DefinitionRecord, Kind, MetadataCapabilities, Organization, Session as AccountSession } from './lib/types'
 import { ModelsPage } from './features/model/ModelsPage'
+import { modelListRoute, modelRouteKind } from './features/model/model-routes'
+import { kindLabels } from './features/model/model-helpers'
 import { DialogScope } from './components/Dialog'
 import { Dialog } from './components/Dialog'
 import { AdminPage } from './features/admin/AdminPage'
@@ -35,13 +38,24 @@ type View = 'overview' | 'organizations' | 'sources' | 'models' | 'query' | 'adm
 type Identity = { tenantId: string; subject: string; expiresAt: number }
 type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
-const nav = [
-  { id: 'overview' as const, name: '工作空间', subtitle: '概览', icon: LayoutDashboard },
-  { id: 'organizations' as const, name: '分类与分组', subtitle: '维护业务目录', icon: FolderTree },
-  { id: 'sources' as const, name: '数据源配置', subtitle: '管理数据库连接', icon: Database },
-  { id: 'models' as const, name: '模型管理', subtitle: '定义业务世界', icon: Layers3 },
-  { id: 'query' as const, name: '数据探索', subtitle: '让数据回答问题', icon: Search },
-  { id: 'admin' as const, name: '用户与权限', subtitle: '管理成员和访问范围', icon: Users },
+type NavItem = { route: string; view: View; name: string; icon: typeof Box; kind?: Kind; administrator?: boolean }
+const navGroups: { name: string; items: NavItem[] }[] = [
+  { name: '工作台', items: [
+    { route: 'overview', view: 'overview', name: '工作空间', icon: LayoutDashboard },
+  ] },
+  { name: '本体建模', items: [
+    { route: modelListRoute('schema'), view: 'models', kind: 'schema', name: kindLabels.schema, icon: Box },
+    { route: modelListRoute('enum'), view: 'models', kind: 'enum', name: kindLabels.enum, icon: List },
+    { route: modelListRoute('link'), view: 'models', kind: 'link', name: kindLabels.link, icon: GitBranch },
+    { route: modelListRoute('action'), view: 'models', kind: 'action', name: kindLabels.action, icon: Workflow },
+    { route: modelListRoute('function'), view: 'models', kind: 'function', name: kindLabels.function, icon: Braces },
+    { route: 'sources', view: 'sources', name: '数据源配置', icon: Database, administrator: true },
+  ] },
+  { name: '数据与管理', items: [
+    { route: 'query', view: 'query', name: '数据探索', icon: Search },
+    { route: 'organizations', view: 'organizations', name: '分类与分组', icon: FolderTree },
+    { route: 'admin', view: 'admin', name: '用户与权限', icon: Users, administrator: true },
+  ] },
 ]
 
 function currentView(route = window.location.hash.slice(1)): View {
@@ -381,7 +395,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
     if (replace) window.history.replaceState(null, '', `#${path}`)
     else window.location.hash = path
   }
-  const navigate = (next: View, preserveEditor = false) => {
+  const navigate = (next: string, preserveEditor = false) => {
     if (!preserveEditor && navigationGuard.current && !navigationGuard.current()) return
     navigateModel(next)
   }
@@ -391,7 +405,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
     setSelectedCategoryId(id)
     setInitialSchemaId(undefined)
     setSelectionRequest((value) => value + 1)
-    if (view === 'models' && route.startsWith('models/')) navigateModel('models', true)
+    if (view === 'models' && route.startsWith('models/')) navigateModel(modelListRoute(modelRouteKind(route, entries)), true)
   }
   useEffect(() => {
     if (!loaded || !route.startsWith('models/') || route.startsWith('models/new')) return
@@ -408,7 +422,9 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
   const scopedCurrent = current.filter((record) => record.definition.categoryId === categoryId)
   const scopedEntries = entries.filter((record) => record.definition.categoryId === categoryId)
   const schemas = scopedCurrent.filter((record) => record.definition.kind === 'schema')
-  const title = nav.find((item) => item.id === view)!.name
+  const modelKind = modelRouteKind(route, entries)
+  const isCurrentNav = (item: NavItem) => view === item.view && (!item.kind || item.kind === modelKind)
+  const title = navGroups.flatMap((group) => group.items).find(isCurrentNav)!.name
   return (
     <div className="app-layout">
       <a
@@ -431,22 +447,24 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
           </span>
           <ShieldCheck size={16} />
         </div>
-        <div className="nav-label">工作台</div>
         <nav aria-label="工作台导航">
-          {nav.filter((item) => !['admin', 'sources'].includes(item.id) || session.account.user.administrator).map((item) => (
+          {navGroups.map((group) => <div className="nav-group" role="group" aria-label={group.name} key={group.name}>
+            <div className="nav-label">{group.name}</div>
+            {group.items.filter((item) => !item.administrator || session.account.user.administrator).map((item) => (
             <a
-              href={`#${item.id}`}
-              onClick={(event) => { event.preventDefault(); navigate(item.id) }}
-              key={item.id}
-              className={`nav-item ${view === item.id ? 'active' : ''}`}
+              href={`#${item.route}`}
+              onClick={(event) => { event.preventDefault(); navigate(item.route) }}
+              key={item.route}
+              className={`nav-item ${isCurrentNav(item) ? 'active' : ''}`}
               aria-label={item.name}
-              aria-current={view === item.id ? 'page' : undefined}
+              title={item.name}
+              aria-current={isCurrentNav(item) ? 'page' : undefined}
             >
               <item.icon size={19} strokeWidth={1.7} />
               <span>{item.name}</span>
-              {view === item.id && <ChevronRight size={15} />}
+              {isCurrentNav(item) && <ChevronRight size={15} />}
             </a>
-          ))}
+          ))}</div>)}
         </nav>
         <div className="sidebar-guide">
           <span className="guide-icon">

@@ -575,6 +575,11 @@ td .icon-button {
   display: flex;
   flex-direction: column;
   z-index: 20;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.sidebar > * {
+  flex-shrink: 0;
 }
 .brand {
   display: flex;
@@ -622,7 +627,7 @@ td .icon-button {
   border: 1px solid #35584b;
   background: #20473a;
   border-radius: 8px;
-  margin: 34px 0 30px;
+  margin: 24px 0;
   padding: 11px 10px;
   font-size: 11px;
   min-width: 0;
@@ -665,19 +670,24 @@ td .icon-button {
   font-weight: 500;
   color: #779682;
   letter-spacing: 2px;
-  margin: 0 15px 14px;
+  margin: 0 15px 8px;
 }
 .sidebar nav {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 20px;
+}
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 .nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
   border: 0;
-  padding: 13px 15px;
+  padding: 9px 15px;
   border-radius: 7px;
   text-decoration: none;
   font-size: 12px;
@@ -703,7 +713,7 @@ td .icon-button {
   color: #e1ecdb;
 }
 .sidebar-guide {
-  margin: 40px 3px 20px;
+  margin: 24px 3px 20px;
   padding: 18px 15px 17px;
   border: 1px solid #3f604d;
   border-radius: 10px;
@@ -1757,12 +1767,16 @@ textarea.field:disabled {
     display: none;
   }
   .sidebar nav {
-    margin-top: 40px;
+    margin-top: 24px;
     width: 100%;
-    gap: 10px;
+    gap: 12px;
+  }
+  .nav-group + .nav-group {
+    border-top: 1px solid #35584b;
+    padding-top: 12px;
   }
   .sidebar .nav-item {
-    padding: 14px 17px;
+    padding: 10px 17px;
     justify-content: center;
   }
   .sidebar-bottom {
@@ -1891,7 +1905,7 @@ textarea.field:disabled {
     padding-right: 6px;
   }
   .sidebar .nav-item {
-    padding: 14px;
+    padding: 10px 14px;
   }
   .workspace-main {
     margin-left: 59px;
