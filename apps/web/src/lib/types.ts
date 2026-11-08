@@ -281,7 +281,17 @@ export interface Organization { id: string; tenantId: string; categoryId?: strin
 export interface Page<T> { data: T[]; hasMore: boolean; nextCursor?: string }
 export interface Publication { id: string; tenantId: string; definitionId: string; status: string; error?: string }
 export interface Preview { operationId: string; status: string; statements?: string[] }
-export interface Expression { op: string; field?: string; value?: JsonValue; args?: Expression[] }
+export interface PermissionValueRef {
+  source: 'user' | 'object'
+  attribute?: 'id' | 'tenantId' | 'username' | 'displayName' | 'roleIds' | 'userGroupIds'
+  schemaId?: string
+  fieldId?: string
+  instanceId?: string
+  matchFieldId?: string
+  matchUserAttribute?: 'id' | 'username'
+  mode?: 'scalar' | 'set'
+}
+export interface Expression { op: string; field?: string; value?: JsonValue; valueRef?: PermissionValueRef; args?: Expression[] }
 export interface Source { schemaId?: string; category?: string; schema?: string }
 export interface Order { field: string; direction: 'asc' | 'desc' }
 export interface QuerySpec {
@@ -410,4 +420,4 @@ export interface Decision {
   state: string
 }
 export interface SimulationRequest { userId: string; request: { operation: string; resourceId: string }; draft: boolean }
-export interface SimulationResult { decision: Decision; reason: string }
+export interface SimulationResult { decision: Decision; reason: string; contextProtected?: boolean }

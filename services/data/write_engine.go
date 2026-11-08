@@ -250,6 +250,9 @@ func mutationResult(schema *c.Schema, item mutationSavedItem, decisions mutation
 
 func (h *handler) executeMutations(ctx context.Context, p c.Principal, current c.CurrentDefinition, req mutationRequest, decisions mutationDecisions) (c.BulkWriteResult, error) {
 	result := c.BulkWriteResult{SchemaID: current.Definition.ID, Atomic: true, Committed: true, Results: []c.WriteResult{}}
+	if err := validateWriteContext(current, mutationContextDecisions(decisions), map[string]bool{current.Definition.ID: true}); err != nil {
+		return c.BulkWriteResult{}, err
+	}
 	// A gate serializes platform requests; retries are still bounded for source
 	// unique-key races, deadlocks and first-use idempotency insert contention.
 	for attempt := 0; attempt < 3; attempt++ {
@@ -444,6 +447,9 @@ func (h *handler) prepareMutation(ctx context.Context, p c.Principal, schemaID, 
 		return current, nil, err
 	}
 	decisions, err := h.mutationDecisions(ctx, p, current.Definition.ID, operation, policy)
+	if err == nil {
+		err = validateWriteContext(current, mutationContextDecisions(decisions), map[string]bool{current.Definition.ID: true})
+	}
 	if err == nil && current.Definition.Schema.StorageBinding != nil {
 		ready, _, readinessErr := h.mappedMutationReadiness(ctx, current)
 		if readinessErr != nil {

@@ -53,6 +53,8 @@ func run() error {
 		origin = "http://127.0.0.1:5173"
 	}
 	accounts := identity.NewStore(e.DB(), &platform.OPAAuthorizer{URL: os.Getenv("ONTOLOGY_OPA_URL"), BearerToken: os.Getenv("ONTOLOGY_OPA_TOKEN")}, origin)
+	contextValues := &platform.RemoteObjectContext{URL: os.Getenv("ONTOLOGY_DATA_URL"), ServiceToken: service}
+	accounts.ObjectContext = contextValues.Read
 	if err := accounts.ConfigureAdditionalOrigins(strings.Split(os.Getenv("ONTOLOGY_ADDITIONAL_PUBLIC_ORIGINS"), ",")...); err != nil {
 		return err
 	}

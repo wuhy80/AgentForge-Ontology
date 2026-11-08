@@ -176,15 +176,20 @@ func (h *handler) formDefinitionHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	canWrite := func(permission string) bool {
+		decision := decisions[permission]
+		return decision.Allow && storageReady && validateWriteContext(current, []c.Decision{decision}, map[string]bool{id: true}) == nil
+	}
 	out := c.FormDefinition{Definition: c.FormSchemaDefinition{ID: id, Schema: c.FormSchema{Properties: []c.FormField{}, StorageBinding: mapped}}, Operation: operation,
-		CreateAllowed: decisions["instance.create"].Allow && storageReady, PatchAllowed: decisions["instance.patch"].Allow && storageReady}
+		CreateAllowed: canWrite("instance.create"), PatchAllowed: canWrite("instance.patch")}
 	write := decisions["instance."+operation]
+	operationAllowed := canWrite("instance." + operation)
 	for _, property := range d.Schema.Properties {
 		if !fieldAllowed(query.ReadFields, property.ID) {
 			continue
 		}
 		out.Definition.Schema.Properties = append(out.Definition.Schema.Properties, c.FormField{ID: property.ID, Name: property.Name, DataType: property.DataType,
-			Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || protectedFields[property.ID] || !storageReady || !write.Allow || !fieldAllowed(write.WriteFields, property.ID), Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID})
+			Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || protectedFields[property.ID] || !operationAllowed || !fieldAllowed(write.WriteFields, property.ID), Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID})
 	}
 	for name, previous := range decisions {
 		now, e := h.cfg.Authorizer.Authorize(r.Context(), p, c.AuthorizationRequest{Operation: name, ResourceID: id, Kind: c.KindSchema})

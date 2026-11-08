@@ -57,6 +57,9 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 	bad := func() (string, []any, error) {
 		return "", nil, problem(422, "invalid_expression", "表达式结构不合法")
 	}
+	if e.ValueRef != nil {
+		return bad()
+	}
 	if e.Op == "and" || e.Op == "or" || e.Op == "not" {
 		if e.Field != "" || len(e.Value) > 0 || len(e.Args) == 0 || (e.Op == "not" && len(e.Args) != 1) {
 			return bad()

@@ -57,8 +57,19 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `POST /internal/publications/preview` | 只读结构预览；正文为 `contracts.PrepareRequest` |
 | `POST /internal/publications/prepare` | 持久关闭受影响 Schema 入口、等待已入场事务排空、执行并核验物理计划 |
 | `POST /internal/publications/activate` | 核验 Metadata 权威当前摘要后恢复访问 |
+| `POST /internal/authorization/object-value` | 仅服务端授权取值；固定实例或当前用户匹配的资料对象，正文及响应见下文 |
 
 内部发布接口只接受服务 Bearer token 和 `X-Tenant-ID`。普通接口使用用户在工作台账号密码登录后取得的 Cookie 会话，Data 每次通过 Metadata 核对会话、当前账号和租户；所有非安全方法请求，包括 POST 查询，还要求同源 `Origin` 与匹配的 `X-CSRF-Token`。不能用外部请求的租户头或手工 Bearer 凭证替代用户会话。
+
+### 权限对象上下文取值
+
+`POST /internal/authorization/object-value`只接受内部服务凭据及`X-Tenant-ID`；公网网关拒绝`/internal/`，普通Cookie和MCP凭据不授予访问。Metadata只可从管理员保存的权限规则构造请求，不能将客户端提供的对象或属性原样转发。规则对判权属性的最小读取不授普通对象读取、字段投影或编辑资格，公共机制仍由[权限设计](../../docs/权限/权限设计.md)维护。
+
+实际DTO见[permission_context.go](../../contracts/permission_context.go)。正文为`{schemaId,fieldId,instanceId?,matchFieldId?,matchValue?,mode?}`，字段仅接受稳定ID。选择器二选一：固定`instanceId`，或`matchFieldId`等于已由Metadata解析的当前用户属性值。`mode`省略或`scalar`要求恰好一行，字段匹配还要求当前定义存在单字段唯一索引；`set`匹配结果最多100行，查询取至多101行检测超限，按实例ID确定顺序并返回去重后的属性值集合，超过100行整项拒绝，即使去重后不超限也不截断。仅支持平台默认MySQL单表；映射来源、跨源与Link路径不可用于此接口。
+
+响应为`{value,digest}`，单值或集合内的int64/decimal继续使用精确字符串；取值总JSON不超过64KiB，内部请求正文不超过32KiB。缺少对象、业务NULL、无匹配、歧义、无效绑定及超预算统一返回403且不回显原值。只选取请求属性与行身份/ETag作依赖证据，不返回其他业务属性，也不再次调用授权服务造成递归。
+
+取值使用独立READ COMMITTED只读事务，前后核对发布gate与权威当前定义；不锁gate，避免在原Data写事务持有同一gate时回调死锁。此精确内部路径使用独立的1个执行槽、至多4个等待请求和4秒总预算，不占原业务请求的执行槽，也不无限绕过资源限制。digest绑定租户、定义ETag、选择器、所选行ID/ETag和值，后续授权复核据此发现已提交的依赖变化。该读取不观察调用方事务的未提交修改，也不提供跨服务原子撤权；写入侧对上下文源与写目标重叠及未认证的跨源组合继续明确拒绝。
 
 MCP 接入另接受 Metadata 签发的 `mcp_` 外部 Bearer，仅允许窄路由白名单内的能力发现、查询上下文、对象读取、QuerySpec 与 OntologySQL 查询。Metadata 每次核验凭据、scope 及真实用户，Data 继续执行相同行列权限；查询目录经窄内部桥读取，不开放完整定义、物理映射或数据源管理。外部 Bearer 不沿用浏览器 Cookie/CSRF，禁止混用；具体认证边界见[权限设计](../../docs/权限/权限设计.md#mcp-与外部客户端认证2026-11-08已接入)，客户端接入见[MCP服务](../mcp/README.md)。
 

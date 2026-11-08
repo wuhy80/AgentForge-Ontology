@@ -143,11 +143,14 @@ func (h *handler) writeCapabilitiesHTTP(w http.ResponseWriter, r *http.Request) 
 	for _, name := range []string{"create", "update", "delete", "upsert", "bulk_create", "bulk_update", "bulk_delete", "bulk_upsert"} {
 		relevant, allow := capabilityDecisions(decisions, name)
 		operation := c.WriteOperationCapability{Name: name, Allowed: ready && allow, WriteFields: []string{}}
+		contextErr := validateWriteContext(current, relevant, map[string]bool{current.Definition.ID: true})
 		switch {
 		case !allow:
 			operation.Reason = "forbidden"
 		case !ready:
 			operation.Reason = reason
+		case contextErr != nil:
+			operation.Allowed, operation.Reason = false, "context_write_unsupported"
 		case (name == "delete" || name == "bulk_delete") && !deleteReady:
 			operation.Allowed, operation.Reason = false, "mapped_relation_mutation_unsupported"
 		}
@@ -174,12 +177,16 @@ func (h *handler) writeCapabilitiesHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	upsertRelevant, upsertAllowed := capabilityDecisions(decisions, "upsert")
+	upsertAllowed = upsertAllowed && validateWriteContext(current, upsertRelevant, map[string]bool{current.Definition.ID: true}) == nil
 	if ready && upsertAllowed {
 		out.MatchModes = []string{"id"}
 		out.OverwriteAllowed = decisions["instance.upsert.overwrite"].Allow
 		overwriteRelevant := append([]c.Decision(nil), upsertRelevant...)
 		if out.OverwriteAllowed {
 			overwriteRelevant = append(overwriteRelevant, decisions["instance.upsert.overwrite"])
+			out.OverwriteAllowed = validateWriteContext(current, overwriteRelevant, map[string]bool{current.Definition.ID: true}) == nil
+		}
+		if out.OverwriteAllowed {
 			for _, fieldID := range capabilityWriteFields(current.Definition.Schema, overwriteRelevant) {
 				if !protectedFields[fieldID] {
 					out.OverwriteWriteFields = append(out.OverwriteWriteFields, fieldID)

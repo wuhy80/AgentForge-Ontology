@@ -59,6 +59,10 @@ func (a *RemoteAuthorizer) Authorize(ctx context.Context, p contracts.Principal,
 }
 
 func authorityCall(ctx context.Context, base, serviceToken string, client *http.Client, path string, input, output any) error {
+	return authorityTenantCall(ctx, base, serviceToken, client, path, "", input, output)
+}
+
+func authorityTenantCall(ctx context.Context, base, serviceToken string, client *http.Client, path, tenant string, input, output any) error {
 	endpoint, err := url.Parse(base)
 	if err != nil || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || len(serviceToken) < 32 {
 		return &AccessError{Status: 503, Code: "identity_unavailable", Message: "身份与权限服务未正确配置"}
@@ -75,6 +79,9 @@ func authorityCall(ctx context.Context, base, serviceToken string, client *http.
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+serviceToken)
+	if tenant != "" {
+		request.Header.Set("X-Tenant-ID", tenant)
+	}
 	transport := http.Client{Timeout: 5 * time.Second}
 	if client != nil {
 		transport = *client
@@ -110,4 +117,21 @@ func authorityCall(ctx context.Context, base, serviceToken string, client *http.
 		return errors.New("invalid authority response framing")
 	}
 	return nil
+}
+
+// RemoteObjectContext reads only explicitly configured authorization attributes
+// from Data. It cannot be called with a browser token or user-supplied URL.
+type RemoteObjectContext struct {
+	URL          string
+	ServiceToken string
+	Client       *http.Client
+}
+
+func (c *RemoteObjectContext) Read(ctx context.Context, tenant string, input contracts.ObjectContextRequest) (contracts.ObjectContextResult, error) {
+	var result contracts.ObjectContextResult
+	if tenant == "" || len(tenant) > 128 {
+		return result, errors.New("missing context tenant")
+	}
+	err := authorityTenantCall(ctx, c.URL, c.ServiceToken, c.Client, "/internal/authorization/object-value", tenant, input, &result)
+	return result, err
 }

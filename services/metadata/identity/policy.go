@@ -121,6 +121,7 @@ func (s *Store) simulate(w http.ResponseWriter, r *http.Request) error {
 	}
 	var runtime contracts.RuntimePolicy
 	var principal contracts.Principal
+	var subject permissionSubject
 	err := s.mutation(r, true, func(tx *sql.Tx, actor contracts.User) error {
 		user, err := scanUser(tx.QueryRowContext(r.Context(), "SELECT "+userColumns+" FROM af_identity_users WHERE tenant_id=? AND id=?", actor.TenantID, input.UserID))
 		if err != nil {
@@ -156,13 +157,21 @@ func (s *Store) simulate(w http.ResponseWriter, r *http.Request) error {
 					runtime.Rules = append(runtime.Rules, rule)
 				}
 			}
+			subject, err = permissionSubjectFor(r.Context(), tx, user, ids, &runtime, input.Request)
+			if err != nil {
+				return err
+			}
 		}
 		return audit(r.Context(), tx, actor.TenantID, actor.ID, "policy.simulate", user.ID)
 	})
 	if err != nil {
 		return err
 	}
-	decision, err := platform.EvaluateRuntimePolicy(r.Context(), s.OPA, &runtime, principal, input.Request)
+	resolved, protected, err := s.resolvePermissionContext(r.Context(), runtime, subject, input.Request)
+	if err != nil {
+		return err
+	}
+	decision, err := platform.EvaluateRuntimePolicy(r.Context(), s.OPA, &resolved, principal, input.Request)
 	if err != nil {
 		return err
 	}
@@ -170,7 +179,11 @@ func (s *Store) simulate(w http.ResponseWriter, r *http.Request) error {
 	if decision.Allow {
 		reason = "匹配当前角色授权；行条件仍需在实际数据访问时校验"
 	}
-	writeJSON(w, 200, contracts.SimulationResult{Decision: decision, Reason: reason})
+	if protected {
+		decision.RowFilter, decision.NewRowFilter = nil, nil
+		decision.ContextDigest, decision.ContextSchemaIDs = "", nil
+	}
+	writeJSON(w, 200, contracts.SimulationResult{Decision: decision, Reason: reason, ContextProtected: protected})
 	return nil
 }
 
@@ -270,6 +283,9 @@ func validatePolicy(ctx context.Context, tx *sql.Tx, tenant string, policy contr
 			if err := validateCondition(expression, fields); err != nil {
 				return err
 			}
+			if err := validateObjectReferences(ctx, tx, tenant, expression, fields); err != nil {
+				return err
+			}
 		}
 		if rule.NewRowFilter != nil && rule.Operation != "instance.create" && rule.Operation != "instance.patch" && rule.Operation != "instance.upsert" && rule.Operation != "instance.upsert.overwrite" {
 			return problem(422, "unsupported_policy", "只有创建、修改和upsert操作可声明新值条件")
@@ -307,8 +323,15 @@ func validateCondition(expression *contracts.Expression, fields map[string]contr
 	if field.DataType == "boolean" && expression.Op != "eq" && expression.Op != "ne" && expression.Op != "in" && expression.Op != "notIn" {
 		return problem(422, "invalid_policy_type", "布尔条件不支持大小比较")
 	}
+	if expression.ValueRef != nil {
+		return validateUserReference(field, *expression.ValueRef)
+	}
 	values := []json.RawMessage{expression.Value}
 	if expression.Op == "in" || expression.Op == "notIn" {
+		// RawMessage.UnmarshalJSON may reuse its destination buffer. Do not
+		// seed that buffer with the original complete array: decoding its first
+		// element would then overwrite the policy operand being validated.
+		values = nil
 		if json.Unmarshal(expression.Value, &values) != nil {
 			return problem(422, "invalid_policy_type", "集合条件必须是同类型值列表")
 		}

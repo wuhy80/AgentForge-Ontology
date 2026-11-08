@@ -106,15 +106,18 @@ type SimulationRequest struct {
 }
 
 type SimulationResult struct {
-	Decision Decision `json:"decision"`
-	Reason   string   `json:"reason"`
+	Decision         Decision `json:"decision"`
+	Reason           string   `json:"reason"`
+	ContextProtected bool     `json:"contextProtected,omitempty"`
 }
 
 // RuntimePolicy is supplied by the authoritative application to OPA; browsers
 // never provide it. Rules have already been scoped to the user's active roles.
 type RuntimePolicy struct {
-	State string           `json:"state"`
-	Rules []PermissionRule `json:"rules"`
+	State            string           `json:"state"`
+	Rules            []PermissionRule `json:"rules"`
+	ContextDigest    string           `json:"contextDigest,omitempty"`
+	ContextSchemaIDs []string         `json:"contextSchemaIds,omitempty"`
 }
 
 type SessionCheck struct {

@@ -29,6 +29,11 @@ type dataBudgetContextKey struct{}
 // skip a nested wrapper belonging to the same limiter that already admitted it.
 var dataServiceLimiter = &dataResourceLimiter{slots: make(chan struct{}, c.MaxDataConcurrentRequests), pending: make(chan struct{}, c.MaxDataQueuedRequests)}
 
+// Authoritative attribute callbacks can arrive while all public request slots
+// are held by callers awaiting those callbacks. Keep this exact service-only
+// route separately bounded so authorization cannot deadlock business admission.
+var objectContextLimiter = &dataResourceLimiter{slots: make(chan struct{}, 1), pending: make(chan struct{}, c.MaxDataQueuedRequests)}
+
 func responseBudgetError() error {
 	return problem(422, "response_budget", "响应超过 8 MiB，请减少查询字段或分页大小后重试")
 }
@@ -332,7 +337,15 @@ func (limiter *dataResourceLimiter) acquire(ctx context.Context) error {
 
 // Health probes bypass business admission so overload remains observable.
 func withDataBudgets(next http.Handler) http.Handler {
-	return dataServiceLimiter.protect(next)
+	business := dataServiceLimiter.protect(next)
+	attributes := objectContextLimiter.protect(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/internal/authorization/object-value" {
+			attributes.ServeHTTP(w, r)
+			return
+		}
+		business.ServeHTTP(w, r)
+	})
 }
 
 // ProtectResources must wrap the public session middleware in the service
@@ -352,7 +365,7 @@ func (limiter *dataResourceLimiter) protect(next http.Handler) http.Handler {
 			return
 		}
 		timeout := dataRequestTimeout
-		if r.URL.Path == "/data/query/context" {
+		if r.URL.Path == "/data/query/context" || r.URL.Path == "/internal/authorization/object-value" {
 			// Include admission and authority RPCs in the directory deadline,
 			// leaving transport margin within OntoApp's five-second upstream cap.
 			timeout = 4 * time.Second

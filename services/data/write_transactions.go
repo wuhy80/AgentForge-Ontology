@@ -292,6 +292,15 @@ func (h *handler) prepareWriteTransaction(ctx context.Context, p c.Principal, bo
 		operations = append(operations, preparedTransactionOperation{current: current, request: mutationRequest{Operation: item.Operation, ConflictPolicy: policy}, decisions: decisions, command: command})
 	}
 	schemas := make([]c.CurrentDefinition, 0, len(schemaMap))
+	contextTargets := map[string]bool{}
+	for id := range schemaMap {
+		contextTargets[id] = true
+	}
+	for _, item := range operations {
+		if err := validateWriteContext(item.current, mutationContextDecisions(item.decisions), contextTargets); err != nil {
+			return nil, nil, err
+		}
+	}
 	for _, current := range schemaMap {
 		schemas = append(schemas, current)
 	}

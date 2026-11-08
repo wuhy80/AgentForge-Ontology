@@ -2,37 +2,45 @@ import { useState } from 'react'
 import { Plus, Save, Trash2, X } from 'lucide-react'
 import { Dialog } from '../../components/Dialog'
 import type { DefinitionRecord, Organization, PermissionRule, Property, Role } from '../../lib/types'
-import { availableOperators, compileFilter, errorMessage, newCondition, newGroup } from '../query/query'
-import type { FilterCondition, FilterGroup, FilterNode } from '../query/query'
-import { filterFromExpression, operations, operationResources, resourceName } from './policy'
+import { availableOperators, errorMessage, newCondition, newGroup } from '../query/query'
+import { compilePermissionFilter, filterFromExpression, operations, operationResources, resourceName, userAttributeOptions } from './policy'
+import type { PermissionFilterCondition, PermissionFilterGroup, PermissionFilterNode } from './policy'
+import { adjustContextReference, ContextValueInput } from './ContextValueInput'
 
-function ConditionInput({ condition, properties, onChange, onRemove }: { condition: FilterCondition; properties: Property[]; onChange: (value: FilterCondition) => void; onRemove: () => void }) {
+function ConditionInput({ condition, properties, definitions, categories, onChange, onRemove }: { condition: PermissionFilterCondition; properties: Property[]; definitions: DefinitionRecord[]; categories: Organization[]; onChange: (value: PermissionFilterCondition) => void; onRemove: () => void }) {
   const property = properties.find((item) => item.id === condition.field)
   const noValue = ['isNull', 'isNotNull'].includes(condition.op)
   const set = ['in', 'notIn'].includes(condition.op)
   return <div className="admin-condition">
     <select aria-label="行条件字段" value={condition.field} onChange={(event) => {
       const field = properties.find((item) => item.id === event.target.value)
-      onChange({ ...condition, field: event.target.value, op: availableOperators(field).some((item) => item.value === condition.op) ? condition.op : 'eq', raw: field?.dataType === 'boolean' ? 'true' : '' })
+      const op = availableOperators(field).some((item) => item.value === condition.op) ? condition.op : 'eq'
+      onChange({ ...condition, field: event.target.value, op, raw: field?.dataType === 'boolean' ? 'true' : '', valueRef: adjustContextReference(condition.valueRef, field, op, definitions) })
     }}>{properties.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-    <select aria-label="行条件运算符" value={condition.op} onChange={(event) => onChange({ ...condition, op: event.target.value })}>{availableOperators(property).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-    {noValue ? <span className="muted">无需比较值</span> : set ? <textarea aria-label="行条件集合，每行一个值" value={condition.raw} rows={2} onChange={(event) => onChange({ ...condition, raw: event.target.value })} placeholder="每行一个值" />
+    <select aria-label="行条件运算符" value={condition.op} onChange={(event) => onChange({ ...condition, op: event.target.value, valueRef: adjustContextReference(condition.valueRef, property, event.target.value, definitions) })}>{availableOperators(property).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+    <div className="admin-condition-value">{noValue ? <span className="muted">无需比较值</span> : <>
+      <select aria-label="行条件取值来源" value={condition.valueRef?.source ?? 'literal'} onChange={(event) => {
+        const source = event.target.value
+        onChange({ ...condition, raw: '', valueRef: source === 'literal' ? undefined : source === 'user' ? { source: 'user', attribute: userAttributeOptions(property, set)[0]?.value } : { source: 'object', schemaId: '', fieldId: '', ...(set ? { mode: 'set', matchFieldId: '', matchUserAttribute: 'id' } : { instanceId: '' }) } })
+      }}><option value="literal">固定值</option><option value="user" disabled={!userAttributeOptions(property, set).length}>当前用户</option><option value="object">对象属性</option></select>
+      {condition.valueRef ? <ContextValueInput value={condition.valueRef} property={property} op={condition.op} definitions={definitions} categories={categories} onChange={(valueRef) => onChange({ ...condition, valueRef })} />
+      : set ? <textarea aria-label="行条件集合，每行一个值" value={condition.raw} rows={2} onChange={(event) => onChange({ ...condition, raw: event.target.value })} placeholder="每行一个值" />
       : property?.dataType === 'boolean' ? <select aria-label="行条件比较值" value={condition.raw} onChange={(event) => onChange({ ...condition, raw: event.target.value })}><option value="true">是</option><option value="false">否</option></select>
         : property?.dataType === 'text' || property?.dataType === 'longtext' ? <textarea aria-label="行条件比较值" value={condition.raw} rows={2} onChange={(event) => onChange({ ...condition, raw: event.target.value })} />
-        : <input aria-label="行条件比较值" type="text" value={condition.raw} onChange={(event) => onChange({ ...condition, raw: event.target.value })} placeholder={property?.dataType === 'timestamp' ? '带时区的 RFC 3339 时间' : '比较值'} />}
+        : <input aria-label="行条件比较值" type="text" value={condition.raw} onChange={(event) => onChange({ ...condition, raw: event.target.value })} placeholder={property?.dataType === 'timestamp' ? '带时区的 RFC 3339 时间' : '比较值'} />}</>}</div>
     <button type="button" className="icon-button" aria-label="移除行条件" onClick={onRemove}><X size={15} /></button>
   </div>
 }
 
-function FilterEditor({ group, properties, onChange, depth = 0, onRemove }: { group: FilterGroup; properties: Property[]; onChange: (value: FilterGroup) => void; depth?: number; onRemove?: () => void }) {
-  function replace(value: FilterNode) { onChange({ ...group, children: group.children.map((item) => item.id === value.id ? value : item) }) }
+function FilterEditor({ group, properties, definitions, categories, onChange, depth = 0, onRemove }: { group: PermissionFilterGroup; properties: Property[]; definitions: DefinitionRecord[]; categories: Organization[]; onChange: (value: PermissionFilterGroup) => void; depth?: number; onRemove?: () => void }) {
+  function replace(value: PermissionFilterNode) { onChange({ ...group, children: group.children.map((item) => item.id === value.id ? value : item) }) }
   return <div className="admin-filter-group"><div className="admin-inline">
     <select aria-label="行条件组逻辑" value={group.join} onChange={(event) => onChange({ ...group, join: event.target.value as 'and' | 'or' })}><option value="and">满足全部 AND</option><option value="or">满足任意 OR</option></select>
     <label className="admin-check"><input type="checkbox" checked={group.negated} onChange={(event) => onChange({ ...group, negated: event.target.checked })} />取反 NOT</label>
     {onRemove && <button type="button" className="icon-button" aria-label="移除行条件组" onClick={onRemove}><Trash2 size={14} /></button>}</div>
     {!group.children.length && <p className="muted admin-filter-empty">不附加此行条件</p>}
-    {group.children.map((child) => child.kind === 'condition' ? <ConditionInput key={child.id} condition={child} properties={properties} onChange={replace} onRemove={() => onChange({ ...group, children: group.children.filter((item) => item.id !== child.id) })} />
-      : <FilterEditor key={child.id} group={child} properties={properties} onChange={replace} depth={depth + 1} onRemove={() => onChange({ ...group, children: group.children.filter((item) => item.id !== child.id) })} />)}
+    {group.children.map((child) => child.kind === 'condition' ? <ConditionInput key={child.id} condition={child} properties={properties} definitions={definitions} categories={categories} onChange={replace} onRemove={() => onChange({ ...group, children: group.children.filter((item) => item.id !== child.id) })} />
+      : <FilterEditor key={child.id} group={child} properties={properties} definitions={definitions} categories={categories} onChange={replace} depth={depth + 1} onRemove={() => onChange({ ...group, children: group.children.filter((item) => item.id !== child.id) })} />)}
     <div className="admin-inline"><button type="button" className="button subtle" disabled={group.children.length >= 30} onClick={() => onChange({ ...group, children: [...group.children, newCondition(properties)] })}><Plus size={14} />添加行条件</button>
       {depth < 3 && <button type="button" className="button subtle" disabled={group.children.length >= 30} onClick={() => onChange({ ...group, children: [...group.children, newGroup()] })}>添加条件组</button>}</div>
   </div>
@@ -80,8 +88,8 @@ export function RuleDialog({ rule, roles, definitions, categories, onClose, onSa
       if (!resourceId || resourceId !== '*' && !selected) throw new Error('请选择当前可见的生效资源')
       if (operation.startsWith('organization.') && resourceId !== '*') throw new Error('分类与分组操作使用租户内全部资源范围')
       const dataAllow = effect === 'allow' && instanceOperation
-      const where = canCondition ? compileFilter(rowFilter, properties) : undefined
-      const next = canNewCondition ? compileFilter(newRowFilter, properties) : undefined
+      const where = dataAllow && resourceId !== '*' ? compilePermissionFilter(rowFilter, properties, definitions) : undefined
+      const next = dataAllow && resourceId !== '*' && ['instance.create', 'instance.patch', 'instance.upsert', 'instance.upsert.overwrite'].includes(operation) ? compilePermissionFilter(newRowFilter, properties, definitions) : undefined
       const allowedFields = new Set(properties.map((property) => property.id))
       if (dataAllow && resourceId !== '*' && [...readFields, ...writeFields].some((field) => field !== '*' && !allowedFields.has(field))) throw new Error('字段已失效，请重新选择')
       onSave({ id: rule?.id ?? crypto.randomUUID(), roleId, effect, operation, resourceId,
@@ -106,8 +114,8 @@ export function RuleDialog({ rule, roles, definitions, categories, onClose, onSa
         : !instanceOperation ? <div className="notice">{operation.endsWith('.invoke') ? '调用按整个操作授权，不支持字段或行条件。运行动作还需拥有其绑定函数的运行权限。' : operation.startsWith('link.') ? '关系按整个操作授权；查询和维护关系时仍独立检查两端对象的数据权限。' : '定义及组织管理按整个操作授权，无需选择字段或行条件。'}</div>
           : <><div className="form-grid"><FieldSelection title="可读字段" fields={readFields} properties={resourceId === '*' ? [] : properties} onChange={setReadFields} /><FieldSelection title="可写字段" fields={writeFields} properties={resourceId === '*' ? [] : properties.filter((property) => !property.readOnly)} onChange={setWriteFields} /></div>
             {resourceId === '*' && <p className="muted">全部资源范围仅支持“全部字段”或“无字段”，不支持行条件。</p>}
-            {canCondition && <><section><h3>读取 / 原行条件</h3><p className="muted admin-help">先在服务端限制可读取、可修改或可删除的原行。</p><FilterEditor group={rowFilter} properties={properties} onChange={setRowFilter} /></section>
-              {canNewCondition && <section><h3>创建 / 修改后的新行条件</h3><p className="muted admin-help">留空时沿用原行条件；限制创建或修改后的值。</p><FilterEditor group={newRowFilter} properties={properties} onChange={setNewRowFilter} /></section>}</>}
+            {canCondition && <><section><h3>读取 / 原行条件</h3><p className="muted admin-help">先在服务端限制可读取、可修改或可删除的原行。可引用当前用户信息，或读取指定、按当前用户匹配的对象属性。</p><FilterEditor group={rowFilter} properties={properties} definitions={definitions} categories={categories} onChange={setRowFilter} /></section>
+              {canNewCondition && <section><h3>创建 / 修改后的新行条件</h3><p className="muted admin-help">留空时沿用原行条件；限制创建或修改后的值。</p><FilterEditor group={newRowFilter} properties={properties} definitions={definitions} categories={categories} onChange={setNewRowFilter} /></section>}</>}
           </>}
       <div className="admin-footer"><button type="button" className="button" onClick={onClose}>取消</button><button type="submit" className="button primary"><Save size={16} />保存规则到编辑区</button></div>
     </form>

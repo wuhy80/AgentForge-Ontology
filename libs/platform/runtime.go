@@ -3,6 +3,7 @@ package platform
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -56,6 +57,10 @@ func canonicalFields(fields []string) ([]string, error) {
 }
 
 func validateFilter(expression *contracts.Expression) error {
+	return validateFilterMode(expression, false)
+}
+
+func validateFilterMode(expression *contracts.Expression, allowReferences bool) error {
 	nodes := 0
 	var visit func(*contracts.Expression, int) error
 	visit = func(e *contracts.Expression, depth int) error {
@@ -67,7 +72,7 @@ func validateFilter(expression *contracts.Expression) error {
 			return policyError("权限条件超过节点或深度预算")
 		}
 		if e.Op == "and" || e.Op == "or" || e.Op == "not" {
-			if e.Field != "" || len(e.Value) != 0 || len(e.Args) == 0 || (e.Op == "not" && len(e.Args) != 1) {
+			if e.Field != "" || len(e.Value) != 0 || e.ValueRef != nil || len(e.Args) == 0 || (e.Op == "not" && len(e.Args) != 1) {
 				return policyError("权限条件结构不合法")
 			}
 			for i := range e.Args {
@@ -79,6 +84,12 @@ func validateFilter(expression *contracts.Expression) error {
 		}
 		if len(e.Args) > 0 || !validIdentifier(e.Field, false) {
 			return policyError("权限条件必须引用稳定属性标识")
+		}
+		if e.ValueRef != nil {
+			if !allowReferences || len(e.Value) != 0 {
+				return policyError("动态引用不能与固定值混用，也不能作为已解析授权下发")
+			}
+			return ValidatePermissionValueRef(*e.ValueRef, e.Op)
 		}
 		switch e.Op {
 		case "isNull", "isNotNull":
@@ -167,10 +178,13 @@ func ValidatePermissionPolicy(policy contracts.PermissionPolicy) error {
 		if (strings.HasPrefix(rule.Operation, "link.") || callableOperation(rule.Operation)) && (!wholeResourceFields(rule.ReadFields) || !wholeResourceFields(rule.WriteFields)) {
 			return policyError("关系及函数动作调用授权以完整资源为单位，不支持字段投影")
 		}
-		if err := validateFilter(rule.RowFilter); err != nil {
+		if err := validateFilterMode(rule.RowFilter, true); err != nil {
 			return err
 		}
-		if err := validateFilter(rule.NewRowFilter); err != nil {
+		if err := validateFilterMode(rule.NewRowFilter, true); err != nil {
+			return err
+		}
+		if err := validateReferenceBudget(rule.RowFilter, rule.NewRowFilter); err != nil {
 			return err
 		}
 	}
@@ -188,6 +202,22 @@ func callableOperation(operation string) bool {
 func validateDecision(decision contracts.Decision) error {
 	if strings.TrimSpace(decision.State) == "" || len(decision.State) > 512 {
 		return errors.New("authorization state is required")
+	}
+	if len(decision.ContextSchemaIDs) > 16 {
+		return policyError("对象上下文来源超过预算")
+	}
+	if len(decision.ContextSchemaIDs) > 0 {
+		value, err := hex.DecodeString(decision.ContextDigest)
+		if err != nil || len(value) != 32 {
+			return policyError("对象上下文缺少依赖摘要")
+		}
+		for i, id := range decision.ContextSchemaIDs {
+			if !validIdentifier(id, false) || (i > 0 && decision.ContextSchemaIDs[i-1] >= id) {
+				return policyError("对象上下文来源不合法")
+			}
+		}
+	} else if decision.ContextDigest != "" {
+		return policyError("对象上下文摘要缺少来源")
 	}
 	if _, err := canonicalFields(decision.ReadFields); err != nil {
 		return err
@@ -273,7 +303,7 @@ func mergeRuntime(runtime *contracts.RuntimePolicy, request contracts.Authorizat
 	if callableOperation(request.Operation) && !validIdentifier(request.ResourceID, false) {
 		return contracts.Decision{}, policyError("调用必须指定具体函数或动作的稳定标识")
 	}
-	decision := contracts.Decision{State: runtime.State}
+	decision := contracts.Decision{State: runtime.State, ContextDigest: runtime.ContextDigest, ContextSchemaIDs: runtime.ContextSchemaIDs}
 	var oldFilters, newFilters []*contracts.Expression
 	for _, rule := range runtime.Rules {
 		if rule.Operation != request.Operation || (rule.ResourceID != "*" && rule.ResourceID != request.ResourceID) {
@@ -394,7 +424,7 @@ func EvaluateRuntimePolicy(ctx context.Context, opa *OPAAuthorizer, runtime *con
 	}
 	read, _ := canonicalFields(actual.ReadFields)
 	write, _ := canonicalFields(actual.WriteFields)
-	if strings.Join(read, "\x00") != strings.Join(grant.ReadFields, "\x00") || strings.Join(write, "\x00") != strings.Join(grant.WriteFields, "\x00") || expressionKey(actual.RowFilter) != expressionKey(grant.RowFilter) || expressionKey(actual.NewRowFilter) != expressionKey(grant.NewRowFilter) {
+	if strings.Join(read, "\x00") != strings.Join(grant.ReadFields, "\x00") || strings.Join(write, "\x00") != strings.Join(grant.WriteFields, "\x00") || expressionKey(actual.RowFilter) != expressionKey(grant.RowFilter) || expressionKey(actual.NewRowFilter) != expressionKey(grant.NewRowFilter) || actual.ContextDigest != grant.ContextDigest || strings.Join(actual.ContextSchemaIDs, "\x00") != strings.Join(grant.ContextSchemaIDs, "\x00") {
 		return denied, errors.New("authorization engine changed authoritative constraints")
 	}
 	return grant, nil

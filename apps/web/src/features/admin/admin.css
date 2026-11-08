@@ -94,6 +94,8 @@
 .admin-condition input, .admin-condition select, .admin-condition textarea { width: 100%; min-width: 0; font-size: 11px; padding: 8px; }
 .admin-condition textarea { resize: vertical; }
 .admin-condition .icon-button { width: 26px; height: 30px; }
+.admin-condition-value, .admin-context-input { display: grid; gap: 7px; min-width: 0; }
+.admin-context-input small { line-height: 1.6; overflow-wrap: anywhere; }
 .admin-help { font-size: 11px; margin: 7px 0 10px; line-height: 1.7; }
 .admin-simulation-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .admin-simulation-controls label { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }

@@ -229,10 +229,11 @@ type Source struct {
 }
 
 type Expression struct {
-	Op    string          `json:"op"`
-	Field string          `json:"field,omitempty"`
-	Value json.RawMessage `json:"value,omitempty"`
-	Args  []Expression    `json:"args,omitempty"`
+	Op       string              `json:"op"`
+	Field    string              `json:"field,omitempty"`
+	Value    json.RawMessage     `json:"value,omitempty"`
+	ValueRef *PermissionValueRef `json:"valueRef,omitempty"`
+	Args     []Expression        `json:"args,omitempty"`
 }
 type Order struct {
 	Field     string `json:"field"`
@@ -265,12 +266,14 @@ type AuthorizationRequest struct {
 
 // Empty field lists grant no fields. Only an explicit "*" grants all fields.
 type Decision struct {
-	Allow        bool        `json:"allow"`
-	ReadFields   []string    `json:"readFields"`
-	WriteFields  []string    `json:"writeFields"`
-	RowFilter    *Expression `json:"rowFilter,omitempty"`
-	NewRowFilter *Expression `json:"newRowFilter,omitempty"`
-	State        string      `json:"state"`
+	Allow            bool        `json:"allow"`
+	ReadFields       []string    `json:"readFields"`
+	WriteFields      []string    `json:"writeFields"`
+	RowFilter        *Expression `json:"rowFilter,omitempty"`
+	NewRowFilter     *Expression `json:"newRowFilter,omitempty"`
+	State            string      `json:"state"`
+	ContextDigest    string      `json:"contextDigest,omitempty"`
+	ContextSchemaIDs []string    `json:"contextSchemaIds,omitempty"`
 }
 
 type Error struct {

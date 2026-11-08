@@ -34,6 +34,7 @@ type Store struct {
 	additionalOrigins map[string]bool
 	OAuthIssuer       string
 	MCPResource       string
+	ObjectContext     func(context.Context, string, contracts.ObjectContextRequest) (contracts.ObjectContextResult, error)
 	loginMu           sync.Mutex
 	abuseSeed         maphash.Seed
 	publicAttempts    [4096]loginAttempt
@@ -265,6 +266,7 @@ func (s *Store) Bootstrap(ctx context.Context, tenant, username, password string
 
 func (s *Store) Authorize(ctx context.Context, p contracts.Principal, req contracts.AuthorizationRequest) (contracts.Decision, error) {
 	var runtime contracts.RuntimePolicy
+	var subject permissionSubject
 	err := s.transaction(ctx, func(tx *sql.Tx) error {
 		policy, err := scanPolicy(tx.QueryRowContext(ctx, "SELECT "+policyColumns+" FROM af_identity_tenants WHERE tenant_id=? FOR SHARE", p.TenantID))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -298,12 +300,20 @@ func (s *Store) Authorize(ctx context.Context, p contracts.Principal, req contra
 				runtime.Rules = append(runtime.Rules, rule)
 			}
 		}
+		subject, err = permissionSubjectFor(ctx, tx, user, ids, &runtime, req)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
 		return contracts.Decision{}, err
 	}
-	return platform.EvaluateRuntimePolicy(ctx, s.OPA, &runtime, p, req)
+	resolved, _, err := s.resolvePermissionContext(ctx, runtime, subject, req)
+	if err != nil {
+		return contracts.Decision{}, err
+	}
+	return platform.EvaluateRuntimePolicy(ctx, s.OPA, &resolved, p, req)
 }
 
 // userInput validates public content without trusting user-supplied identities.
