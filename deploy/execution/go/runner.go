@@ -169,7 +169,7 @@ func main() {
 	sourcePath := filepath.Join(work, "source.go")
 	driverPath := filepath.Join(work, "driver.go")
 	binaryPath := filepath.Join(work, "invoke")
-	if os.WriteFile(sourcePath, []byte(p.Source), 0600) != nil || os.WriteFile(driverPath, []byte(fmt.Sprintf(driver, p.Entrypoint, entryLine)), 0600) != nil {
+	if os.WriteFile(sourcePath, []byte(p.Source), 0600) != nil || os.WriteFile(driverPath, []byte(fmt.Sprintf(driver, p.Entrypoint, p.Operation == "execute_data", entryLine)+dataSDK), 0600) != nil {
 		fail("go_error", 0, 0)
 	}
 	compile := exec.Command("/usr/local/go/bin/go", "build", "-trimpath", "-o", binaryPath, sourcePath, driverPath)
@@ -272,11 +272,124 @@ func main() {
     var __ontologyInput map[string]any
     __ontologyDecoder := __ontologyJSON.NewDecoder(__ontologyIO.LimitReader(__ontologyOS.Stdin,262145));__ontologyDecoder.UseNumber()
     if __ontologyDecoder.Decode(&__ontologyInput) != nil { __ontologyFail(0) }
-    __ontologyOutput, __ontologyCallError := %s(__ontologyInput)
-    if __ontologyCallError != nil || __ontologyOutput == nil { __ontologyFail(%d) }
+    __ontologyEntry := any(%s)
+    __ontologyDataMode, __ontologyEntryLine := %t, %d
+    __ontologyData := &OntologyData{__ontologyOperations:make([]__ontologyOperation,0),__ontologyKeys:make(map[string]bool)}
+    __ontologyContext := &OntologyContext{Data:__ontologyData}
+    var __ontologyOutput map[string]any
+    var __ontologyCallError error
+    switch __ontologyHandler := __ontologyEntry.(type) {
+    case func(map[string]any)(map[string]any,error): __ontologyOutput,__ontologyCallError=__ontologyHandler(__ontologyInput)
+    case func(map[string]any,*OntologyContext)(map[string]any,error): if !__ontologyDataMode {__ontologyFail(__ontologyEntryLine)};__ontologyOutput,__ontologyCallError=__ontologyHandler(__ontologyInput,__ontologyContext)
+    case func(map[string]any,*OntologyContext)map[string]any: if !__ontologyDataMode {__ontologyFail(__ontologyEntryLine)};__ontologyOutput=__ontologyHandler(__ontologyInput,__ontologyContext)
+    default: __ontologyFail(__ontologyEntryLine)
+    }
+    if __ontologyCallError != nil || __ontologyOutput == nil || __ontologyData.__ontologyPoisoned { __ontologyFail(__ontologyEntryLine) }
     for _, __ontologyValue := range __ontologyOutput { switch __ontologyValue.(type) { case nil,string,bool,int,int8,int16,int32,int64,uint,uint8,uint16,uint32,uint64,float32,float64,__ontologyJSON.Number: default: __ontologyFail(0) } }
-    __ontologyEncoded, __ontologyEncodeError := __ontologyJSON.Marshal(__ontologyOutput)
+    var __ontologyResult any = __ontologyOutput
+    if __ontologyDataMode { __ontologyResult=map[string]any{"output":__ontologyOutput,"operations":__ontologyData.__ontologyOperations} }
+    __ontologyEncoded, __ontologyEncodeError := __ontologyJSON.Marshal(__ontologyResult)
     if __ontologyEncodeError != nil || len(__ontologyEncoded)>262144 { __ontologyFail(0) }
     _, _ = __ontologyOut.Write(__ontologyEncoded)
 }
+`
+
+// Only the trusted generated driver can name the reserved state fields. The
+// public SDK stages operations and returns no IDs or database observations.
+const dataSDK = `
+type OntologyContext struct { Data *OntologyData }
+type OntologyMatch struct {
+    ID string ` + "`json:\"id,omitempty\"`" + `
+    IndexID string ` + "`json:\"indexId,omitempty\"`" + `
+    Values map[string]any ` + "`json:\"values,omitempty\"`" + `
+}
+type OntologyWriteItem struct {
+    ClientKey string
+    ID string
+    IfMatch string
+    Match *OntologyMatch
+    Values map[string]any
+}
+type __ontologyOperation struct {
+    SchemaID string ` + "`json:\"schemaId\"`" + `
+    Operation string ` + "`json:\"operation\"`" + `
+    ClientKey string ` + "`json:\"clientKey\"`" + `
+    ID string ` + "`json:\"id,omitempty\"`" + `
+    IfMatch string ` + "`json:\"ifMatch,omitempty\"`" + `
+    Match *OntologyMatch ` + "`json:\"match,omitempty\"`" + `
+    Values map[string]any ` + "`json:\"values,omitempty\"`" + `
+    ConflictPolicy string ` + "`json:\"conflictPolicy,omitempty\"`" + `
+}
+type OntologyData struct {
+    __ontologyOperations []__ontologyOperation
+    __ontologyKeys map[string]bool
+    __ontologyPoisoned bool
+}
+func __ontologyRequire(ok bool) { if !ok { panic("invalid data write plan") } }
+func __ontologyID(value string) string {
+    __ontologyRequire(len(value)==36)
+    for i,ch:=range value {
+        if i==8 || i==13 || i==18 || i==23 { __ontologyRequire(ch=='-') } else { __ontologyRequire(ch>='0'&&ch<='9'||ch>='a'&&ch<='f') }
+    }
+    return value
+}
+func __ontologyETag(value string, required bool) string {
+    if value=="" && !required { return value }
+    __ontologyRequire(len(value)>2 && value[0]=='"' && value[len(value)-1]=='"')
+    for _,ch:=range value[1:len(value)-1] { __ontologyRequire(ch>32 && ch!=127 && ch!='"') }
+    return value
+}
+func __ontologyValues(values map[string]any) map[string]any {
+    __ontologyRequire(values!=nil)
+    copied:=make(map[string]any,len(values))
+    for key,value:=range values {
+        __ontologyID(key)
+        switch value.(type) { case nil,string,bool,int,int8,int16,int32,int64,uint,uint8,uint16,uint32,uint64,float32,float64,__ontologyJSON.Number: default: __ontologyRequire(false) }
+        _,err:=__ontologyJSON.Marshal(value);__ontologyRequire(err==nil)
+        copied[key]=value
+    }
+    return copied
+}
+func __ontologyMatchCopy(match *OntologyMatch) *OntologyMatch {
+    __ontologyRequire(match!=nil)
+    if match.ID!="" { __ontologyRequire(match.IndexID=="" && match.Values==nil);return &OntologyMatch{ID:__ontologyID(match.ID)} }
+    __ontologyRequire(len(match.Values)>0)
+    return &OntologyMatch{IndexID:__ontologyID(match.IndexID),Values:__ontologyValues(match.Values)}
+}
+func (data *OntologyData) __ontologyStage(operation,schema string,item OntologyWriteItem,policy string) {
+    defer func(){if failure:=recover();failure!=nil {data.__ontologyPoisoned=true;panic(failure)}}()
+    __ontologyRequire(!data.__ontologyPoisoned && len(data.__ontologyOperations)<100)
+    __ontologyID(schema)
+    switch operation {
+    case "create": __ontologyRequire(item.ID=="" && item.IfMatch=="" && item.Match==nil)
+    case "update": __ontologyRequire(item.Match==nil)
+    case "delete": __ontologyRequire(item.Match==nil && item.Values==nil)
+    case "upsert": __ontologyRequire(item.ID=="")
+    default: __ontologyRequire(false)
+    }
+    __ontologyRequire(len(item.ClientKey)>0 && len(item.ClientKey)<=128 && !data.__ontologyKeys[item.ClientKey])
+    for _,ch:=range item.ClientKey { __ontologyRequire(ch>=32 && (ch<127||ch>159)) }
+    out:=__ontologyOperation{SchemaID:schema,Operation:operation,ClientKey:item.ClientKey}
+    if operation!="delete" {out.Values=__ontologyValues(item.Values)}
+    if operation=="update" || operation=="delete" {out.ID=__ontologyID(item.ID);out.IfMatch=__ontologyETag(item.IfMatch,true)}
+    if operation=="upsert" {
+        if policy=="" {policy="check"};__ontologyRequire(policy=="check"||policy=="overwrite")
+        out.Match=__ontologyMatchCopy(item.Match);out.IfMatch=__ontologyETag(item.IfMatch,false);out.ConflictPolicy=policy
+    }
+    if data.__ontologyKeys==nil {data.__ontologyKeys=make(map[string]bool)}
+    data.__ontologyOperations=append(data.__ontologyOperations,out);data.__ontologyKeys[item.ClientKey]=true
+}
+func (data *OntologyData) Create(schema string,values map[string]any,clientKey string) {data.__ontologyStage("create",schema,OntologyWriteItem{Values:values,ClientKey:clientKey},"")}
+func (data *OntologyData) Update(schema,id string,values map[string]any,ifMatch,clientKey string) {data.__ontologyStage("update",schema,OntologyWriteItem{ID:id,Values:values,IfMatch:ifMatch,ClientKey:clientKey},"")}
+func (data *OntologyData) Delete(schema,id,ifMatch,clientKey string) {data.__ontologyStage("delete",schema,OntologyWriteItem{ID:id,IfMatch:ifMatch,ClientKey:clientKey},"")}
+func (data *OntologyData) Upsert(schema string,match OntologyMatch,values map[string]any,ifMatch,clientKey,conflictPolicy string) {data.__ontologyStage("upsert",schema,OntologyWriteItem{Match:&match,Values:values,IfMatch:ifMatch,ClientKey:clientKey},conflictPolicy)}
+func (data *OntologyData) __ontologyBulk(operation,schema string,items []OntologyWriteItem,policy string) {
+    defer func(){if failure:=recover();failure!=nil {data.__ontologyPoisoned=true;panic(failure)}}()
+    __ontologyRequire(len(items)>0 && len(items)<=100 && len(data.__ontologyOperations)+len(items)<=100)
+    for _,item:=range items {data.__ontologyStage(operation,schema,item,policy)}
+}
+func (data *OntologyData) BulkCreate(schema string,items []OntologyWriteItem) {data.__ontologyBulk("create",schema,items,"")}
+func (data *OntologyData) BulkUpdate(schema string,items []OntologyWriteItem) {data.__ontologyBulk("update",schema,items,"")}
+func (data *OntologyData) BulkDelete(schema string,items []OntologyWriteItem) {data.__ontologyBulk("delete",schema,items,"")}
+func (data *OntologyData) BulkUpsert(schema string,items []OntologyWriteItem,conflictPolicy string) {data.__ontologyBulk("upsert",schema,items,conflictPolicy)}
 `

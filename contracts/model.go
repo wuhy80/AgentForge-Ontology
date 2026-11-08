@@ -142,12 +142,13 @@ type Callable struct {
 	Output []Property `json:"output,omitempty"`
 	// TargetSchemaIDs associates Action metadata with existing schemas. It does
 	// not grant invocation or instance access and is unsupported on Function.
-	TargetSchemaIDs []string           `json:"targetSchemaIds,omitempty"`
-	FunctionID      string             `json:"functionId,omitempty"`
-	ArtifactRef     string             `json:"artifactRef,omitempty"`
-	SideEffects     string             `json:"sideEffects"`
-	Runtime         *ScriptRuntime     `json:"runtime,omitempty"`
-	TestCases       []CallableTestCase `json:"testCases,omitempty"`
+	TargetSchemaIDs []string              `json:"targetSchemaIds,omitempty"`
+	FunctionID      string                `json:"functionId,omitempty"`
+	ArtifactRef     string                `json:"artifactRef,omitempty"`
+	SideEffects     string                `json:"sideEffects"`
+	DataWrite       []DataWriteCapability `json:"dataWrite,omitempty"`
+	Runtime         *ScriptRuntime        `json:"runtime,omitempty"`
+	TestCases       []CallableTestCase    `json:"testCases,omitempty"`
 }
 
 type Organization struct {

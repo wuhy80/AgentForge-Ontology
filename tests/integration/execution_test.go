@@ -3,6 +3,8 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,12 +23,13 @@ import (
 	"github.com/wuhy80/AgentForge-Ontology/services/metadata/identity"
 )
 
-const executionOrigin = "http://127.0.0.1:5173"
+const executionOrigin = "https://127.0.0.1:5173"
 
 type executionHTTP struct {
 	t       *testing.T
 	cookies []*http.Cookie
 	csrf    string
+	client  *http.Client
 }
 
 func (h *executionHTTP) request(method, endpoint string, body any, headers map[string]string, want int, out any) http.Header {
@@ -53,7 +56,11 @@ func (h *executionHTTP) request(method, endpoint string, body any, headers map[s
 	for key, value := range headers {
 		r.Header.Set(key, value)
 	}
-	res, err := (&http.Client{Timeout: 45 * time.Second}).Do(r)
+	client := h.client
+	if client == nil {
+		client = &http.Client{Timeout: 45 * time.Second}
+	}
+	res, err := client.Do(r)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -135,9 +142,9 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 		}
 	}
 	metaMux := http.NewServeMux()
-	metaServer := httptest.NewServer(platform.ProtectSessionRoutes(serviceToken, true, accounts, metaMux))
+	metaServer := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, true, accounts, metaMux))
 	defer metaServer.Close()
-	dataServer := httptest.NewServer(data.NewHandler(data.Config{Engine: de, Authorizer: accounts, MetadataURL: metaServer.URL, ServiceToken: serviceToken, CursorSecret: cursorSecret}))
+	dataServer := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, false, accounts, data.NewHandler(data.Config{Engine: de, Authorizer: accounts, SessionChecker: accounts, MetadataURL: metaServer.URL, ServiceToken: serviceToken, CursorSecret: cursorSecret, HTTPClient: metaServer.Client()})))
 	defer dataServer.Close()
 	metaMux.Handle("/metadata/auth/", accounts.NewHandler())
 	metaMux.Handle("/metadata/admin/", accounts.NewHandler())
@@ -167,9 +174,15 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 		}
 		platform.WriteJSON(w, 200, result)
 	}))
-	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, DataURL: dataServer.URL, ServiceToken: serviceToken}))
+	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, DataURL: dataServer.URL, ServiceToken: serviceToken, HTTPClient: dataServer.Client()}))
+	roots := x509.NewCertPool()
+	roots.AddCert(metaServer.Certificate())
+	roots.AddCert(dataServer.Certificate())
+	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
+	defer transport.CloseIdleConnections()
+	browserClient := &http.Client{Transport: transport, Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	login := func(tenantID, username string) (*executionHTTP, c.Session) {
-		h := &executionHTTP{t: t}
+		h := &executionHTTP{t: t, client: browserClient}
 		var session c.Session
 		headers := h.request("POST", metaServer.URL+"/metadata/auth/login", c.LoginRequest{Tenant: tenantID, Username: username, Password: password}, nil, 200, &session)
 		response := http.Response{Header: headers}
@@ -178,7 +191,7 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	}
 	admin, session := login(tenant, "admin")
 	other, _ := login(otherTenant, "admin")
-	checker := &platform.RemoteSessionChecker{URL: metaServer.URL, ServiceToken: serviceToken}
+	checker := &platform.RemoteSessionChecker{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}
 	image := os.Getenv("ONTOLOGY_PYTHON_IMAGE")
 	if image == "" {
 		image = "python:3.12-alpine"
@@ -187,9 +200,11 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if _, err := runner.Ready(ctx); err != nil {
 		t.Fatal(err)
 	}
-	execApp := execution.NewHandler(execution.Config{Store: &execution.SQLStore{DB: ee.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metaServer.URL, ServiceToken: serviceToken}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metaServer.URL, ServiceToken: serviceToken}, Runner: runner})
-	execServer := httptest.NewServer(platform.ProtectSessionRoutes(serviceToken, false, checker, execApp))
+	execConfig := execution.Config{Store: &execution.SQLStore{DB: ee.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}, Runner: runner, DataTransactions: &execution.RemoteDataTransactions{URL: dataServer.URL, ServiceToken: serviceToken, Client: dataServer.Client()}}
+	execApp := execution.NewHandler(execConfig)
+	execServer := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, false, checker, execApp))
 	defer execServer.Close()
+	roots.AddCert(execServer.Certificate())
 	var category, group c.Organization
 	admin.request("POST", metaServer.URL+"/metadata/categories", map[string]string{"name": "Python执行验收"}, nil, 201, &category)
 	admin.request("POST", metaServer.URL+"/metadata/groups", map[string]string{"name": "计算", "categoryId": category.ID}, nil, 201, &group)
@@ -374,6 +389,8 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 		t.Fatal("execution disclosed code or traceback")
 	}
 	verifyMultiLanguageHTTP(t, admin, other, peerClient, execServer.URL, metaServer.URL, publish, savePolicy, policy.Current.Rules, roleID)
+	verifyDataWriteTransactionsHTTP(t, admin, other, execServer.URL, dataServer.URL, publish)
+	verifyTransactionRecoveryHTTP(t, admin, execConfig, roots, dataServer.URL, publish)
 	// Authoritative OPA failure closes access even for a persisted success.
 	originalURL := opa.URL
 	opa.URL = "http://127.0.0.1:1"

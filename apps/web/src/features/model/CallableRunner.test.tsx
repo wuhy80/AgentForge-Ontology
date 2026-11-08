@@ -21,6 +21,79 @@ function fixture() {
 async function open() { await userEvent.click(screen.getByRole('button', { name: '打开运行面板' })); return screen.findByLabelText('数值int64') }
 
 describe('当前定义运行面板', () => {
+  it('事务提交中不显示输出或成功，可查询并按原参数及幂等键恢复提交', async () => {
+    const { api, props, record, result } = fixture()
+    record.definition.function!.sideEffects = 'dataWrite'
+    record.definition.function!.dataWrite = [{ schemaId: 'schema', operations: ['update'] }]
+    api.executionCapabilities.mockResolvedValue({ invocation: true, runtimes: ['python'], synchronous: true, actionInlineSource: true, dataWriteTransactions: true } as never)
+    api.invoke.mockResolvedValueOnce({ ...result, status: 'committing', transaction: { status: 'pending', committed: false, operationCount: 1 } } as Invocation)
+      .mockResolvedValueOnce({ ...result, transaction: { status: 'committed', committed: true, operationCount: 1 } } as Invocation)
+    api.getInvocation.mockRejectedValueOnce(new ApiError(409, 'definition_changed', '原事务结果须先核对；请勿更换请求标识重复执行写入'))
+    render(<CallableRunner {...props} />)
+    const input = await open()
+    await userEvent.type(input, '7')
+    await userEvent.click(screen.getByRole('button', { name: '运行' }))
+    await screen.findByText('正在确认事务提交')
+    expect(screen.queryByText('9007199254740993')).toBeNull()
+    expect(screen.queryByText('运行成功')).toBeNull()
+    expect((input as HTMLInputElement).disabled || (input.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '关闭运行' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: '核对运行结果' }))
+    await waitFor(() => expect(api.getInvocation).toHaveBeenCalledTimes(1))
+    expect((await screen.findByRole('alert')).textContent).toContain('原事务结果须先核对')
+    expect(screen.getByText('正在确认事务提交')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '重新载入运行参数' })).toBeNull()
+    expect((input.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true)
+    expect((input as HTMLInputElement).value).toBe('7')
+    await userEvent.click(screen.getByRole('button', { name: '恢复本次提交' }))
+    await screen.findByText('运行成功')
+    expect(api.invoke.mock.calls[0].slice(0, 3)).toEqual(api.invoke.mock.calls[1].slice(0, 3))
+    expect(api.getCurrent).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('definition').textContent).toBe('9007199254740993')
+  })
+
+  it('已派发写入收到403仍保留未确认状态，恢复继续复用原参数和请求标识', async () => {
+    const { api, props, record, result } = fixture()
+    record.definition.function!.sideEffects = 'dataWrite'
+    record.definition.function!.dataWrite = [{ schemaId: 'schema', operations: ['update'] }]
+    api.executionCapabilities.mockResolvedValue({ invocation: true, runtimes: ['python'], synchronous: true, actionInlineSource: true, dataWriteTransactions: true } as never)
+    api.invoke.mockRejectedValueOnce(new ApiError(403, 'forbidden', '当前无权恢复原事务'))
+      .mockResolvedValueOnce({ ...result, status: 'failed', error: { code: 'forbidden', message: '本次事务未提交' }, transaction: { status: 'failed', committed: false, operationCount: 1 } } as Invocation)
+    render(<CallableRunner {...props} />)
+    const input = await open()
+    await userEvent.type(input, '7')
+    await userEvent.click(screen.getByRole('button', { name: '运行' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('当前无权恢复原事务')
+    expect((input.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '关闭运行' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: '重新载入运行参数' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '恢复本次提交' }))
+    await screen.findByText('运行失败')
+    expect(api.invoke.mock.calls[0].slice(0, 3)).toEqual(api.invoke.mock.calls[1].slice(0, 3))
+    expect(api.getCurrent).toHaveBeenCalledTimes(2)
+    expect((input.closest('fieldset') as HTMLFieldSetElement).disabled).toBe(false)
+    expect((screen.getByRole('button', { name: '关闭运行' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByRole('definition')).toBeNull()
+  })
+
+  it('旧执行服务不支持事务或MCP拒绝时明确提示且不显示旧输出', async () => {
+    const { api, props, record } = fixture()
+    record.definition.function!.sideEffects = 'dataWrite'
+    record.definition.function!.dataWrite = [{ schemaId: 'schema', operations: ['create'] }]
+    render(<CallableRunner {...props} />)
+    await userEvent.click(screen.getByRole('button', { name: '打开运行面板' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('尚未开放事务写入')
+    expect(api.invoke).not.toHaveBeenCalled()
+    api.executionCapabilities.mockResolvedValue({ invocation: true, runtimes: ['python'], synchronous: true, dataWriteTransactions: true } as never)
+    await userEvent.click(screen.getByRole('button', { name: '重新载入运行参数' }))
+    await userEvent.type(await screen.findByLabelText('数值int64'), '7')
+    api.invoke.mockRejectedValue(new ApiError(403, 'data_write_session_required', 'MCP和外部令牌不允许数据写入调用'))
+    await userEvent.click(screen.getByRole('button', { name: '运行' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('MCP和外部令牌不允许')
+    expect((screen.getByLabelText('数值int64').closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true)
+    expect(screen.queryByRole('definition')).toBeNull()
+  })
+
   it('独立源码动作按自身稳定参数运行，保留绑定动作的权限说明', async () => {
     const { api, props, record, result } = fixture()
     const action: DefinitionRecord = { ...record, definition: { ...record.definition, kind: 'action', function: undefined, action: record.definition.function } }

@@ -14,7 +14,7 @@ export const kindDescriptions: Record<Kind, string> = {
   enum: '维护稳定的业务编码与用户可见标签。',
   link: '通过正反方向连接已经生效的对象模型。',
   action: '编写动作的独立 Python、JavaScript 或 Go 源码，或绑定已发布的函数。',
-  function: '维护函数签名，编写和运行无副作用的 Python、JavaScript 或 Go 计算。',
+  function: '维护函数签名，编写 Python、JavaScript 或 Go 计算或有明确范围的事务写入。',
 }
 
 export function newDefinition(kind: Kind, categoryId = '', groupId = ''): Definition {
@@ -22,7 +22,7 @@ export function newDefinition(kind: Kind, categoryId = '', groupId = ''): Defini
   if (kind === 'schema') definition.schema = { mode: 'schema_2_db', storageLayout: 'single', properties: [newProperty()], indexes: [] }
   if (kind === 'enum') definition.enum = { values: [{ code: '', label: '', deprecated: false }] }
   if (kind === 'link') definition.link = { sourceSchemaId: '', targetSchemaId: '', forwardName: '', reverseName: '', cardinality: '1:N', onDelete: 'restrict' }
-  if (kind === 'action') definition.action = { input: [], output: [], sideEffects: 'dataWrite' }
+  if (kind === 'action') definition.action = { input: [], output: [], sideEffects: 'none' }
   if (kind === 'function') definition.function = { input: [], output: [], sideEffects: 'none' }
   return definition
 }
@@ -95,8 +95,18 @@ export function validateDefinition(definition: Definition): string | undefined {
     const error = validateProperties(callable.input ?? [], '输入参数') ?? validateProperties(callable.output ?? [], '输出参数')
     if (error) return error
     if (callable.functionId && callable.artifactRef) return '实现函数与产物引用不能同时配置。'
+    if (callable.sideEffects !== 'dataWrite' && callable.dataWrite?.length) return '仅写入业务数据的定义允许声明写入范围。'
+    if (callable.sideEffects === 'dataWrite') {
+      if (!callable.dataWrite?.length || callable.dataWrite.length > 32) return '业务写入须声明 1–32 个对象及允许操作。'
+      const schemas = new Set<string>()
+      for (const item of callable.dataWrite) {
+        if (!item.schemaId.trim() || item.schemaId.trim() !== item.schemaId || schemas.has(item.schemaId.toLowerCase())) return '写入对象不能为空或重复。'
+        schemas.add(item.schemaId.toLowerCase())
+        if (!item.operations.length || item.operations.length > 4 || new Set(item.operations).size !== item.operations.length || item.operations.some((name) => !['create', 'update', 'delete', 'upsert'].includes(name))) return '每个写入对象须选择不重复的创建、更新、删除或创建更新操作。'
+      }
+    }
     if (callable.runtime) {
-      if (callable.sideEffects !== 'none') return '源码实现仅支持无副作用计算。'
+      if (callable.sideEffects === 'externalWrite') return '源码尚不支持修改外部系统。'
       if (callable.artifactRef) return '源码与产物引用不能同时配置。'
       if (callable.functionId) return '独立源码与绑定函数不能同时配置。'
       if (!['python', 'javascript', 'go'].includes(callable.runtime.language)) return '当前仅支持 Python、JavaScript、Go 运行器。'

@@ -74,6 +74,8 @@ go run ./cmd/server
 
 MCP 外部 Bearer 仅开放受限发现、查询和当前纯计算路由，每次由身份服务恢复真实用户并核验范围，继续执行业务权限。`POST /internal/metadata/query-directory` 是 Data 使用的窄内部目录桥，同时校验服务凭据和真实调用者；它不授予外部凭据读取完整定义、源码或物理映射的权限。外部认证协议见 [identity](identity/README.md#外部连接与-mcp-oauth2026-11-08-已接入)，客户端配置见 [MCP 服务](../mcp/README.md)。
 
+Function/Action正文支持`sideEffects=dataWrite`及`dataWrite:[{schemaId,operations}]`。声明1～32个不同的同租户已生效Schema，每项1～4种基本操作create/update/delete/upsert，SDK bulk使用同一基本操作范围；保存时按Schema和操作排序，草稿保存与发布分别检查引用并登记依赖。none/externalWrite不接受写入声明，externalWrite源码不可执行；绑定Action须与Function副作用及写入范围完全相同。已生效dataWrite只允许原范围内更新源码，不开放副作用或范围结构变更。MCP最小调用发现始终仅公开纯计算实现，不能通过发现或外部Bearer调用dataWrite。源码、编辑器及SDK规则唯一见[Function](../../docs/模块/Function.md#声明范围的事务写入2026-11-08)，本服务不执行脚本或提交业务事务。
+
 普通业务目录另使用 `POST /internal/metadata/business-directory`，同时校验服务令牌、原始Cookie/MCP会话及当前instance.query，不要求definition.read/organization.read；此内部响应含Data裁剪所需的私有定义，不得直接公开。Metadata.Config.SessionChecker须显式接入权威身份服务，未配置拒绝；实际DTO见[business_directory.go](../../contracts/business_directory.go)，公开目录/表单见[Data](../data/README.md)，授权与裁剪边界唯一见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07)。
 
 组织及定义列表默认100条、最多200条，使用返回的 `nextCursor` 作为下一次 `after`。这与 Data 的查询游标分别处理。
@@ -86,7 +88,7 @@ Schema 的 `storageBinding` 声明主数据源、命名空间、表、稳定标�
 
 Action 正文支持可选 `targetSchemaIds` 数组，为动作详情和 Schema 详情的关联发现保存最多32个同租户已生效 Schema 稳定 ID；空数组或省略表示未关联，不表示对所有 Schema 生效。保存草稿及发布均校验目标类型与状态，发布将目标写入当前依赖；已有 Action 可经草稿/发布修改这一关联，签名、实现和副作用仍保持原有变更限制。Function 不接受该字段。关联仅是定义元数据，不授予执行或实例权限，详细规则以 [Action](../../docs/模块/Action.md#当前对象关联协议2026-11-07) 为主要说明。
 
-Function与直接源码Action支持可选`runtime`内联Python、JavaScript、Go实现，字段及参数规则以[Function](../../docs/模块/Function.md)为主要说明。保存校验语言、源码预算、入口、超时与无副作用声明，不在Metadata执行、编译或解析源码；runtime与artifactRef或其他Function引用不能并存。Action也可绑定同租户已生效Function，发布校验双方中文参数签名及副作用；Function重发布还检查当前引用它的Action。已生效Function/直接源码Action可经草稿发布修改源码语言、入口及超时，签名、副作用和实现模式继续受结构限制。Metadata仍不执行用户代码，能力中的`invocation:false`只描述本服务，真实运行及Go源码工具可用性通过[Execution](../execution/README.md)查询。
+Function与直接源码Action支持可选`runtime`内联Python、JavaScript、Go实现，字段及参数规则以[Function](../../docs/模块/Function.md)为主要说明。保存校验语言、源码预算、入口、超时与副作用及写入范围声明，不在Metadata执行、编译或解析源码；runtime与artifactRef或其他Function引用不能并存。Action也可绑定同租户已生效Function，发布校验双方中文参数签名、副作用及写入范围；Function重发布还检查当前引用它的Action。已生效Function/直接源码Action可经草稿发布修改源码语言、入口及超时，签名、副作用、写入范围和实现模式继续受结构限制。Metadata仍不执行用户代码，能力中的`invocation:false`只描述本服务，真实运行及Go源码工具可用性通过[Execution](../execution/README.md)查询。
 
 Function与Action的`testCases`随定义草稿保存，最多10项、总JSON最多64KiB；名称最多80个Unicode字符且不重复，输入仅使用声明参数稳定ID与相应标量传输格式。样例可部分填写，运行时由Execution检查必填和默认值。已有定义可经草稿/发布修改样例；该编辑不改变可执行签名或调用授权，发布后样例按定义读取权限可见。草稿试运行使用已保存ETag，不写当前态；源码诊断与运行记录由Execution负责。
 
@@ -99,6 +101,8 @@ Function与Action的`testCases`随定义草稿保存，最多10项、总JSON最�
 `go test ./...` 覆盖名称归一、定义/类型校验、身份隔离、错误关闭、并发凭证及 Data 操作确认。设置 `METADATA_TEST_DSN` 可运行真实 MySQL 测试，显式应用本模块迁移，并以随机租户验证生命周期、失败恢复、outbox 去重、中文名称多轮往返修改、同操作并发恢复和结构变更拒绝；测试不会删除既有数据。
 
 对象关联回归 `TestMySQLActionTargetsLifecycleAndIsolation` 使用真实 MySQL Metadata 存储及隔离 Data 确认接口，覆盖 Action 关联创建、生效、ETag 冲突、跨租户/未生效/错误类型目标拒绝、发布前再次校验、目标变更及解除关联；测试只清理本次生成的随机租户。该用例不代表 Action 业务执行或 Data 实例写入已验收。
+
+2026-11-08事务写入批次已在临时独立MySQL库运行`go test -count=1 ./...`及`go vet ./...`通过，含Metadata与identity真实MySQL/OPA测试。`TestMySQLPythonPublicationAndActionBinding`增加dataWrite Function、等范围绑定Action及源码重发布，拒绝错误类型与不存在的Schema引用；单元覆盖声明规范化、依赖、范围结构锁、三语言及MCP发现过滤。发布用例的Data确认接口使用隔离HTTP模拟，实际Data事务和三语言容器执行分别见项目总览。
 
 2026-11-07 的 `TestMySQLDefaultStorageRelocationAtomicityAndEvidence` 已通过真实 MySQL 定向验证，覆盖固定旧定义、整批原子提交及幂等证据，以及草稿、未恢复发布、绑定依赖、来源摘要变化、混合新旧态和证据篡改的拒绝；后续合法 Link 绑定不使已完成迁移证据失效。个人知识库实际迁移及只读核对见[场景记录](../../docs/应用场景/个人知识库.md#配置复核与专用来源迁移当前)，不据此宣称自动恢复或生产迁移验收通过。
 

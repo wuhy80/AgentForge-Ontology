@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import type { ApiClient } from '../../lib/api'
 import type { DefinitionRecord } from '../../lib/types'
 import { ModelEditor } from './ModelEditor'
+import { initialRuntime } from '../../lib/runtime-language'
 
 afterEach(cleanup)
 
@@ -24,6 +25,24 @@ function editSource(source: string) {
 }
 
 describe('模型编辑的执行配置', () => {
+  it('配置事务写入对象及基本操作保存，切回纯计算清除范围，草稿写入禁用', async () => {
+    const draft = structuredClone(fn)
+    draft.status = 'draft'; draft.definition.function!.runtime = initialRuntime('python')
+    const schema: DefinitionRecord = { status: 'active', etag: 'schema-etag', definition: { id: 'schema', tenantId: 'tenant', categoryId: 'category', groupId: 'group', kind: 'schema', name: '订单', schema: { mode: 'schema_2_db', storageLayout: 'single', properties: [] } } }
+    const { api, props } = fixture(draft, [draft, schema])
+    render(<ModelEditor {...props} />)
+    await userEvent.selectOptions(screen.getByLabelText('副作用'), 'dataWrite')
+    await userEvent.click(screen.getByRole('button', { name: '添加写入对象' }))
+    await userEvent.selectOptions(screen.getByLabelText('写入对象1'), 'schema')
+    await userEvent.click(screen.getByRole('checkbox', { name: '创建' }))
+    expect((screen.getByRole('button', { name: '打开草稿试运行' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(EditorView.findFromDOM(screen.getByRole('textbox', { name: 'Python 源码' }))!.state.doc.toString()).toContain('main(inputs, ctx)')
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('fn', expect.objectContaining({ function: expect.objectContaining({ sideEffects: 'dataWrite', dataWrite: [{ schemaId: 'schema', operations: ['create'] }] }) }), 'fn-etag'))
+    await userEvent.selectOptions(screen.getByLabelText('副作用'), 'none')
+    await userEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+    await waitFor(() => expect(api.saveDraft).toHaveBeenLastCalledWith('fn', expect.objectContaining({ function: expect.objectContaining({ sideEffects: 'none', dataWrite: undefined }) }), 'saved'))
+  })
   it('已生效函数保持参数锁定并允许通过草稿更新Python源码', async () => {
     const { api, props } = fixture(fn)
     render(<ModelEditor {...props} />)

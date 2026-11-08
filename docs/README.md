@@ -6,7 +6,7 @@ AgentForge-Ontology 是通用本体管理与运行框架，服务于不同领域
 
 当前仓库已有首批Metadata、Data、公共协议、MySQL存储及中文前端工作台，并已补齐本地账号密码、用户/用户组/角色管理、权限策略草稿/模拟/生效及管理审计；另有 [Link](模块/Link.md#当前关系数据库实现2026-11-07) 的物理映射与同库单跳查询，以及[OntologySQL](数据查询/OntologySQL.md#首批实际协议2026-11-07)单Schema文本、参数、补全及SQL/可视化工作台。当前交付范围及验证结果统一见[项目总览](项目总览.md#当前实现与验证2026-11-06)，启动、测试及实际协议入口见[开发指南](开发指南.md)。尚无性能验收结果；下文的完整设计示例与候选扩展不代表均已实现。
 
-本批按用户追加确认，已将[Function](模块/Function.md)与[Action](模块/Action.md)的独立源码、语法高亮、补全及实际执行扩展到Python、JavaScript和Go；Action同时保留绑定Function调用，共用[Execution](../services/execution/README.md)的当前态/草稿记录。多语言扩展的实现及分项验证状态统一维护在项目总览，联网、第三方依赖及业务写入继续按所属主题分期实现。
+本批按用户追加确认，已将[Function](模块/Function.md)与[Action](模块/Action.md)的独立源码、语法高亮、补全及实际执行扩展到Python、JavaScript和Go；Action同时保留绑定Function调用，共用[Execution](../services/execution/README.md)的当前态/草稿记录。多语言扩展的实现及分项验证状态统一维护在项目总览，已补受控事务写计划，范围见[数据读写](数据读写.md)；业务查询SDK、联网及第三方依赖仍未开放。
 
 Schema、Enum、Link、Action、Function统一只维护当前生效定义，引用仅保存稳定ID，不设置业务version。草稿、生效、迁移及执行期间的一致性规则集中见[定义生效与数据库迁移](发布与迁移.md)。
 
@@ -31,7 +31,7 @@ Schema、Enum、Link、Action、Function统一只维护当前生效定义，引�
 | [MCP 服务与客户端接入](MCP接入.md) | Ontology 提供 MCP Streamable HTTP、外部连接凭据与 OAuth 接入；记录 dsh 客户端配置、工具范围、验证结果及未完成的真实联调边界 |
 | [权限](权限/README.md) | [权限设计](权限/权限设计.md)统一维护本地账号与会话、用户/用户组/角色管理、策略配置及行列执行边界，并维护Action/Function授权、关系策略、执行身份与撤权候选；包含OPA选型依据、原始验证资料及AUTH验收 |
 | [数据查询](数据查询/README.md) | [DataSet](数据查询/DataSet.md)维护实体/关联行共同语义，[OntologySQL](数据查询/OntologySQL.md)维护文本编译、INNER Link及路径/字段接口，[可视化查询编辑器](数据查询/可视化查询编辑器.md)维护工作台、指导/补全、中文条件/关联角色配置、SQL双向转换及体验验收 |
-| [数据读写](数据读写.md) | 每Schema八种内置写操作、能力发现、原子bulk、并发/幂等及受限专用MySQL来源写入；对象/关系组合事务及分块导入继续候选 |
+| [数据读写](数据读写.md) | 每Schema八种内置写操作、能力发现、原子bulk、跨Schema对象事务、Action/Function受控写计划、并发/幂等及受限专用MySQL来源写入；对象/关系组合事务及分块导入继续候选 |
 | [数据源配置](数据源.md) | 租户连接/版本/凭据、数据库管理布局与真实指标、表列/索引目录、自动预览及专属来源只读SQL工具/固定排行模板；当前增量状态与只读边界见正文，Schema维护逐属性跨源映射 |
 | [存储引擎](存储引擎.md) | 平台及实例存储、ORM 选型理由、驱动注册、MySQL/PostgreSQL/达梦适配、版本能力登记与性能策略 |
 | [定义生效与迁移](发布与迁移.md) | 五类对象的单份当前定义、草稿、生效、平台/模型迁移、任务一致性与恢复 |

@@ -269,47 +269,11 @@ func (h *handler) executeMutations(ctx context.Context, p c.Principal, current c
 						return problem(500, "idempotency_corrupt", "无法核对原写入结果")
 					}
 					for _, item := range saved.Items {
-						if item.Operation != "instance.create" && item.Operation != "instance.patch" && item.Operation != "instance.delete" {
-							return problem(500, "idempotency_corrupt", "无法核对原写入结果")
-						}
-						for _, decision := range decisions.relevant(item.Operation) {
-							if err := checkRowFilter(ctx, store.Tx(), current.Definition.Schema, item.Instance.Values, decision.RowFilter); err != nil {
-								return err
-							}
-						}
-						if item.Outcome != "deleted" {
-							for _, decision := range decisions.relevant(item.Operation) {
-								if err := checkNewRow(ctx, store.Tx(), current.Definition.Schema, item.Instance.Values, decision); err != nil {
-									return err
-								}
-							}
-						}
-						actual, exists, err := store.Lookup(ctx, mutationMatch{ID: item.Instance.ID})
+						projected, err := replayMutation(ctx, store, current, req, decisions, item, saved.Authorization)
 						if err != nil {
 							return err
 						}
-						if item.Outcome == "deleted" {
-							for name, decision := range decisions {
-								if saved.Authorization[name] != digest(decision) {
-									return problem(409, "authorization_changed", "授权已改变，不能重放原删除回执")
-								}
-							}
-						} else if !exists {
-							return problem(404, "not_found", "实例不存在或不可访问")
-						}
-						if exists {
-							if err = mutationCheckOld(ctx, store, current.Definition.Schema, actual, decisions.relevant(item.Operation), req.Operation == "upsert"); err != nil {
-								return err
-							}
-							if item.Outcome != "deleted" {
-								for _, decision := range decisions.relevant(item.Operation) {
-									if err = checkNewRow(ctx, store.Tx(), current.Definition.Schema, actual.Values, decision); err != nil {
-										return err
-									}
-								}
-							}
-						}
-						result.Results = append(result.Results, mutationResult(current.Definition.Schema, item, decisions))
+						result.Results = append(result.Results, projected)
 					}
 					result.Replayed = true
 					if _, err := encodeBudgetedJSON(result); err != nil {
@@ -331,126 +295,8 @@ func (h *handler) executeMutations(ctx context.Context, p c.Principal, current c
 			}
 			seen := map[string]bool{}
 			for _, i := range ordered {
-				command := req.Commands[i]
-				old, exists, err := store.Lookup(ctx, command.Match)
+				item, err := applyMutation(ctx, store, current, req, decisions, req.Commands[i], seen)
 				if err != nil {
-					return err
-				}
-				operation := mutationPermission(req.Operation)
-				creating := req.Operation == "create" || req.Operation == "upsert" && !exists
-				if req.Operation == "upsert" {
-					operation = "instance.patch"
-					if creating {
-						operation = "instance.create"
-					}
-				}
-				relevant := decisions.relevant(operation)
-				if exists {
-					if err = mutationCheckOld(ctx, store, current.Definition.Schema, old, relevant, req.Operation == "upsert"); err != nil {
-						return err
-					}
-					if seen[old.ID] {
-						return problem(422, "duplicate_target", "同一批次不能重复修改同一实例")
-					}
-					seen[old.ID] = true
-				}
-				if req.Operation == "create" && exists {
-					return problem(409, "write_conflict", "目标或约束不允许本次写入")
-				}
-				if !creating && !exists {
-					if req.Operation == "upsert" && command.IfMatch != "" {
-						return problem(412, "precondition_failed", "实例已改变或不存在，请重新读取")
-					}
-					return problem(404, "not_found", "实例不存在或不可访问")
-				}
-				if req.Operation == "upsert" && creating && command.IfMatch != "" {
-					return problem(412, "precondition_failed", "实例已改变或不存在，请重新读取")
-				}
-				if !creating && !(req.Operation == "upsert" && req.ConflictPolicy == "overwrite") {
-					etag, err := mutationETag(command.IfMatch)
-					if err != nil {
-						return err
-					}
-					if old.ETag != etag {
-						return problem(412, "precondition_failed", "实例已被修改，请重新读取")
-					}
-				}
-				item := mutationSavedItem{ClientKey: command.ClientKey, Operation: operation}
-				if req.Operation == "delete" {
-					item.Instance, item.Outcome = old, "deleted"
-					if err = store.Delete(ctx, old); err != nil {
-						return err
-					}
-				} else {
-					input := command.Values
-					if req.Operation == "upsert" && command.Match.Index != nil {
-						input = map[string]json.RawMessage{}
-						for key, value := range command.Values {
-							input[key] = value
-						}
-						for key, value := range command.Match.Values {
-							if other, ok := input[key]; ok {
-								equal, err := mutationValuesEqual(ctx, store, current.Definition.Schema, key, other, value)
-								if err != nil {
-									return err
-								}
-								if !equal {
-									return problem(422, "match_value_conflict", "写入值不能改变匹配键")
-								}
-							}
-							if creating {
-								input[key] = value
-							} else {
-								// Matching identity remains immutable even when an
-								// equivalent decimal/UUID encoding was repeated.
-								delete(input, key)
-							}
-						}
-					}
-					values, err := mutationBuild(ctx, store, current.Definition.Schema, input, old.Values, relevant, creating)
-					if err != nil {
-						return err
-					}
-					item.Instance = c.Instance{SchemaID: current.Definition.ID, ID: old.ID, Values: values, ETag: c.NewID()}
-					item.Outcome = "updated"
-					if creating {
-						item.Outcome = "created"
-						item.Instance.ID = command.Match.ID
-						if item.Instance.ID == "" {
-							item.Instance.ID = c.NewID()
-						}
-					}
-					if seen[item.Instance.ID] && !exists {
-						return problem(422, "duplicate_target", "同一批次不能重复修改同一实例")
-					}
-					seen[item.Instance.ID] = true
-					if stamper, ok := store.(interface {
-						Stamp(c.Instance) (c.Instance, error)
-					}); ok {
-						item.Instance, err = stamper.Stamp(item.Instance)
-						if err != nil {
-							return err
-						}
-					}
-					budget := jsonBudget{remaining: c.MaxDataResponseBytes - 1}
-					if err = budget.add(item.Instance); err != nil {
-						return err
-					}
-					if creating {
-						err = store.Insert(ctx, item.Instance)
-					} else {
-						changed := []string{}
-						for field := range input {
-							changed = append(changed, field)
-						}
-						sort.Strings(changed)
-						err = store.Update(ctx, old, item.Instance, changed)
-					}
-					if err != nil {
-						return err
-					}
-				}
-				if err = store.Emit(ctx, "instance."+item.Outcome, item.Instance); err != nil {
 					return err
 				}
 				saved.Items[i] = item
@@ -734,34 +580,7 @@ func (h *handler) bulkWriteHTTP(operation string) http.HandlerFunc {
 				return
 			}
 			clients[item.ClientKey] = true
-			command := mutationCommand{ClientKey: item.ClientKey, IfMatch: item.IfMatch}
-			if operation == "upsert" {
-				if item.Match == nil || item.ID != "" || len(item.Values) == 0 || policy == "overwrite" && item.IfMatch != "" {
-					err = problem(422, "invalid_bulk_item", "upsert 项需要 match 和 values，并发条件须与策略一致")
-				} else {
-					command.Match, err = normalizeMutationMatch(current, *item.Match, decisions)
-				}
-			} else if operation == "create" {
-				if item.ID != "" || item.IfMatch != "" || item.Match != nil || len(item.Values) == 0 {
-					err = problem(422, "invalid_bulk_item", "create 项只接受 clientKey 和非空 values")
-				}
-				command.Match.ID = c.NewID()
-			} else {
-				if item.Match != nil || operation == "delete" && len(item.Values) != 0 || operation == "update" && len(item.Values) == 0 {
-					err = problem(422, "invalid_bulk_item", "更新或删除项目格式无效")
-				} else {
-					command.Match.ID, err = mutationID(current, item.ID)
-				}
-			}
-			if err == nil && command.IfMatch != "" {
-				_, err = mutationETag(command.IfMatch)
-			}
-			if err == nil && (operation == "update" || operation == "delete") && command.IfMatch == "" {
-				err = problem(428, "precondition_required", "每个更新或删除项目均需要读取时返回的 If-Match")
-			}
-			if err == nil {
-				command.Values, err = normalizeMutationValues(current.Definition.Schema, item.Values)
-			}
+			command, err := normalizeMutationCommand(current, decisions, operation, policy, item)
 			if err != nil {
 				writeError(w, err)
 				return
@@ -781,4 +600,208 @@ func (h *handler) bulkWriteHTTP(operation string) http.HandlerFunc {
 		}
 		writeJSON(w, 200, result)
 	}
+}
+
+// replayMutation reauthorizes historical and current rows before projecting a receipt.
+func replayMutation(ctx context.Context, store mutationStore, current c.CurrentDefinition, req mutationRequest, decisions mutationDecisions, item mutationSavedItem, authorization map[string]string) (c.WriteResult, error) {
+	if item.Operation != "instance.create" && item.Operation != "instance.patch" && item.Operation != "instance.delete" {
+		return c.WriteResult{}, problem(500, "idempotency_corrupt", "无法核对原写入结果")
+	}
+	for _, decision := range decisions.relevant(item.Operation) {
+		if err := checkRowFilter(ctx, store.Tx(), current.Definition.Schema, item.Instance.Values, decision.RowFilter); err != nil {
+			return c.WriteResult{}, err
+		}
+	}
+	if item.Outcome != "deleted" {
+		for _, decision := range decisions.relevant(item.Operation) {
+			if err := checkNewRow(ctx, store.Tx(), current.Definition.Schema, item.Instance.Values, decision); err != nil {
+				return c.WriteResult{}, err
+			}
+		}
+	}
+	actual, exists, err := store.Lookup(ctx, mutationMatch{ID: item.Instance.ID})
+	if err != nil {
+		return c.WriteResult{}, err
+	}
+	if item.Outcome == "deleted" {
+		for name, decision := range decisions {
+			if authorization[name] != digest(decision) {
+				return c.WriteResult{}, problem(409, "authorization_changed", "授权已改变，不能重放原删除回执")
+			}
+		}
+	} else if !exists {
+		return c.WriteResult{}, problem(404, "not_found", "实例不存在或不可访问")
+	}
+	if exists {
+		if err = mutationCheckOld(ctx, store, current.Definition.Schema, actual, decisions.relevant(item.Operation), req.Operation == "upsert"); err != nil {
+			return c.WriteResult{}, err
+		}
+		if item.Outcome != "deleted" {
+			for _, decision := range decisions.relevant(item.Operation) {
+				if err = checkNewRow(ctx, store.Tx(), current.Definition.Schema, actual.Values, decision); err != nil {
+					return c.WriteResult{}, err
+				}
+			}
+		}
+	}
+	return mutationResult(current.Definition.Schema, item, decisions), nil
+}
+
+// applyMutation runs one logical write in its caller-owned transaction.
+func applyMutation(ctx context.Context, store mutationStore, current c.CurrentDefinition, req mutationRequest, decisions mutationDecisions, command mutationCommand, seen map[string]bool) (mutationSavedItem, error) {
+	old, exists, err := store.Lookup(ctx, command.Match)
+	if err != nil {
+		return mutationSavedItem{}, err
+	}
+	operation := mutationPermission(req.Operation)
+	creating := req.Operation == "create" || req.Operation == "upsert" && !exists
+	if req.Operation == "upsert" {
+		operation = "instance.patch"
+		if creating {
+			operation = "instance.create"
+		}
+	}
+	relevant := decisions.relevant(operation)
+	if exists {
+		if err = mutationCheckOld(ctx, store, current.Definition.Schema, old, relevant, req.Operation == "upsert"); err != nil {
+			return mutationSavedItem{}, err
+		}
+		if seen[old.ID] {
+			return mutationSavedItem{}, problem(422, "duplicate_target", "同一批次不能重复修改同一实例")
+		}
+		seen[old.ID] = true
+	}
+	if req.Operation == "create" && exists {
+		return mutationSavedItem{}, problem(409, "write_conflict", "目标或约束不允许本次写入")
+	}
+	if !creating && !exists {
+		if req.Operation == "upsert" && command.IfMatch != "" {
+			return mutationSavedItem{}, problem(412, "precondition_failed", "实例已改变或不存在，请重新读取")
+		}
+		return mutationSavedItem{}, problem(404, "not_found", "实例不存在或不可访问")
+	}
+	if req.Operation == "upsert" && creating && command.IfMatch != "" {
+		return mutationSavedItem{}, problem(412, "precondition_failed", "实例已改变或不存在，请重新读取")
+	}
+	if !creating && !(req.Operation == "upsert" && req.ConflictPolicy == "overwrite") {
+		etag, err := mutationETag(command.IfMatch)
+		if err != nil {
+			return mutationSavedItem{}, err
+		}
+		if old.ETag != etag {
+			return mutationSavedItem{}, problem(412, "precondition_failed", "实例已被修改，请重新读取")
+		}
+	}
+	item := mutationSavedItem{ClientKey: command.ClientKey, Operation: operation}
+	if req.Operation == "delete" {
+		item.Instance, item.Outcome = old, "deleted"
+		if err = store.Delete(ctx, old); err != nil {
+			return mutationSavedItem{}, err
+		}
+	} else {
+		input := command.Values
+		if req.Operation == "upsert" && command.Match.Index != nil {
+			input = map[string]json.RawMessage{}
+			for key, value := range command.Values {
+				input[key] = value
+			}
+			for key, value := range command.Match.Values {
+				if other, ok := input[key]; ok {
+					equal, err := mutationValuesEqual(ctx, store, current.Definition.Schema, key, other, value)
+					if err != nil {
+						return mutationSavedItem{}, err
+					}
+					if !equal {
+						return mutationSavedItem{}, problem(422, "match_value_conflict", "写入值不能改变匹配键")
+					}
+				}
+				if creating {
+					input[key] = value
+				} else {
+					// Matching identity remains immutable even when an
+					// equivalent decimal/UUID encoding was repeated.
+					delete(input, key)
+				}
+			}
+		}
+		values, err := mutationBuild(ctx, store, current.Definition.Schema, input, old.Values, relevant, creating)
+		if err != nil {
+			return mutationSavedItem{}, err
+		}
+		item.Instance = c.Instance{SchemaID: current.Definition.ID, ID: old.ID, Values: values, ETag: c.NewID()}
+		item.Outcome = "updated"
+		if creating {
+			item.Outcome = "created"
+			item.Instance.ID = command.Match.ID
+			if item.Instance.ID == "" {
+				item.Instance.ID = c.NewID()
+			}
+		}
+		if seen[item.Instance.ID] && !exists {
+			return mutationSavedItem{}, problem(422, "duplicate_target", "同一批次不能重复修改同一实例")
+		}
+		seen[item.Instance.ID] = true
+		if stamper, ok := store.(interface {
+			Stamp(c.Instance) (c.Instance, error)
+		}); ok {
+			item.Instance, err = stamper.Stamp(item.Instance)
+			if err != nil {
+				return mutationSavedItem{}, err
+			}
+		}
+		budget := jsonBudget{remaining: c.MaxDataResponseBytes - 1}
+		if err = budget.add(item.Instance); err != nil {
+			return mutationSavedItem{}, err
+		}
+		if creating {
+			err = store.Insert(ctx, item.Instance)
+		} else {
+			changed := []string{}
+			for field := range input {
+				changed = append(changed, field)
+			}
+			sort.Strings(changed)
+			err = store.Update(ctx, old, item.Instance, changed)
+		}
+		if err != nil {
+			return mutationSavedItem{}, err
+		}
+	}
+	if err = store.Emit(ctx, "instance."+item.Outcome, item.Instance); err != nil {
+		return mutationSavedItem{}, err
+	}
+	return item, nil
+}
+
+func normalizeMutationCommand(current c.CurrentDefinition, decisions mutationDecisions, operation, policy string, item c.BulkWriteItem) (mutationCommand, error) {
+	var err error
+	command := mutationCommand{ClientKey: item.ClientKey, IfMatch: item.IfMatch}
+	if operation == "upsert" {
+		if item.Match == nil || item.ID != "" || len(item.Values) == 0 || policy == "overwrite" && item.IfMatch != "" {
+			err = problem(422, "invalid_bulk_item", "upsert 项需要 match 和 values，并发条件须与策略一致")
+		} else {
+			command.Match, err = normalizeMutationMatch(current, *item.Match, decisions)
+		}
+	} else if operation == "create" {
+		if item.ID != "" || item.IfMatch != "" || item.Match != nil || len(item.Values) == 0 {
+			err = problem(422, "invalid_bulk_item", "create 项只接受 clientKey 和非空 values")
+		}
+		command.Match.ID = c.NewID()
+	} else {
+		if item.Match != nil || operation == "delete" && len(item.Values) != 0 || operation == "update" && len(item.Values) == 0 {
+			err = problem(422, "invalid_bulk_item", "更新或删除项目格式无效")
+		} else {
+			command.Match.ID, err = mutationID(current, item.ID)
+		}
+	}
+	if err == nil && command.IfMatch != "" {
+		_, err = mutationETag(command.IfMatch)
+	}
+	if err == nil && (operation == "update" || operation == "delete") && command.IfMatch == "" {
+		err = problem(428, "precondition_required", "每个更新或删除项目均需要读取时返回的 If-Match")
+	}
+	if err == nil {
+		command.Values, err = normalizeMutationValues(current.Definition.Schema, item.Values)
+	}
+	return command, err
 }

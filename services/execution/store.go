@@ -26,6 +26,8 @@ type Record struct {
 	Input          map[string]json.RawMessage `json:"input"`
 	ImageID        string                     `json:"imageId"`
 	DeadlineAt     time.Time                  `json:"deadlineAt"`
+	Transaction    *c.WriteTransactionRequest `json:"transaction,omitempty"`
+	PreparedOutput map[string]json.RawMessage `json:"preparedOutput,omitempty"`
 }
 
 type Store interface {
@@ -37,6 +39,28 @@ type Store interface {
 }
 
 type SQLStore struct{ DB *sql.DB }
+
+// PreparingStore persists a validated write plan before any Data request.
+// A restart resumes this exact plan and never re-executes user code.
+type PreparingStore interface {
+	Prepare(context.Context, Record) (bool, error)
+}
+
+func (s *SQLStore) Prepare(ctx context.Context, record Record) (bool, error) {
+	if record.Invocation.Status != "committing" || record.Transaction == nil {
+		return false, errors.New("invalid transaction preparation")
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		return false, err
+	}
+	result, err := s.DB.ExecContext(ctx, "UPDATE af_execution_invocations SET status='committing',record_json=? WHERE tenant_id=? AND subject_id=? AND id=? AND status='running'", string(raw), record.TenantID, record.SubjectID, record.Invocation.ID)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
+}
 
 func (s *SQLStore) Ping(ctx context.Context) error {
 	if err := s.DB.PingContext(ctx); err != nil {
@@ -89,7 +113,11 @@ func (s *SQLStore) Finish(ctx context.Context, record Record) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	result, err := s.DB.ExecContext(ctx, "UPDATE af_execution_invocations SET status=?,record_json=? WHERE tenant_id=? AND subject_id=? AND id=? AND status='running'", record.Invocation.Status, string(raw), record.TenantID, record.SubjectID, record.Invocation.ID)
+	from := "running"
+	if record.Transaction != nil {
+		from = "committing"
+	}
+	result, err := s.DB.ExecContext(ctx, "UPDATE af_execution_invocations SET status=?,record_json=? WHERE tenant_id=? AND subject_id=? AND id=? AND status=?", record.Invocation.Status, string(raw), record.TenantID, record.SubjectID, record.Invocation.ID, from)
 	if err != nil {
 		return false, err
 	}

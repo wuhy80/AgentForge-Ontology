@@ -22,6 +22,12 @@ type Runner interface {
 	Run(context.Context, *c.ScriptRuntime, map[string]json.RawMessage, string) (map[string]json.RawMessage, error)
 }
 
+// DataRunner stages a logical plan inside the same isolated runtime. It never
+// commits data; the caller must validate output, capabilities and the plan.
+type DataRunner interface {
+	RunWithData(context.Context, *c.ScriptRuntime, map[string]json.RawMessage, string) (c.ScriptExecutionResult, error)
+}
+
 type RunError struct{ Status, Code, Message string }
 
 func (e *RunError) Error() string { return e.Code + ": " + e.Message }
@@ -203,8 +209,7 @@ func (d *DockerRunner) cleanup(name string) error {
 	return nil
 }
 
-const pythonWrapper = `import json, sys, contextlib, os
-try:
+const pythonWrapper = "import json, sys, contextlib, os\n" + pythonDataSDK + `try:
     payload = json.load(sys.stdin)
     namespace = {"__name__": "ontology_function"}
     with open(os.devnull, "w") as quiet:
@@ -213,9 +218,15 @@ try:
             handler = namespace.get(payload["entrypoint"])
             if not callable(handler):
                 raise ValueError("missing entrypoint")
-            result = handler(payload["input"])
+            if payload.get("operation") == "execute_data":
+                context, finish = __ontology_data_context()
+                result = handler(payload["input"], context)
+            else:
+                result = handler(payload["input"])
     if not isinstance(result, dict):
         raise ValueError("output must be an object")
+    if payload.get("operation") == "execute_data":
+        result = finish(result)
     encoded = json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     if len(encoded.encode("utf-8")) > 262144:
         raise ValueError("output budget")
@@ -326,6 +337,32 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 
 func (d *DockerRunner) Run(ctx context.Context, runtime *c.ScriptRuntime, input map[string]json.RawMessage, imageID string) (map[string]json.RawMessage, error) {
 	return d.run(ctx, runtime, input, imageID, "run")
+}
+
+func (d *DockerRunner) RunWithData(ctx context.Context, runtime *c.ScriptRuntime, input map[string]json.RawMessage, imageID string) (c.ScriptExecutionResult, error) {
+	out, err := d.run(ctx, runtime, input, imageID, "execute_data")
+	if err != nil {
+		return c.ScriptExecutionResult{}, err
+	}
+	raw, err := json.Marshal(out)
+	var result c.ScriptExecutionResult
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err != nil || decoder.Decode(&result) != nil || decoder.Decode(new(any)) != io.EOF || result.Output == nil || result.Operations == nil || len(result.Operations) > 100 {
+		return c.ScriptExecutionResult{}, &RunError{"failed", "invalid_output", "运行器必须返回合法输出与完整写入计划"}
+	}
+	for _, value := range result.Output {
+		var scalar any
+		if json.Unmarshal(value, &scalar) != nil {
+			return c.ScriptExecutionResult{}, &RunError{"failed", "invalid_output", "入口输出必须使用标量值"}
+		}
+		switch scalar.(type) {
+		case nil, string, bool, float64:
+		default:
+			return c.ScriptExecutionResult{}, &RunError{"failed", "invalid_output", "入口输出必须使用标量值"}
+		}
+	}
+	return result, nil
 }
 
 func (d *DockerRunner) run(ctx context.Context, runtime *c.ScriptRuntime, input map[string]json.RawMessage, imageID, operation string) (map[string]json.RawMessage, error) {

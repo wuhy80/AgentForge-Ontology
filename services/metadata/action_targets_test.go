@@ -13,7 +13,7 @@ import (
 func validAction() contracts.Definition {
 	d := validSchema()
 	d.ID, d.Kind, d.Name, d.Schema = "action-1", contracts.KindAction, "设备维护", nil
-	d.Action = &contracts.Callable{SideEffects: "dataWrite", TargetSchemaIDs: []string{"schema-b", "schema-a"}}
+	d.Action = &contracts.Callable{SideEffects: "dataWrite", DataWrite: []contracts.DataWriteCapability{{SchemaID: "schema-a", Operations: []string{"update"}}}, TargetSchemaIDs: []string{"schema-b", "schema-a"}}
 	return d
 }
 

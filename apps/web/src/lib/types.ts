@@ -218,21 +218,24 @@ export interface Callable {
   functionId?: string
   artifactRef?: string
   sideEffects: 'none' | 'dataWrite' | 'externalWrite'
+  dataWrite?: DataWriteCapability[]
   runtime?: ScriptRuntime
   testCases?: CallableTestCase[]
 }
+export interface DataWriteCapability { schemaId: string; operations: ('create' | 'update' | 'delete' | 'upsert')[] }
 export interface CallableTestCase { id: string; name: string; input: Values }
 export interface SourceDiagnostic { code: string; message: string; line: number; column?: number; endLine?: number; endColumn?: number }
 export type ScriptLanguage = 'python' | 'javascript' | 'go'
 export interface ScriptRuntime { language: ScriptLanguage; source: string; entrypoint: string; timeoutSeconds: number }
 export interface SourceToolResult { source: string; diagnostics: SourceDiagnostic[] }
-export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; actionInlineSource?: boolean; draftInvocation?: boolean; reason?: string }
+export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; actionInlineSource?: boolean; draftInvocation?: boolean; dataWriteTransactions?: boolean; dataWriteDraftInvocation?: boolean; maxTransactionItems?: number; sideEffects?: string[]; reason?: string }
 export interface Invocation {
   id: string
   definitionId: string
   definitionName: string
   kind: Kind
-  status: 'running' | 'succeeded' | 'failed' | 'timed_out' | 'canceled' | 'interrupted'
+  status: 'running' | 'committing' | 'succeeded' | 'failed' | 'timed_out' | 'canceled' | 'interrupted'
+  transaction?: { status: string; committed: boolean; operationCount: number }
   output?: Values
   error?: { code: string; message: string }
   createdAt: string

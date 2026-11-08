@@ -59,7 +59,7 @@ func run() error {
 			return fmt.Errorf("ONTOLOGY_EXECUTION_MAX_CONCURRENT须为1到4的整数")
 		}
 	}
-	app := execution.NewHandler(execution.Config{Store: &execution.SQLStore{DB: engine.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metadataURL, ServiceToken: service}, Runner: &execution.DockerRunner{Isolation: isolation, Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE")}, MaxConcurrent: maxConcurrent})
+	app := execution.NewHandler(execution.Config{Store: &execution.SQLStore{DB: engine.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metadataURL, ServiceToken: service}, Runner: &execution.DockerRunner{Isolation: isolation, Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE")}, MaxConcurrent: maxConcurrent, DataTransactions: &execution.RemoteDataTransactions{URL: os.Getenv("ONTOLOGY_DATA_URL"), ServiceToken: service}})
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18082"

@@ -103,8 +103,10 @@ try {
   sandbox.__ontologyInputJSON = JSON.stringify(payload.input);
   const context = vm.createContext(sandbox, {codeGeneration:{strings:false,wasm:false}});
   vm.runInContext('globalThis.__ontologyInput = JSON.parse(__ontologyInputJSON); delete globalThis.__ontologyInputJSON; globalThis.console = Object.freeze({log(){},info(){},warn(){},error(){},debug(){}});',context);
+  const dataMode = payload.operation === 'execute_data';
+  if (dataMode) vm.runInContext(String.raw` + "`" + javascriptDataSDK + "`" + `,context);
   const objectPrototype = vm.runInContext('Object.prototype', context);
-  new vm.Script(source + '\n;__ontologyResult = ' + payload.entrypoint + '(__ontologyInput);', {filename:'<function>'}).runInContext(context);
+  new vm.Script(source + '\n;__ontologyResult = ' + payload.entrypoint + (dataMode ? '(__ontologyInput,__ontologyWriteState.context);' : '(__ontologyInput);'), {filename:'<function>'}).runInContext(context);
   const result = sandbox.__ontologyResult;
   if (result === null || typeof result !== 'object' || Array.isArray(result) || ![null,objectPrototype].includes(Object.getPrototypeOf(result)) || typeof result.then === 'function') throw new Error('invalid result');
   const out = Object.create(null);
@@ -116,7 +118,12 @@ try {
     if (!(value === null || typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value))) throw new Error('invalid value');
     out[key] = value;
   }
-  const encoded = JSON.stringify(out);
+  let encoded = JSON.stringify(out);
+  if (dataMode) {
+    sandbox.__ontologyOutputJSON = encoded;
+    encoded = vm.runInContext('__ontologyWriteState.finish(__ontologyOutputJSON)',context);
+    if (typeof encoded !== 'string') throw new Error('invalid plan');
+  }
   if (Buffer.byteLength(encoded,'utf8') > 262144) throw new Error('output budget');
   fs.writeSync(1, encoded);
 } catch (failure) {

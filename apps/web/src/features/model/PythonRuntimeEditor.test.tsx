@@ -31,9 +31,11 @@ describe('Python 实现编辑', () => {
     expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ runtime: expect.objectContaining({ language: 'python', entrypoint: 'calculate', timeoutSeconds: 10, source: expect.stringContaining('inputs["原文"]') }) }))
   })
 
-  it('已生效的写入声明不允许借启用Python改成纯计算', () => {
-    render(<PythonRuntimeEditor callable={{ sideEffects: 'dataWrite' }} locked onChange={vi.fn()} />)
-    expect((screen.getByLabelText('启用 Python 实现') as HTMLInputElement).disabled).toBe(true)
+  it('已生效写入声明可补充Python源码并保持原副作用和范围', async () => {
+    const changed = vi.fn(), dataWrite = [{ schemaId: 'schema', operations: ['update' as const] }]
+    render(<PythonRuntimeEditor callable={{ sideEffects: 'dataWrite', dataWrite }} locked onChange={changed} />)
+    await userEvent.click(screen.getByLabelText('启用 Python 实现'))
+    expect(changed).toHaveBeenCalledWith(expect.objectContaining({ sideEffects: 'dataWrite', dataWrite, runtime: expect.objectContaining({ source: expect.stringContaining('main(inputs, ctx)') }) }))
   })
 
   it('草稿动作启用独立源码时清除函数绑定，已生效绑定不允许切换', async () => {
@@ -74,7 +76,7 @@ describe('Python 实现编辑', () => {
     expect(validateDefinition(definition)).toContain('不能同时配置')
     definition.action!.functionId = undefined
     definition.action!.sideEffects = 'dataWrite'
-    expect(validateDefinition(definition)).toContain('无副作用')
+    expect(validateDefinition(definition)).toContain('须声明')
   })
 
   it('按稳定参数ID提示改名后的旧字面量引用，修正后消失且不自动改源码', () => {

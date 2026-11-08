@@ -154,4 +154,32 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	foreign.Action = &c.Callable{FunctionID: c.NewID(), SideEffects: "none"}
 	foreignAction := create(foreign)
 	publish(foreignAction, 422)
+	// Declared writes must resolve a current same-tenant Schema even in drafts.
+	schemaDefinition := validSchema()
+	schemaDefinition.Name = "事务写入对象"
+	schema := create(schemaDefinition)
+	publish(schema, 200)
+	writerDefinition := writingFunction()
+	writerDefinition.Name = "事务写入函数"
+	writerDefinition.Function.DataWrite = []c.DataWriteCapability{{SchemaID: schema.Definition.ID, Operations: []string{"update", "create"}}}
+	writer := create(writerDefinition)
+	publish(writer, 200)
+	writerActionDefinition := writer.Definition
+	writerActionDefinition.ID, writerActionDefinition.TenantID = "", ""
+	writerActionBody := *writer.Definition.Function
+	writerActionDefinition.Kind, writerActionDefinition.Action, writerActionDefinition.Function = c.KindAction, &writerActionBody, nil
+	writerActionDefinition.Name = "事务绑定动作"
+	writerActionDefinition.Action.FunctionID, writerActionDefinition.Action.Runtime = writer.Definition.ID, nil
+	writerAction := create(writerActionDefinition)
+	publish(writerAction, 200)
+	writer.Definition.Function.Runtime.Source += "\n# new write implementation"
+	var writerDraft c.CurrentDefinition
+	request("PUT", "/metadata/definitions/"+writer.Definition.ID+"/draft", writer.ETag, writer.Definition, 200, &writerDraft)
+	publish(writerDraft, 200)
+	for _, ref := range []string{function.Definition.ID, c.NewID()} {
+		candidate := writingFunction()
+		candidate.ID, candidate.TenantID, candidate.CategoryID, candidate.GroupID, candidate.Name = "", "", category.ID, group.ID, "非法写入引用"
+		candidate.Function.DataWrite = []c.DataWriteCapability{{SchemaID: ref, Operations: []string{"create"}}}
+		request("POST", "/metadata/definitions", "", candidate, 422, nil)
+	}
 }

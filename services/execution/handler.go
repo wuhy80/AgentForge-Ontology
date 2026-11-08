@@ -23,12 +23,13 @@ import (
 )
 
 type Config struct {
-	Store          Store
-	Authorizer     platform.Authorizer
-	SessionChecker platform.SessionChecker
-	Metadata       MetadataReader
-	Runner         Runner
-	MaxConcurrent  int
+	Store            Store
+	Authorizer       platform.Authorizer
+	SessionChecker   platform.SessionChecker
+	Metadata         MetadataReader
+	Runner           Runner
+	MaxConcurrent    int
+	DataTransactions DataTransactionClient
 }
 
 type handler struct {
@@ -218,6 +219,9 @@ func (h *handler) draftPlan(ctx context.Context, p c.Principal, id, etag string)
 	if draft.ETag != etag {
 		return out, problem(409, "draft_changed", "草稿已改变，请重新保存或载入后使用新的请求标识试运行")
 	}
+	if callable := definitionCallable(out.root); callable != nil && callable.SideEffects == "dataWrite" {
+		return out, problem(422, "draft_writes_unsupported", "带数据写入的草稿不能试运行，请生效后正式调用")
+	}
 	return h.resolvePlan(ctx, p, out)
 }
 
@@ -226,8 +230,8 @@ func (h *handler) resolvePlan(ctx context.Context, p c.Principal, out plan) (pla
 		return out, err
 	}
 	if out.root.Kind == c.KindAction {
-		if out.root.Action == nil || out.root.Action.SideEffects != "none" || out.root.Action.ArtifactRef != "" {
-			return out, problem(422, "unsupported_action", "仅执行内联源码或绑定无副作用Function的Action")
+		if out.root.Action == nil || !supportedSideEffects(out.root.Action) || out.root.Action.ArtifactRef != "" {
+			return out, problem(422, "unsupported_action", "仅执行纯计算或声明数据写入范围的源码Action")
 		}
 		if out.root.Action.Runtime != nil {
 			out.implementation = out.root
@@ -250,6 +254,9 @@ func (h *handler) resolvePlan(ctx context.Context, p c.Principal, out plan) (pla
 		if !sameSignature(out.root.Action.Input, out.implementation.Function.Input) || !sameSignature(out.root.Action.Output, out.implementation.Function.Output) {
 			return out, problem(422, "signature_mismatch", "动作与实现函数的输入输出声明不一致")
 		}
+		if out.root.Action.SideEffects != out.implementation.Function.SideEffects || !sameDataWrite(out.root.Action.DataWrite, out.implementation.Function.DataWrite) {
+			return out, problem(422, "data_scope_mismatch", "Action与Function的数据写入范围必须一致")
+		}
 	} else {
 		out.implementation = out.root
 	}
@@ -265,8 +272,8 @@ func executable(definition c.Definition) error {
 		return problem(422, "runtime_missing", "此定义尚未配置源码实现")
 	}
 	runtime := callable.Runtime
-	if callable.SideEffects != "none" || callable.FunctionID != "" || callable.ArtifactRef != "" || definition.Kind == c.KindFunction && len(callable.TargetSchemaIDs) > 0 {
-		return problem(422, "unsupported_runtime", "仅支持无副作用的内联源码计算")
+	if !supportedSideEffects(callable) || callable.FunctionID != "" || callable.ArtifactRef != "" || definition.Kind == c.KindFunction && len(callable.TargetSchemaIDs) > 0 {
+		return problem(422, "unsupported_runtime", "仅支持纯计算或声明数据写入范围的内联源码")
 	}
 	if c.ValidateScriptRuntime(runtime) != nil {
 		return problem(422, "unsupported_runtime", "源码语言、内容、入口或运行时限无效")
@@ -308,6 +315,14 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p c.Princ
 		}
 	}
 	out := map[string]any{"invocation": available, "draftInvocation": available, "sourceDiagnostics": true, "testCases": true, "runtimes": runtimes, "supportedRuntimes": supportedRuntimes, "sourceTools": sourceTools, "synchronous": true, "async": false, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionInlineSource": true, "actionRequiresFunctionInvoke": true}
+	if _, ok := h.cfg.Runner.(DataRunner); ok && dataTransactionsConfigured(h.cfg.DataTransactions) {
+		if _, durable := h.cfg.Store.(PreparingStore); durable && available {
+			out["sideEffects"] = []string{"none", "dataWrite"}
+			out["dataWriteTransactions"] = true
+			out["dataWriteDraftInvocation"] = false
+			out["maxTransactionItems"] = c.MaxBulkWriteItems
+		}
+	}
 	if !available {
 		out["reason"] = "运行器或执行存储尚未就绪"
 	}
@@ -376,6 +391,17 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		return err
 	}
 	rootCallable := definitionCallable(initial.root)
+	if rootCallable.SideEffects == "dataWrite" {
+		if platform.ValidAccessToken(platform.Bearer(r)) {
+			return problem(403, "connection_scope_denied", "外部连接不允许调用带数据写入的定义")
+		}
+		if _, ok := h.cfg.Runner.(DataRunner); !ok || !dataTransactionsConfigured(h.cfg.DataTransactions) {
+			return problem(503, "data_transactions_unavailable", "运行器或数据事务服务尚未配置")
+		}
+		if _, ok := h.cfg.Store.(PreparingStore); !ok {
+			return problem(503, "data_transactions_unavailable", "执行存储尚不支持事务恢复")
+		}
+	}
 	runtime := definitionCallable(initial.implementation).Runtime
 	namedInput, err := buildInput(rootCallable.Input, request.Input)
 	if err != nil {
@@ -414,7 +440,16 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		return h.finish(w, r, p, record, 201)
 	}
 	runCtx, stop := context.WithTimeout(r.Context(), time.Duration(runtime.TimeoutSeconds)*time.Second)
-	output, runErr := h.cfg.Runner.Run(runCtx, runtime, namedInput, imageID)
+	var output map[string]json.RawMessage
+	var operations []c.TransactionOperation
+	var runErr error
+	if rootCallable.SideEffects == "dataWrite" {
+		var execution c.ScriptExecutionResult
+		execution, runErr = h.cfg.Runner.(DataRunner).RunWithData(runCtx, runtime, namedInput, imageID)
+		output, operations = execution.Output, execution.Operations
+	} else {
+		output, runErr = h.cfg.Runner.Run(runCtx, runtime, namedInput, imageID)
+	}
 	stop()
 	if runErr != nil {
 		var re *RunError
@@ -437,6 +472,9 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		} else {
 			record.Invocation.Status = "succeeded"
 			record.Invocation.Output = values
+			if rootCallable.SideEffects == "dataWrite" && len(operations) > 0 {
+				return h.prepareDataTransaction(w, r, p, record, operations)
+			}
 		}
 	}
 	return h.finish(w, r, p, record, 201)
@@ -468,6 +506,9 @@ func (h *handler) checkRecord(ctx context.Context, r *http.Request, p c.Principa
 	if record.TenantID != p.TenantID || record.SubjectID != p.Subject {
 		return sql.ErrNoRows
 	}
+	if callable := definitionCallable(record.Root); callable != nil && callable.SideEffects == "dataWrite" && platform.ValidAccessToken(platform.Bearer(r)) {
+		return problem(403, "connection_scope_denied", "外部连接不允许调用或读取数据写入执行")
+	}
 	if err := h.session(ctx, r, p); err != nil {
 		return err
 	}
@@ -490,6 +531,9 @@ func (h *handler) checkRecord(ctx context.Context, r *http.Request, p c.Principa
 		return err
 	}
 	if digest(current.root) != digest(record.Root) || digest(current.implementation) != digest(record.Implementation) {
+		if record.Transaction != nil {
+			return problem(409, "definition_changed", "当前定义已改变，原事务结果须先核对；请勿更换请求标识重复执行写入")
+		}
 		return problem(409, "definition_changed", "当前定义已改变，无法按原执行上下文安全交付结果；请使用新请求标识重新运行")
 	}
 	return nil
@@ -520,6 +564,9 @@ func (h *handler) deliver(w http.ResponseWriter, r *http.Request, p c.Principal,
 	if err := h.checkRecord(r.Context(), r, p, record); err != nil {
 		return err
 	}
+	if record.Invocation.Status == "committing" {
+		return h.resolveDataTransaction(w, r, p, record, r.Method != http.MethodPost, 200)
+	}
 	if record.Invocation.Status == "running" && time.Now().After(record.DeadlineAt) {
 		record.Invocation.Status = "interrupted"
 		record.Invocation.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
@@ -536,6 +583,9 @@ func (h *handler) deliver(w http.ResponseWriter, r *http.Request, p c.Principal,
 		}
 		if err := h.checkRecord(r.Context(), r, p, record); err != nil {
 			return err
+		}
+		if record.Invocation.Status == "committing" {
+			return h.resolveDataTransaction(w, r, p, record, r.Method != http.MethodPost, 200)
 		}
 	}
 	status := 200

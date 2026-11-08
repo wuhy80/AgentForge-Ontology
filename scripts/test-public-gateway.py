@@ -139,6 +139,10 @@ func main() {
                 ('GET', '/api/ontoapp-ontology/metadata/definitions/a%2Db', '/data/schemas/a-b/form'),
                 ('GET', '/api/ontoapp-ontology/data/query/context?limit=50', '/data/query/context?limit=50'),
                 ('POST', '/api/data/query', '/data/query'),
+                ('POST', '/api/data/transactions', '/data/transactions'),
+                ('POST', '/api/data/transactions/status', '/data/transactions/status'),
+                ('POST', '/api/ontoapp-ontology/data/transactions', '/data/transactions'),
+                ('POST', '/api/ontoapp-ontology/data/transactions/status', '/data/transactions/status'),
                 ('PATCH', '/api/ontoapp-ontology/data/schemas/model/instances/record', '/data/schemas/model/instances/record'),
                 ('POST', '/api/execution/invocations', '/execution/invocations'),
                 ('GET', '/api/data/sources/source/tables/a%20b', '/data/sources/source/tables/a%20b'),
@@ -181,7 +185,9 @@ func main() {
                 status, _, value = request('GET', path)
                 assert status == 200 and value['path'] == '/data/schemas/model/write-capabilities'
                 checks += 1
-            for method, path in [('DELETE','/api/data/query'),('GET','/api/metadata/auth/unknown'),
+            for method, path in [('GET','/api/data/transactions'),('PUT','/api/data/transactions/status'),
+                                 ('POST','/api/data/transactions/unknown'),('POST','/internal/execution/transactions'),
+                                 ('POST','/api/data/internal/execution/transactions'),('DELETE','/api/data/query'),('GET','/api/metadata/auth/unknown'),
                                  ('GET','/api/ontoapp-ontology/metadata/admin/users'),('GET','/api/execution/unknown'),
                                  ('POST','/api/data/schemas/model/instances/bulk-execute'),
                                  ('PUT','/api/data/schemas/model/instances/bulk-update'),

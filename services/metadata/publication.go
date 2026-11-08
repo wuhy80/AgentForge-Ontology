@@ -267,6 +267,11 @@ func validateReferences(ctx context.Context, tx *sql.Tx, d contracts.Definition)
 	}
 	for _, c := range []*contracts.Callable{d.Action, d.Function} {
 		if c != nil {
+			for _, item := range c.DataWrite {
+				if err := validateDataWriteSchema(d, refs[item.SchemaID], item.SchemaID); err != nil {
+					return err
+				}
+			}
 			if err := checkProps(c.Input); err != nil {
 				return err
 			}

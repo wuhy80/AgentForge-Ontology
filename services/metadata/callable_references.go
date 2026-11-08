@@ -15,6 +15,9 @@ func validateCallableBinding(action contracts.Definition, function contracts.Def
 	if action.Action.SideEffects != function.Function.SideEffects {
 		return problem(422, "invalid_callable_binding", "Action与实现Function的副作用声明必须一致")
 	}
+	if !dataWriteCapabilitiesEqual(action.Action.DataWrite, function.Function.DataWrite) {
+		return problem(422, "invalid_callable_binding", "Action与实现Function的业务写入范围必须完全一致")
+	}
 	if !contracts.CallableSignaturesEqual(action.Action, function.Function) {
 		return problem(422, "invalid_callable_binding", "Action与实现Function的输入输出中文名称、类型及约束必须一致")
 	}

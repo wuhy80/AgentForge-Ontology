@@ -1,6 +1,6 @@
 # Function：可调用计算与运行定义
 
-状态：完整设计与首批实现并行维护。用户于2026-11-07确认先实现Python运行器和Function/Action独立源码编辑；2026-11-08按用户追加要求接入JavaScript和Go。三语言独立编辑、纯计算、源码工具及当前态/草稿执行已有实现，分项验证统一见[项目总览](../项目总览.md#当前实现与验证2026-11-06)。本文维护源码、运行器及类型协议；任务和权限分别引用所属专题。
+状态：完整设计与首批实现并行维护。用户于2026-11-07确认Python执行，2026-11-08扩展JavaScript/Go及当前态事务写入。三语言纯计算、源码工具和草稿执行保留；本批新增声明范围的dataWrite正式调用，草稿写入禁止。源码、运行器及类型协议以本文为主，分项测试与真实集成状态见[项目总览](../项目总览.md#当前实现与验证2026-11-06)，任务和权限引用所属专题。
 
 ## 1. 用途与边界
 
@@ -12,13 +12,40 @@ Metadata 的 function 模块保存一份当前定义、输入输出及实现引�
 
 ## 2. 定义与运行清单
 
+### 声明范围的事务写入（2026-11-08）
+
+Function及直接源码Action可以使用`sideEffects=dataWrite`，并在正文声明`dataWrite:[{schemaId,operations}]`。每份声明须包含1～32个不同的Schema，每个Schema至少一种操作且仅允许`create/update/delete/upsert`；不接受bulk操作名称，SDK批量方法展开后沿用对应基本操作声明。Schema及操作是集合，保存时排序，引用必须是同租户已经生效的Schema；保存草稿与发布分别校验，写入对象也登记为定义依赖。`none`及`externalWrite`不得附带该声明，`externalWrite`仍不执行。实际合约见[事务契约](../../contracts/transactions.go)和[定义契约](../../contracts/model.go)。
+
+声明限定代码可以提出的写入范围，不授予业务权限。正式调用仍要求原用户会话、定义调用资格及每条操作当前有效的行列写权限；MCP及外部Bearer不能运行dataWrite定义，其调用目录不暴露这类可调用项。绑定Action与Function的副作用、写入Schema及操作集合必须完全相同，中文输入输出签名仍按原规则一致。权限主说明见[权限设计](../权限/权限设计.md)。
+
+工作台“实现声明”可选择副作用，并按中文对象名称配置写入范围和四种操作，保存稳定Schema ID。切换回纯计算会清除写入声明；默认模板同时切换入口参数，自编源码保留原文，由作者调整签名。已生效定义继续锁定输入输出结构、副作用及写入范围，可通过草稿更新源码、语言、入口和超时；改变能力范围须新建定义，不借源码更新扩大权限。数据写入草稿的试运行按钮禁用，后端同样拒绝；纯计算草稿行为保持原规则。
+
+SDK入口为Python的`def main(inputs, ctx)`、JavaScript的`function main(inputs, ctx)`、Go的`func Main(inputs map[string]any, ctx *OntologyContext) (map[string]any, error)`。Python/JavaScript通过`ctx.data`调用，Go通过`ctx.Data`调用下表方法；只暂存受控计划，不读取数据、不立即写入、不返回生成ID，也不向容器传入Cookie、数据库或服务凭据。输入输出仍使用中文参数键，SDK的Schema、字段及实例引用使用稳定ID。若后续操作需要新记录身份，由调用方预先提供ID并使用ID匹配upsert，不以create方法返回ID串联操作。
+
+| Python / JavaScript 方法 | Go 方法与参数 |
+| --- | --- |
+| `create(schemaId, values, clientKey)` | `Create(schemaID, values, clientKey)` |
+| `update(schemaId, id, values, ifMatch, clientKey)` | `Update(schemaID, id, values, ifMatch, clientKey)` |
+| `delete(schemaId, id, ifMatch, clientKey)` | `Delete(schemaID, id, ifMatch, clientKey)` |
+| `upsert(schemaId, match, values, ifMatch, clientKey, conflictPolicy="check")` | `Upsert(schemaID, match, values, ifMatch, clientKey, conflictPolicy)` |
+| `bulk_create(schemaId, items)` | `BulkCreate(schemaID, items)` |
+| `bulk_update(schemaId, items)` | `BulkUpdate(schemaID, items)` |
+| `bulk_delete(schemaId, items)` | `BulkDelete(schemaID, items)` |
+| `bulk_upsert(schemaId, items, conflictPolicy="check")` | `BulkUpsert(schemaID, items, conflictPolicy)` |
+
+`values`以字段ID为键；`match`为`{id}`或`{indexId,values}`。批量`items`使用`clientKey`及对应的`values/id/ifMatch/match`，不产生独立事务。Go使用`OntologyMatch{ID,IndexID,Values}`和`[]OntologyWriteItem`，其中Match为`*OntologyMatch`，Values为`map[string]any`；Go策略空字符串等同`check`。`ifMatch`必须是带双引号的强ETag，覆盖仍要求额外授权；int64/decimal继续保持字符串。SDK无返回值；任一SDK计划错误都会使调用失败，即使业务源码捕获异常也不能提交剩余计划。
+
+执行先运行脚本并校验输出，再将最多100条展开操作交给Data在单事务内提交，任一操作失败回滚整批；不在数据库事务内运行脚本。没有暂存任何写项时仍可正常完成计算。实际支持的存储与事务范围见[数据读写](../数据读写.md)，不支持的组合明确拒绝，不拆成多次非原子调用。
+
+执行状态`committing`表示事务结果尚未确认，不能展示为成功，也不交付函数输出。页面冻结原参数，允许核对状态或使用原幂等键POST恢复同一次提交；恢复不重新运行脚本。请求派发后遇到定义变化、403或网络错误仍保留原键、输入及未确认状态，隐藏业务输出与诊断；只有服务端权威终态释放参数，不提供换键重新起跑。恢复现场仅保存在当前页面内存，离开页面或整页刷新后不会自动恢复，也不将输入、会话或CSRF写入浏览器存储；未确认事务必须先核对，不能刷新后以新键重复提交。公开`transaction`仅含`status/committed/operationCount`状态摘要，不包含历史业务行值。服务端能力接口`dataWriteTransactions`为真时才允许打开写入正式调用；容器、Data事务或持久准备记录未就绪时明确不可用。恢复、提交不确定性及结果授权以[执行与调度](../执行与调度.md)为主。
+
 ### 首批Python运行协议（2026-11-07已实现）
 
-实际类型见[运行契约](../../contracts/execution.go)。Function正文中的可选`runtime`也用于[Action的直接源码模式](Action.md#直接源码与绑定调用2026-11-07)。本节记录先行Python协议：`language=python`，`source`为不超过64 KiB的UTF-8源码，`entrypoint`为普通Python函数名（默认示例`main`），`timeoutSeconds`为1～30秒；JavaScript和Go本轮扩展见下文。未配置可执行实现的既有定义继续可以登记；登记不表示可调用。当前只开放`sideEffects=none`，不支持第三方依赖安装、文件制品加载、用户指定镜像、联网访问或平台数据读写；未列出的语言及副作用声明明确拒绝。内联源码与`artifactRef`或`functionId`不能同时配置。
+实际类型见[运行契约](../../contracts/execution.go)。Function正文中的可选`runtime`也用于[Action的直接源码模式](Action.md#直接源码与绑定调用2026-11-07)。本节记录先行Python纯计算协议：`language=python`，`source`为不超过64 KiB的UTF-8源码，`entrypoint`为普通Python函数名（默认示例`main`），`timeoutSeconds`为1～30秒；JavaScript和Go扩展见下文。未配置可执行实现的既有定义继续可以登记；登记不表示可调用。纯计算使用`sideEffects=none`，声明事务写入按上节另行配置；不支持第三方依赖安装、文件制品加载、用户指定镜像或联网访问。内联源码与`artifactRef`或`functionId`不能同时配置。
 
 输入和输出各最多256个参数，支持string、text、longtext、uuid、int64、decimal、boolean及timestamp标量，不支持Enum引用、存储映射或复杂对象/数组参数。每次输入和输出分别受256 KiB总预算约束，不能将单字段longtext上限理解为本接口的请求预算。
 
-源码作为所属定义的一部分，经草稿和发布更新；不要求修改或重新编译平台Go服务。已生效Function及直接源码Action允许更新runtime源码、入口和超时，输入输出签名、副作用及已绑定实现继续沿结构变更限制；未绑定Function或产物的既有纯计算定义可补充源码，Action直接源码与绑定Function两种模式不能互相切换。发布后新调用使用新实现，已开始调用保持本次源码快照；历史结果与当前定义不兼容时拒绝读取，具体规则见[执行与调度](../执行与调度.md)。每个定义仍只有一份当前态及最多一份草稿，不新增业务version或旧定义选择入口。
+源码作为所属定义的一部分，经草稿和发布更新；不要求修改或重新编译平台Go服务。已生效Function及直接源码Action允许更新runtime源码、入口和超时，输入输出签名、副作用及已绑定实现继续沿结构变更限制；未绑定Function或产物的既有纯计算或已声明范围的写入定义可补充源码，Action直接源码与绑定Function两种模式不能互相切换。发布后新调用使用新实现，已开始调用保持本次源码快照；历史结果与当前定义不兼容时拒绝读取，具体规则见[执行与调度](../执行与调度.md)。每个定义仍只有一份当前态及最多一份草稿，不新增业务version或旧定义选择入口。
 
 入口接收并返回字典，键使用当前定义声明的中文参数名。HTTP输入和输出仍用稳定属性ID，由Execution按本次定义快照映射，用户不填写ID。未声明键、类型不符、缺少必填值或非法空值明确失败；int64、decimal仍以字符串无损传输，代码需自行使用`int`或标准库`decimal.Decimal`计算并转换回字符串。参数中文名变更不会自动改写Python源码中的字符串引用，作者须同步检查源码；已有绑定Action时还须保持双方签名一致。以下为用户代码示例：
 
@@ -59,7 +86,7 @@ Execution可返回受控的源码诊断，字段为`code`、固定公共`message
 
 用户要求将JavaScript与Go同时加入Function和直接源码Action，包含各语言源码编辑、语法高亮、自动补全，以及当前态和已保存草稿执行。本节维护本轮已实现的源码与运行器协议；前端、真实容器、跨服务HTTP及文档验证分别记录在项目总览，不以语言下拉选项代替执行结果。实际协议以[运行契约](../../contracts/execution.go)和服务说明为准。
 
-已确认沿用`runtime.source`、`entrypoint`、`timeoutSeconds`及唯一当前态/草稿流程；语言标识为`python`、`javascript`、`go`，不把`js`作为静默别名或退回Python。源码继续限制为64 KiB，超时为1～30秒；API须显式提供合法入口和超时，不从源码自动发现入口。入口名为1～64字符的ASCII普通函数标识，不能以双下划线开头或使用所选语言的保留名称；入口接收并返回中文参数名为键的JSON对象，HTTP与测试样例继续绑定稳定参数ID，int64和decimal必须使用字符串。新增语言不开放平台数据访问、联网、第三方依赖安装、任意镜像或外部副作用，绑定Action仍使用被引用Function的当前实现和调用权限。
+已确认沿用`runtime.source`、`entrypoint`、`timeoutSeconds`及唯一当前态/草稿流程；语言标识为`python`、`javascript`、`go`，不把`js`作为静默别名或退回Python。源码继续限制为64 KiB，超时为1～30秒；API须显式提供合法入口和超时，不从源码自动发现入口。入口名为1～64字符的ASCII普通函数标识，不能以双下划线开头或使用所选语言的保留名称；入口接收并返回中文参数名为键的JSON对象，HTTP与测试样例继续绑定稳定参数ID，int64和decimal必须使用字符串。语言本身不授予数据或网络权限；正式dataWrite仅使用上文声明范围的计划SDK，不开放数据读取、联网、第三方依赖安装、任意镜像或外部副作用。绑定Action仍使用被引用Function当前实现和调用权限。
 
 JavaScript采用Node 22容器执行同步普通函数，默认入口`main`；仅提供ECMAScript内建对象及静默`console`，不开放Node模块、`require`或`process`，不接收ES模块、npm依赖或Promise结果。Go使用隔离容器内的Go 1.26.10标准工具链编译并执行单文件`package main`源码，入口签名为`func Main(inputs map[string]any) (map[string]any, error)`，默认`Main`，可使用标准库import；`main`、`init`及语言关键字不能作为入口。Go源码不调用宿主编译器，不联网解析或下载模块。两种语言与Python共用执行记录、幂等、输入输出检查、草稿ETag及结果交付复核；编译也属于受限执行，不以编译成功代替函数输出或权限验收。以下为本轮已确认的用户源码示例，实际容器执行结果单独验证：
 
@@ -158,7 +185,7 @@ Python已先行实现，JavaScript和Go按上文用户确认的纯计算源码�
 
 建议流程：按中文名称选择并绑定 ID → 按 ID 读取当前定义 → 验证调用权限和输入类型/单位 → 提交任务 → 实际开始时解析当前定义及依赖并重新校验 → 保存本次执行内容及制品摘要 → 运行、校验输出并保存结果。已绑定调用沿用原 ID 并检查当前状态，不按旧中文文本重新选取同名定义。
 
-完整方案建议Function与Action支持同步和异步调用，共用权限、任务及重试语义；当前仅开放上文同步纯计算。同步等待预算不以100 ms为统一分界；首批HTTP请求取消会中止容器，后续限时等待及后台任务的取消语义须单独落实。结果核对、通知、取消与错误状态统一见[执行与调度](../执行与调度.md)，本模块不再维护另一套任务状态机。
+完整方案建议Function与Action支持同步和异步调用，共用权限、任务及重试语义；当前开放同步纯计算及上文正式事务写入，草稿仍仅纯计算。同步等待预算不以100 ms为统一分界；执行阶段HTTP取消与提交阶段的不确定性按[执行与调度](../执行与调度.md)处理，不能将取消等同未提交。本模块不再维护另一套任务状态机。
 
 定义模块提供注册/编辑草稿、读取当前定义、检查依赖及清单、变更影响分析能力；调用与任务查询由 Execution 的公共接口提供。新增运行器不应修改 Data 查询模块，新增计算函数不应修改通用 API 入口中的类型分支。
 
@@ -181,4 +208,4 @@ Function、Action 及输入输出引用的 Schema/Enum 均按稳定 ID 解析当
 
 还需验证正确输入/输出、单位不匹配、依赖缺失、运行器版本不支持、超时、资源超限及重复调用。执行公共验收使用 RUN-01～05。
 
-待定：第三方依赖构建与分发、自定义容器/外部服务协议、受限数据与联网能力、不可信代码生产隔离、大结果制品及保留方式。Python、JavaScript、Go纯计算范围已确认，本轮多语言实现及分项验证以本节和项目总览为准。
+待定：第三方依赖构建与分发、自定义容器/外部服务协议、运行器数据读取与联网能力、不可信代码生产隔离、大结果制品及保留方式。当前三语言纯计算及正式事务写入的范围以上文为准，分项验证统一见项目总览。

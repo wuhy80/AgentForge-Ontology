@@ -89,4 +89,32 @@ func TestMySQLExecutionDurabilityIsolationAndConcurrentClaim(t *testing.T) {
 	if err != nil || read.Invocation.Status != "succeeded" || string(read.Invocation.Output["result"]) != `"9007199254740993.10"` {
 		t.Fatalf("durable terminal record %+v %v", read, err)
 	}
+	// Persist a validated plan across repository restarts before Data can commit.
+	record.RequestKey, record.Invocation.ID = "prepared", c.NewID()
+	record.Invocation.Status, record.Invocation.Output = "running", nil
+	if ok, err := store.Claim(ctx, record); err != nil || !ok {
+		t.Fatalf("claim prepared %v %v", ok, err)
+	}
+	late := cloneRecord(record)
+	record.Invocation.Status = "committing"
+	record.Transaction = &c.WriteTransactionRequest{IdempotencyKey: "execution:" + record.Invocation.ID, Operations: []c.TransactionOperation{{SchemaID: "schema", Operation: "create", ClientKey: "a", Values: map[string]json.RawMessage{"field": json.RawMessage(`"value"`)}}}}
+	record.PreparedOutput = map[string]json.RawMessage{"result": json.RawMessage(`"done"`)}
+	if ok, err := store.Prepare(ctx, record); err != nil || !ok {
+		t.Fatalf("prepare %v %v", ok, err)
+	}
+	late.Invocation.Status = "interrupted"
+	if ok, err := store.Finish(ctx, late); err != nil || ok {
+		t.Fatalf("late interruption overwrote committing %v %v", ok, err)
+	}
+	read, err = reopened.FindID(ctx, tenant, "caller", record.Invocation.ID)
+	if err != nil || read.Invocation.Status != "committing" || read.Transaction == nil || len(read.PreparedOutput) != 1 {
+		t.Fatal("prepared plan did not survive reopen")
+	}
+	read.Invocation.Status, read.Invocation.Output = "succeeded", read.PreparedOutput
+	if ok, err := reopened.Finish(ctx, read); err != nil || !ok {
+		t.Fatalf("finish prepared %v %v", ok, err)
+	}
+	if ok, err := store.Prepare(ctx, record); err != nil || ok {
+		t.Fatalf("terminal record re-prepared %v %v", ok, err)
+	}
 }

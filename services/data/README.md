@@ -46,6 +46,8 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `POST /data/schemas/{schemaId}/instances/upsert` | 明确ID或完整唯一键的upsert；幂等键必填，默认check |
 | `POST /data/schemas/{schemaId}/instances/bulk-create`、`bulk-update`、`bulk-delete`、`bulk-upsert` | 同Schema原子批量写；逐项clientKey与必要ifMatch，1～100项 |
 | `GET /data/schemas/{schemaId}/write-capabilities` | 当前调用者八项能力、可写字段、唯一键、覆盖范围及预算；不返回物理映射 |
+| `POST /data/transactions` | 默认平台存储跨Schema混合create/update/delete/upsert，整笔1～100项原子提交 |
+| `POST /data/transactions/status` | 使用原完整事务正文核对持久回执，不执行任何业务写入 |
 | `POST /data/query` | 中文名称或稳定 ID 绑定、类型化筛选、投影、排序和签名游标 |
 | `GET /data/query/context` | 按当前目录及实例查询权限返回最小模型/字段能力，支持分类、模型、搜索及分页 |
 | `GET /data/schemas/{schemaId}/form?operation=create` | 默认create，可显式patch；只返回当前可见字段及对应写权限的安全表单描述，具体语义见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07) |
@@ -77,6 +79,16 @@ bulk正文为`{atomic?, items, conflictPolicy?, idempotencyKey}`，仅支持默�
 幂等键1～128字节，作用域包含租户、用户、Schema、操作，摘要包含原意图与并发条件；同键不同意图409。平台新增`008_data_write_receipts`，须显式`-migrate`，普通启动不建表。数据/回执/outbox同一本地事务，重放再次校验当前操作及历史/当前行义务，删除回执授权摘要变化即拒绝。当前没有自动过期或清理，保留策略需另行设计。事务竞争最多三次，受15秒整体预算约束；8MiB正文、完整响应及保留证据预算在提交前检查。
 
 能力发现返回八个`name/allowed/reason/writeFields`及安全fields、matchModes、uniqueKeys、overwriteAllowed、overwriteWriteFields、overwriteUniqueKeyIds、maxBulkItems和请求/响应预算。基础check与可选overwrite分别描述字段/唯一键，额外覆盖规则不收窄check。来源维护或未启用、无写权和关系限制均可使操作不可用，执行时仍重新核验，UI提示不授予权限。
+
+## 默认平台存储事务
+
+正文为`WriteTransactionRequest{idempotencyKey,operations}`，每项`{schemaId,operation,clientKey,id?,ifMatch?,match?,values?,conflictPolicy?}`；DTO见[transactions.go](../../contracts/transactions.go)。只接受当前用户租户内默认平台存储的已生效Schema，映射Schema和跨来源事务以`transaction_storage_unsupported`明确拒绝。总项数1～100，clientKey在整笔内唯一，逐项复用八写接口的字段、旧/新行权限、强ETag和upsert规则；同一实际对象不能重复修改，不提供前一步结果引用。`conflictPolicy`仅upsert可填，覆盖仍须额外授权。
+
+所有Schema按稳定ID排序获取发布gate，在同一个`*sql.Tx`内执行类型化SQL、实例写入和outbox；结果按输入顺序返回。事务共用15秒及8MiB请求、响应和保留证据预算，不按项重置总预算。提交前复核当前授权和Schema摘要；内部执行桥另通过guard复核原会话及Action/Function身份，其服务身份不能代替业务权限。该机制不承诺跨服务原子撤权。
+
+新增`009_data_transaction_receipts`须显式迁移。事务幂等键按租户、当前用户和整笔key隔离，摘要包含完整原请求及并发条件；同key不同意图409。数据/outbox/成功回执同事务提交。可确定的业务失败在savepoint回滚全部写入和outbox后，提交最小安全`status=failed`回执，不保留已回滚行；成功为`status=committed`且`committed=true`。可确定的前置字段、Schema、并发凭证和逐项权限拒绝也在同一receipt锁内登记最小failed，不执行任何业务写入；并发在途请求必须先释放该锁，已有committed绝不会被拒绝结果覆盖。这两种终态均HTTP200，`results`仅在成功时含逐项结果，重放加`replayed=true`。解析、身份、请求总预算、guard前置拒绝或存储不可用等可返回HTTP错误，网络、超时或commit错误不能据此断言回滚。
+
+`POST /data/transactions/status`必须提交原完整正文，沿当前会话、逐项授权和相同hash读取回执，不创建回执或重跑业务。`not_found`只表示本次未看到持久回执，不能证明没有在途提交；客户端可再次核对或以同key及相同正文重试原提交。成功回执复用历史及现行行约束校验与当前字段投影，删除回执授权摘要变化即拒绝。确定性前置校验或权限拒绝时，只允许同主体、同hash读取已有最小failed错误，不读取历史业务值；已有committed仍返回当前拒绝，未发现回执则保留校验错误。权限/定义变化或权威服务不可用时，成功回执的恢复查询可能拒绝，不绕过现行授权披露旧结果。回执暂不自动清理，生产保留和故障恢复仍待验收。
 
 ## 显式来源映射
 
@@ -128,7 +140,7 @@ QuerySpec 目前每页为 1 至 100 条、最多一个业务排序字段并以�
 
 首批 [OntologySQL 实际协议](../../docs/数据查询/OntologySQL.md#首批实际协议2026-11-07) 支持单Schema只读SELECT、显式投影、类型化参数、布尔/比较/空值/集合/前缀条件、一个排序字段及LIMIT；通过有界lexer/parser和类型绑定进入上述共用执行路径。目录及补全使用调用者的当前定义发现权限，叠加instance.query和字段义务；响应不返回物理映射。文本/参数/游标限制、诊断与错误语义以该主要说明和contracts为准。能力响应的ontologySQL为true不表示任意SQL可用。
 
-分表、计算属性、Enum 属性的跨定义协调、Link 多跳/跨源、批量事务、JOIN/聚合及任意联邦条件尚未开放。权限当前支持受控行条件、静态字段集合及可安全合并的角色规则，不能安全合并的组合明确拒绝；不代表完整 ABAC、逐行掩码或 Action/Function 运行授权已经实现。前端已在 [apps/web](../../apps/web/README.md) 接入 CRUD、单 Schema 查询、OntologySQL及 Link 单跳导航。服务对无法表达的请求直接拒绝，`capabilities` 不将五类元数据可维护等同于这些运行能力已实现。outbox 和幂等记录目前不自动清理；保留期限、事件投递、全量恢复和生产容量仍待后续实现及验证。
+分表、计算属性、Enum 属性的跨定义协调、Link 多跳/跨源、跨来源事务、JOIN/聚合及任意联邦条件尚未开放。权限当前支持受控行条件、静态字段集合及可安全合并的角色规则，不能安全合并的组合明确拒绝；不代表完整 ABAC 或逐行掩码已实现。Action/Function的实际执行边界见[执行服务](../execution/README.md)。前端已在 [apps/web](../../apps/web/README.md) 接入 CRUD、单 Schema 查询、OntologySQL及 Link 单跳导航。服务对无法表达的请求直接拒绝，`capabilities` 不将五类元数据可维护等同于这些运行能力已实现。outbox 和幂等记录目前不自动清理；保留期限、事件投递、全量恢复和生产容量仍待后续实现及验证。
 
 ## Link 运行接口
 
@@ -145,6 +157,8 @@ QuerySpec 目前每页为 1 至 100 条、最多一个业务排序字段并以�
 ## 验证
 
 2026-11-08八写操作增量已通过九个Go模块的测试与vet，Data全量启用真实MySQL/PostgreSQL。新增核心用例覆盖八操作、八并发同键upsert、唯一键精确比较、原子回滚、旧create回放兼容、权限收紧及覆盖范围；来源用例使用独立随机平台/来源库，覆盖八操作、回执/读取HMAC一致、隐藏字段变化、源内幂等/outbox与发布排空/恢复。另以临时低权账号验证隐藏触发器不得认证，临时跨库外键验证global REFERENCES提供完整元数据可见性且级联约束拒绝；触发器创建使用独立测试维护账号，未改现有来源权限。真实TLS两租户公开Cookie矩阵及42项Nginx回源检查通过，完整分项结果见项目总览。测试库/账号按runner finally清理，本轮未迁移现网或修改知识库；生产故障恢复、三库写入及性能仍未验收。
+
+同日默认平台跨Schema事务增量已通过Data全模块真实MySQL/PostgreSQL测试与vet；新事务用例实际在MySQL运行，覆盖四操作混合提交、同key八并发只提交一次、跨Schema同ID身份、数据/outbox/savepoint回滚及持久failed、格式/权限前置失败恢复、状态核对不写入、主体隔离、当前字段及新行约束、实际目标去重、guard撤销及未知基础设施错误。另以真实并发锁验证前置拒绝等待已在途事务提交且不能覆盖committed回执。测试在独立随机库/账号执行并清理，未执行现有库迁移、重启或部署；不表示执行沙箱联合验收、生产恢复或跨来源事务已通过。
 
 来源基本实库要求MYSQL_TEST_DSN与不同security_库的MAPPED_WRITE_TEST_DSN；隐藏目录/跨库约束补充分别使用MAPPED_WRITE_LIMITED_TEST_DSN及MAPPED_WRITE_REFERENCING_TEST_DSN。若测试MySQL启用binlog且创建触发器要求额外维护权限，可用MAPPED_WRITE_DDL_TEST_DSN仅创建/清理合成trigger，实际被认证来源连接仍沿其最小认证权限。未提供对应环境的补充用例明确跳过，不能据普通单元通过声明完整来源验收。
 

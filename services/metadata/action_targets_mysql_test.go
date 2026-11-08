@@ -121,6 +121,7 @@ func TestMySQLActionTargetsLifecycleAndIsolation(t *testing.T) {
 		d := validAction()
 		d.ID, d.TenantID, d.CategoryID, d.GroupID = "", "", category.ID, group.ID
 		d.Action.TargetSchemaIDs = targets
+		d.Action.SideEffects, d.Action.DataWrite = "none", nil
 		return d
 	}
 	for _, id := range []string{unpublished.Definition.ID, foreign.Definition.ID, contracts.NewID(), strings.ToUpper(first.Definition.ID)} {
@@ -136,7 +137,7 @@ func TestMySQLActionTargetsLifecycleAndIsolation(t *testing.T) {
 	// A different same-tenant definition kind must not become an Action target.
 	decode(request("POST", "/metadata/definitions", tenant, "", makeAction(current.Definition.ID)), 422, nil)
 	modified := current.Definition
-	modified.Action = &contracts.Callable{SideEffects: "dataWrite", TargetSchemaIDs: []string{second.Definition.ID}}
+	modified.Action = &contracts.Callable{SideEffects: "none", TargetSchemaIDs: []string{second.Definition.ID}}
 	var draft contracts.CurrentDefinition
 	decode(request("PUT", "/metadata/definitions/"+current.Definition.ID+"/draft", tenant, current.ETag, modified), 200, &draft)
 	decode(request("PUT", "/metadata/definitions/"+current.Definition.ID+"/draft", tenant, current.ETag, modified), 412, nil)

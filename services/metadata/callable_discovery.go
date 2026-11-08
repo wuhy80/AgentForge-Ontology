@@ -87,7 +87,7 @@ func (h *handler) activeCallable(ctx context.Context, tenant, id string) (c.Defi
 }
 
 func inlineCallableAvailable(body *c.Callable) bool {
-	if body == nil || body.SideEffects != "none" || body.ArtifactRef != "" || body.FunctionID != "" || c.ValidateScriptRuntime(body.Runtime) != nil {
+	if body == nil || body.SideEffects != "none" || len(body.DataWrite) != 0 || body.ArtifactRef != "" || body.FunctionID != "" || c.ValidateScriptRuntime(body.Runtime) != nil {
 		return false
 	}
 	for _, properties := range [][]c.Property{body.Input, body.Output} {

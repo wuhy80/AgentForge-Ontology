@@ -201,12 +201,15 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if c.SideEffects != "none" && c.SideEffects != "dataWrite" && c.SideEffects != "externalWrite" {
 			return problem(400, "invalid_side_effects", "必须显式声明none、dataWrite或externalWrite")
 		}
+		if err := canonicalDataWrite(c); err != nil {
+			return err
+		}
 		if c.FunctionID != "" && c.ArtifactRef != "" {
 			return problem(422, "unsupported_runtime", "实现函数与产物引用不能同时配置")
 		}
 		if c.Runtime != nil {
-			if c.SideEffects != "none" || c.ArtifactRef != "" || c.FunctionID != "" {
-				return problem(422, "unsupported_runtime", "源码仅支持无副作用计算，不能同时绑定产物或其他函数")
+			if c.SideEffects == "externalWrite" || c.ArtifactRef != "" || c.FunctionID != "" {
+				return problem(422, "unsupported_runtime", "源码支持无副作用计算或已声明范围的事务写入，不能绑定产物、其他函数或修改外部系统")
 			}
 			if err := contracts.ValidateScriptRuntime(c.Runtime); err != nil {
 				return problem(422, "invalid_runtime", err.Error())
@@ -316,6 +319,9 @@ func dependencyIDs(d contracts.Definition) []string {
 			for _, id := range c.TargetSchemaIDs {
 				seen[id] = true
 			}
+			for _, item := range c.DataWrite {
+				seen[item.SchemaID] = true
+			}
 			if c.FunctionID != "" {
 				seen[c.FunctionID] = true
 			}
@@ -340,17 +346,17 @@ func compatibleUpdate(old, next contracts.Definition) error {
 	// signatures, implementation modes and side effects remain locked.
 	if a.Kind == contracts.KindAction && a.Action != nil && b.Action != nil {
 		a.Action.TargetSchemaIDs, b.Action.TargetSchemaIDs = nil, nil
-		// An inline Action may replace its code, and an unconfigured pure Action
+		// An inline Action may replace its code, and an unconfigured supported Action
 		// may acquire code. Existing implementations cannot switch modes or drop
 		// the executable source of an already active Action.
-		if b.Action.Runtime != nil && a.Action.SideEffects == "none" && b.Action.SideEffects == "none" && a.Action.FunctionID == "" && b.Action.FunctionID == "" && a.Action.ArtifactRef == "" && b.Action.ArtifactRef == "" {
+		if b.Action.Runtime != nil && a.Action.SideEffects == b.Action.SideEffects && (a.Action.SideEffects == "none" || a.Action.SideEffects == "dataWrite") && a.Action.FunctionID == "" && b.Action.FunctionID == "" && a.Action.ArtifactRef == "" && b.Action.ArtifactRef == "" {
 			a.Action.Runtime, b.Action.Runtime = nil, nil
 		}
 	}
-	// A pure Function may acquire or replace its inline implementation while
-	// preserving its stable parameter signature. Started invocations own an
+	// A supported Function may acquire or replace its inline implementation while
+	// preserving its stable signature and write declaration. Started invocations own an
 	// immutable snapshot; later invocations resolve the new current definition.
-	if a.Kind == contracts.KindFunction && a.Function != nil && b.Function != nil && a.Function.SideEffects == "none" && b.Function.SideEffects == "none" && a.Function.ArtifactRef == "" && b.Function.ArtifactRef == "" {
+	if a.Kind == contracts.KindFunction && a.Function != nil && b.Function != nil && a.Function.SideEffects == b.Function.SideEffects && (a.Function.SideEffects == "none" || a.Function.SideEffects == "dataWrite") && a.Function.ArtifactRef == "" && b.Function.ArtifactRef == "" {
 		a.Function.Runtime, b.Function.Runtime = nil, nil
 	}
 	if !reflect.DeepEqual(a, b) {

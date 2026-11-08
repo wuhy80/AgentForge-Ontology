@@ -10,17 +10,18 @@ const sourceFor = (language: Language, upper = false) => language === 'javascrip
 
 // Browser interactions use isolated API fixtures. Real compilers, containers,
 // SQL persistence and current authorization are verified by Go integration.
-async function fixture(page: Page, language: Language, kind: 'function' | 'action', runtimes = ['python', 'javascript', 'go']) {
+async function fixture(page: Page, language: Language, kind: 'function' | 'action', runtimes = ['python', 'javascript', 'go'], dataWrite = false) {
   const tenantId = 'multilang-browser-fixture', id = `${language}-${kind}`
   let current: DefinitionRecord = { status: 'active', etag: 'active-original', definition: {
     id, tenantId, categoryId: 'knowledge', groupId: 'calculations', kind, name: '多语言原文转换',
-    [kind]: { sideEffects: 'none', runtime: { language, source: sourceFor(language), entrypoint: language === 'go' ? 'Main' : 'main', timeoutSeconds: language === 'go' ? 30 : 5 },
+    [kind]: { sideEffects: dataWrite ? 'dataWrite' : 'none', ...(dataWrite ? { dataWrite: [{ schemaId: 'schema', operations: ['update'] }] } : {}), runtime: { language, source: sourceFor(language), entrypoint: language === 'go' ? 'Main' : 'main', timeoutSeconds: language === 'go' ? 30 : 5 },
       input: [{ id: 'original', name: '原文', dataType: 'string', required: true }], output: [{ id: 'result', name: '转换结果', dataType: 'string' }],
       testCases: [{ id: 'mixed', name: '混合大小写', input: { original: '中文 mixedCase' } }] },
   } }
   let draft: DefinitionRecord | undefined, result: Invocation | undefined
   let denied = false
   const calls: { definitionId: string; input: Values; draftEtag?: string }[] = []
+  const keys: string[] = []
   const writes: Definition[] = [], tools: { definitionId: string; operation: string; runtime: ScriptRuntime }[] = [], unhandled: string[] = []
   await page.route('**/api/**', async (route) => {
     const request = route.request(), url = new URL(request.url()), method = request.method(), path = url.pathname
@@ -47,7 +48,7 @@ async function fixture(page: Page, language: Language, kind: 'function' | 'actio
       current = { ...draft!, status: 'active', etag: 'active-updated' }; draft = undefined
       return reply({ id: 'publication', tenantId, definitionId: id, status: 'succeeded' })
     }
-    if (path === '/api/execution/capabilities') return reply({ invocation: true, draftInvocation: true, sourceDiagnostics: true, testCases: true, runtimes, synchronous: true, actionInlineSource: true, sourceTools: ['go'] })
+    if (path === '/api/execution/capabilities') return reply({ invocation: true, draftInvocation: true, dataWriteTransactions: true, sourceDiagnostics: true, testCases: true, runtimes, synchronous: true, actionInlineSource: true, sourceTools: ['go'] })
     if (path === '/api/execution/source-tools') {
       expect(request.headers()['x-csrf-token']).toBe('fixture-csrf')
       const body = request.postDataJSON() as typeof tools[number]
@@ -62,19 +63,51 @@ async function fixture(page: Page, language: Language, kind: 'function' | 'actio
       expect(request.headers()['idempotency-key']).toBeTruthy()
       const body = request.postDataJSON() as typeof calls[number]
       calls.push(body)
+      keys.push(request.headers()['idempotency-key'])
       const selected = body.draftEtag ? draft! : current
       if (body.draftEtag) expect(body.draftEtag).toBe(draft?.etag)
       const runtime = selected.definition[kind]!.runtime!, text = String(body.input.original)
       result = { id: `invocation-${calls.length}`, definitionId: id, definitionName: selected.definition.name, kind, mode: body.draftEtag ? 'draft' : 'current', draftEtag: body.draftEtag,
         status: 'succeeded', output: { result: /ToUpper|toUpperCase/.test(runtime.source) ? text.toUpperCase() : text }, codeDigest: createHash('sha256').update(runtime.source).digest('hex'), createdAt: '2026-11-08T00:00:00Z' }
+      if (dataWrite) result = { ...result, status: calls.length === 1 ? 'committing' : 'succeeded', output: calls.length === 1 ? undefined : result.output,
+        transaction: { status: calls.length === 1 ? 'pending' : 'committed', committed: calls.length > 1, operationCount: 1 } }
       return reply(result, 201)
     }
     if (path.startsWith('/api/execution/invocations/')) return denied ? reply({ code: 'forbidden', message: '当前无权读取运行结果' }, 403) : reply(result)
     unhandled.push(`${method} ${path}`)
     return reply({ code: 'unhandled', message: '未定义的隔离接口' }, 404)
   })
-  return { id, calls, writes, tools, unhandled, deny: () => { denied = true } }
+  return { id, calls, keys, writes, tools, unhandled, deny: () => { denied = true } }
 }
+
+test('事务写入正式调用：草稿禁用、提交中隐藏结果，查询后以原参数和键恢复', async ({ page }) => {
+  const state = await fixture(page, 'javascript', 'function', ['python', 'javascript', 'go'], true)
+  await page.goto(`/#models/${state.id}`)
+  await expect(page.getByRole('button', { name: '打开草稿试运行', exact: true })).toBeDisabled()
+  await expect(page.getByText('数据写入草稿不允许试运行；请发布后通过当前用户会话正式调用。', { exact: true })).toBeVisible()
+  const runner = page.getByRole('region', { name: '运行当前定义', exact: true })
+  await runner.getByRole('button', { name: '打开运行面板', exact: true }).click()
+  await runner.getByRole('textbox', { name: '原文 string', exact: true }).fill('事务输出样本')
+  await runner.getByRole('button', { name: '运行', exact: true }).click()
+  await expect(runner.getByText('正在确认事务提交', { exact: true })).toBeVisible()
+  await expect(runner.locator('dd')).toHaveCount(0)
+  await expect(runner.getByRole('button', { name: '关闭运行', exact: true })).toBeDisabled()
+  await expect(runner.getByRole('textbox', { name: '原文 string', exact: true })).toBeDisabled()
+  state.deny()
+  await runner.getByRole('button', { name: '核对运行结果', exact: true }).click()
+  await expect(runner.getByRole('alert')).toContainText('当前无权读取运行结果')
+  await expect(runner.getByText('正在确认事务提交', { exact: true })).toBeVisible()
+  await expect(runner.getByRole('textbox', { name: '原文 string', exact: true })).toBeDisabled()
+  await expect(runner.getByRole('button', { name: '重新载入运行参数', exact: true })).toHaveCount(0)
+  await runner.getByRole('button', { name: '恢复本次提交', exact: true }).click()
+  await expect(runner.getByText('运行成功', { exact: true })).toBeVisible()
+  await expect(runner.locator('dd')).toHaveText('事务输出样本')
+  await expect(runner.getByText('已提交 1 条业务写入。', { exact: true })).toBeVisible()
+  expect(state.calls).toHaveLength(2)
+  expect(state.calls[0]).toEqual(state.calls[1])
+  expect(state.keys[0]).toBe(state.keys[1])
+  expect(state.unhandled).toEqual([])
+})
 
 test('切换语言须确认替换已编辑源码，取消保留原文，确认后使用对应模板与入口', async ({ page }) => {
   const state = await fixture(page, 'javascript', 'function')

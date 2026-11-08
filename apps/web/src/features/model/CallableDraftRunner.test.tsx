@@ -26,6 +26,19 @@ async function loadSample() {
 }
 
 describe('已保存草稿试运行', () => {
+  it('数据写入草稿入口禁用，读取到写入草稿时也不发送执行请求', async () => {
+    const { api, props, draft } = fixture()
+    const view = render(<CallableRunner {...props} dataWrite />)
+    expect((screen.getByRole('button', { name: '打开草稿试运行' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/数据写入草稿不允许试运行/)).toBeTruthy()
+    expect(api.getDraft).not.toHaveBeenCalled()
+    draft.definition.function!.sideEffects = 'dataWrite'
+    draft.definition.function!.dataWrite = [{ schemaId: 'schema', operations: ['create'] }]
+    view.rerender(<CallableRunner {...props} />)
+    await userEvent.click(screen.getByRole('button', { name: '打开草稿试运行' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('数据写入草稿不允许试运行')
+    expect(api.invokeDraft).not.toHaveBeenCalled()
+  })
   it('按草稿ETag、稳定参数ID和完整精度运行保存样例，独立于current路径', async () => {
     const { api, props } = fixture()
     render(<CallableRunner {...props} />)

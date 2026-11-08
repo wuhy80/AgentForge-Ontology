@@ -71,4 +71,12 @@ type Invocation struct {
 	Mode           InvocationMode             `json:"mode"`
 	DraftETag      string                     `json:"draftEtag,omitempty"`
 	Diagnostics    []SourceDiagnostic         `json:"diagnostics,omitempty"`
+	Transaction    *InvocationTransaction     `json:"transaction,omitempty"`
+}
+
+// InvocationTransaction exposes commit evidence without historical row values.
+type InvocationTransaction struct {
+	Status         string `json:"status"`
+	Committed      bool   `json:"committed"`
+	OperationCount int    `json:"operationCount"`
 }

@@ -380,6 +380,9 @@ func (h *handler) createDefinition(w http.ResponseWriter, r *http.Request, p con
 		if err := validateActionTargetReferences(r.Context(), tx, d); err != nil {
 			return err
 		}
+		if err := validateDataWriteReferences(r.Context(), tx, d); err != nil {
+			return err
+		}
 		if err := validateLinkReferences(r.Context(), tx, d); err != nil {
 			return err
 		}
@@ -467,6 +470,9 @@ func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, p contracts.
 			return err
 		}
 		if err := validateActionTargetReferences(r.Context(), tx, d); err != nil {
+			return err
+		}
+		if err := validateDataWriteReferences(r.Context(), tx, d); err != nil {
 			return err
 		}
 		if err := validateLinkReferences(r.Context(), tx, d); err != nil {

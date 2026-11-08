@@ -6,14 +6,14 @@
 
 默认要求 `ONTOLOGY_EXECUTION_ISOLATION=sandbox` 的rootless Docker、runsc及cgroup v2资源预算；仅受控开发显式设为 `trusted` 时兼容普通Docker。缺少沙盒条件不会自动降级；`-check-isolation` 可单独检查环境。隔离协议唯一见[Function](../../docs/模块/Function.md)，单机准备和未部署边界见[部署与运维](../../docs/部署与运维.md#后续安全加固代码尚未部署)。
 
-- 同步执行已生效、`sideEffects: none`、配置`runtime`的Python、JavaScript、Go Function及直接源码Action。Action也可使用`functionId`绑定签名相同的已生效Function；绑定双方的中文参数名、类型、空值、默认值和必填语义须一致，参数ID可以各自独立。Action的内联源码、函数引用和制品引用互斥。
+- 同步执行已生效、`sideEffects: none`或显式声明`dataWrite`范围、配置`runtime`的Python、JavaScript、Go Function及直接源码Action。Action也可使用`functionId`绑定签名相同的已生效Function；绑定双方的中文参数名、类型、空值、默认值和必填语义须一致，参数ID可以各自独立。Action的内联源码、函数引用和制品引用互斥。
 - 入口由作者声明：Python默认`main(inputs)`，JavaScript默认同步`main(inputs)`，Go默认`Main(inputs map[string]any) (map[string]any, error)`；Go源码为含标准库导入的完整`package main`文件。三种语言均接受并返回以声明中文参数名为键的对象，HTTP输入、输出使用稳定参数ID。int64、decimal始终以字符串传递，精确计算及输出转换由作者显式完成。
 - 输入输出支持 string、text、longtext、uuid、int64、decimal、boolean、timestamp；单次输入/输出仍受 256 KiB 总预算。枚举引用、存储映射与复杂参数类型明确拒绝。可选输入缺省时不注入键，有默认值则使用默认值；null 仅在 nullable 时接受。
 - 执行记录按租户与发起用户隔离；记录真实调用目标、实际源码、定义上下文、输入、源码SHA-256与实际容器image ID。直接源码Action保存自己的实现快照，绑定Action另外保存Function上下文。HTTP仅返回状态、输出、摘要及安全错误，不返回源码、原始输入、stdout、stderr或traceback。
 - 已保存的Function/Action草稿可独立试运行；请求显式携带草稿`draftEtag`，不替换当前态，也不能运行任意客户端定义。未发布的纯计算草稿同样可用。草稿与当前态共用隔离容器、并发、参数校验和持久化协议，记录以`mode: draft/current`区分。
 - `Callable.testCases`随定义草稿保存，发布后随当前定义可见；最多10项，总JSON最多64KiB，名称最多80个Unicode字符且不重复。样例输入使用参数稳定ID，可部分填写，已填写值须满足标量传输声明；运行时仍检查必填与默认值，不将样例当作执行授权。
 
-未开放用户自定义镜像、容器业务程序、HTTP/gRPC外部实现、第三方依赖安装、网络访问、业务数据读写、模型API调用、事件/周期调度、后台队列、自动重试和调用委托。既无runtime也未绑定可执行Function的定义仍可登记；业务调用会明确拒绝。
+未开放用户自定义镜像、容器业务程序、HTTP/gRPC外部实现、第三方依赖安装、网络访问、业务数据读取、容器直接写库、模型API调用、事件/周期调度、后台队列、自动重试和调用委托。既无runtime也未绑定可执行Function的定义仍可登记；业务调用会明确拒绝。
 
 ## HTTP 入口
 
@@ -50,11 +50,19 @@ POST 请求使用 `contracts.InvocationRequest`，例如：
 
 失败响应可含`diagnostics`数组，返回受控`code/message`与源码内`line/column/endLine/endColumn`。行列从1开始，列按Unicode码点计数，非UTF-8字节；Python语法错误可给出范围，执行异常只给最深的用户源码行。坐标越界被丢弃，原异常文本、堆栈和源码片段不会返回；超时等没有可靠源码位置的错误不伪造行号。
 
-首次完成返回 201，同键同请求重放返回 200，相同请求仍运行时返回 202；内容变化返回 `409 idempotency_conflict`。键限定 1～128 个字母、数字、`.`、`_`、`:` 或 `-`，在租户与发起用户范围内唯一。新计算使用新键，网络不确定时保留原键，不能为了重试生成新键。
+首次完成返回 201，同键同请求重放返回 200，相同请求仍运行或提交待确认时返回 202；内容变化返回 `409 idempotency_conflict`。键限定 1～128 个字母、数字、`.`、`_`、`:` 或 `-`，在租户与发起用户范围内唯一。新计算使用新键，网络不确定时保留原键，不能为了重试生成新键。
 
 每个进程默认最多同时执行 4 个计算，可通过 `ONTOLOGY_EXECUTION_MAX_CONCURRENT` 配置为1～4，非法配置使启动失败；不排队，实际值见能力响应 `maxConcurrent`。超限在保存执行记录前返回 429，可稍后使用原键重试。记录先持久保存为 running，之后成为 succeeded、failed、timed_out 或 canceled。浏览器断开仍以独立短事务上下文保存已知终态。写入结果不确定时只能用原键/ID核对，不自动再跑。
 
-进程中断留下的 running 记录在执行时限加90秒后由当前有权读取它的请求标记为 interrupted，终态不可被迟到进程覆盖；这不是自动恢复执行。平台不自动删除历史记录或实现生产备份/保留策略。
+尚未准备事务的进程中断留下的 running 记录在执行时限加90秒后由当前有权读取它的请求标记为 interrupted，终态不可被迟到进程覆盖；这不是自动恢复执行。平台不自动删除历史记录或实现生产备份/保留策略。
+
+## 受控事务写入
+
+`Callable.sideEffects=dataWrite`与`dataWrite`声明允许Schema及四种基本写操作；绑定双方须一致。Python/JS使用`main(inputs,ctx)`，Go支持`Main(inputs,ctx *OntologyContext)`；八种SDK方法只暂存计划，完整签名与例子唯一见[Function](../../docs/模块/Function.md)。成功及合法输出后才交给Data统一提交，代码失败、取消、超时或输出非法不提交。草稿写入、MCP外部调用及业务读取均不开放。
+
+Execution在请求Data前持久保存计划及待交付输出，以`committing`表示尚未核对的提交。GET仅查Data回执，原键POST恢复原计划；响应丢失或存储失败不会触发脚本重跑、不会误报回滚。`committing`不按计算deadline中断。实际状态与恢复语义唯一见[执行与调度](../../docs/执行与调度.md#同步事务写入与恢复2026-11-08已实现)，Data存储范围、预算、终态及幂等见[数据读写](../../docs/数据读写.md#跨schema对象事务2026-11-08已实现)。
+
+Data内部桥接独立验证服务身份及原用户会话/CSRF、当前调用定义与声明，再复用逐项业务权限。容器不接收任何凭据或数据库句柄；不通过改写Origin调用公共Data接口。需显式Data迁移009和更新Go镜像，Execution记录沿既有JSON列保存，不增加自动迁移。能力`dataWriteTransactions`表示运行器、持久准备与Data客户端已配置；`dataWriteDraftInvocation=false`。
 
 ## 语言容器
 
@@ -86,6 +94,7 @@ go run ./cmd/server
 | --- | --- |
 | `ONTOLOGY_MYSQL_DSN` | 本服务独立 MySQL 数据库 |
 | `ONTOLOGY_METADATA_URL` | Metadata 地址 |
+| `ONTOLOGY_DATA_URL` | Data地址；启用受控写计划必须配置，缺省仅开放纯计算 |
 | `ONTOLOGY_SERVICE_TOKEN` | 至少32字节内部服务凭据 |
 | `ONTOLOGY_LISTEN` | 默认 `127.0.0.1:18082` |
 | `ONTOLOGY_PYTHON_IMAGE` | 已准备的可信镜像，建议正式环境固定内容摘要 |
@@ -109,3 +118,5 @@ go run ./cmd/server
 `EXECUTION_TEST_DSN` 开启真实 MySQL 隔离测试，以随机租户检查唯一并发认领、重开仓库读取、用户/租户隔离及终态不可覆盖，只清理该次随机租户。`EXECUTION_TEST_DOCKER=1` 开启真实三语言容器测试，检查精确值、隔离、日志丢弃、严格标量输出、安全诊断、超时、取消、Go源码限制和解析格式化；使用相同镜像配置。测试入口不自动下载镜像。
 
 跨服务真实 MySQL、OPA、会话与 Docker 的 HTTP 验证位于 [tests/integration](../../tests/integration)。模块测试或容器测试通过不代表完整调度、委托、生产隔离、三库或性能验收。
+
+本轮[事务编排用例](data_transactions_test.go)覆盖准备后提交、响应丢失、未见回执只允许POST恢复、终态持久化失败、定义变化提示及无Data配置时不运行写代码；真实MySQL另验证running到committing的CAS与迟到中断保护。[SDK容器用例](data_sdk_test.go)及三服务TLS事务增量均通过，具体环境和分项结果统一记录于[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)。

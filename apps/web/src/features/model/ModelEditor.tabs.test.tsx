@@ -28,7 +28,7 @@ function link(id: string, name: string, sourceSchemaId: string, targetSchemaId: 
 function action(id: string, name: string, targets?: string[], status = 'active'): DefinitionRecord {
   return { status, etag: `etag-${id}`, definition: {
     id, name, tenantId: 'tenant', categoryId: 'production', groupId: 'group', kind: 'action',
-    action: { input: [], output: [], sideEffects: 'dataWrite', ...(targets ? { targetSchemaIds: targets } : {}) },
+    action: { input: [], output: [], sideEffects: 'dataWrite', dataWrite: [{ schemaId: 'equipment', operations: ['update'] }], ...(targets ? { targetSchemaIds: targets } : {}) },
   } }
 }
 function fixture(initial = schema(), entries = [initial]) {
