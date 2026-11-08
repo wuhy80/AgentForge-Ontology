@@ -41,7 +41,7 @@ func missingSourceControls(err error) bool {
 }
 
 func mappedWriteUnsupported(reason string) error {
-	return problem(422, reason, "当前来源尚未具备已认证的实例写入能力")
+	return problem(422, reason, "当前来源尚未具备已认证的实例写入能力（"+reason+"）")
 }
 
 // Validate the complete physical scope before allowing a mutation. A source
@@ -278,6 +278,13 @@ func InitializeMappedWrites(ctx context.Context, cfg Config, tenantID, schemaID 
 	}
 	defer closeMappedTables(tables)
 	if err := validateMappedWriteTable(ctx, current.Definition, tables); err != nil {
+		var api *apiError
+		if len(tables) == 1 && errors.As(err, &api) && api.code == "mapped_write_metadata_visibility_unsupported" {
+			var account string
+			if tables[0].db.QueryRowContext(ctx, "SELECT CURRENT_USER()").Scan(&account) == nil {
+				return fmt.Errorf("%w；初始化连接账号：%s", err, account)
+			}
+		}
 		return err
 	}
 	table := tables[0]

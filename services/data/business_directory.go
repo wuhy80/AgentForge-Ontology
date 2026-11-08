@@ -170,6 +170,9 @@ func (h *handler) formDefinitionHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if storageReady {
 			protectedFields, err = h.mappedProtectedWriteFields(r.Context(), current)
+			if err == nil && operation == "create" {
+				protectedFields, err = h.mappedCreateProtectedWriteFields(r.Context(), p, current)
+			}
 			if err != nil {
 				writeError(w, err)
 				return

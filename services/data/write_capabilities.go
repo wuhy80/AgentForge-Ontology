@@ -126,6 +126,7 @@ func (h *handler) writeCapabilitiesHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	deleteReady := true
 	protectedFields := map[string]bool{}
+	createProtected := map[string]bool{}
 	if ready && current.Definition.Schema.StorageBinding != nil {
 		deleteReady, err = h.mappedDeleteReadiness(r.Context(), current)
 		if err != nil {
@@ -137,10 +138,19 @@ func (h *handler) writeCapabilitiesHTTP(w http.ResponseWriter, r *http.Request) 
 			writeError(w, err)
 			return
 		}
+		createProtected, err = h.mappedCreateProtectedWriteFields(r.Context(), p, current)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 	}
 	out := c.WriteCapabilities{SchemaID: current.Definition.ID, Operations: []c.WriteOperationCapability{}, Fields: []c.FormField{}, MatchModes: []string{}, UniqueKeys: []c.WriteUniqueKey{}, OverwriteWriteFields: []string{}, OverwriteUniqueKeyIDs: []string{}, MaxBulkItems: c.MaxBulkWriteItems, MaxRequestBytes: c.MaxDataRequestBytes, MaxResponseBytes: c.MaxDataResponseBytes}
 	visible := map[string]bool{}
 	for _, name := range []string{"create", "update", "delete", "upsert", "bulk_create", "bulk_update", "bulk_delete", "bulk_upsert"} {
+		operationProtected := protectedFields
+		if name == "create" || name == "bulk_create" {
+			operationProtected = createProtected
+		}
 		relevant, allow := capabilityDecisions(decisions, name)
 		operation := c.WriteOperationCapability{Name: name, Allowed: ready && allow, WriteFields: []string{}}
 		contextErr := validateWriteContext(current, relevant, map[string]bool{current.Definition.ID: true})
@@ -156,7 +166,7 @@ func (h *handler) writeCapabilitiesHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		if allow && name != "delete" && name != "bulk_delete" {
 			for _, id := range capabilityWriteFields(current.Definition.Schema, relevant) {
-				if !protectedFields[id] {
+				if !operationProtected[id] {
 					operation.WriteFields = append(operation.WriteFields, id)
 					visible[id] = true
 				}
@@ -173,7 +183,7 @@ func (h *handler) writeCapabilitiesHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	for _, property := range current.Definition.Schema.Properties {
 		if visible[property.ID] {
-			out.Fields = append(out.Fields, c.FormField{ID: property.ID, Name: property.Name, DataType: property.DataType, Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || protectedFields[property.ID], Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID})
+			out.Fields = append(out.Fields, c.FormField{ID: property.ID, Name: property.Name, DataType: property.DataType, Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || (protectedFields[property.ID] && createProtected[property.ID]), Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID})
 		}
 	}
 	upsertRelevant, upsertAllowed := capabilityDecisions(decisions, "upsert")

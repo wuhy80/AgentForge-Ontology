@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,6 +30,7 @@ type mappedWriteFixture struct {
 	source  c.DataSource
 	db      *sql.DB
 	current c.CurrentDefinition
+	extra   map[string]c.CurrentDefinition
 	mu      sync.Mutex
 	code    string
 	amount  string
@@ -63,6 +65,10 @@ func newMappedWriteFixture(t *testing.T) *mappedWriteFixture {
 	source := c.DataSource{ID: c.NewID(), TenantID: "mapped-write-" + c.NewID(), Name: input.Name, Driver: "mysql", Host: input.Host, Port: input.Port, Database: input.Database, Username: input.Username, TLSMode: "disable", TenantIsolation: "dedicated", Enabled: true, PasswordSet: true, ETag: digest(c.NewID())}
 	f := &mappedWriteFixture{t: t, ctx: ctx, source: source, db: db}
 	f.cfg = Config{Engine: engine, DataSourceKey: strings.Repeat("source-write-test-", 3), ServiceToken: strings.Repeat("source-service-test-", 3), CursorSecret: strings.Repeat("source-cursor-test-", 3), SourceNetworkPolicy: testSourceNetworkPolicy(t)}
+	f.cfg.SourceNetworkPolicy, err = ParseSourceNetworkPolicy(fmt.Sprintf(`[{"cidr":"127.0.0.1/32","ports":[%d],"allowInsecureTLS":true}]`, source.Port))
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.h = &handler{cfg: f.cfg}
 	secret, err := f.h.encryptSourceSecret(source.TenantID, source.ID, *input.Password)
 	if err != nil {
@@ -82,11 +88,15 @@ func newMappedWriteFixture(t *testing.T) *mappedWriteFixture {
 	metadata := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		if r.URL.Path != "/metadata/definitions/"+f.current.Definition.ID || r.Header.Get("X-Tenant-ID") != source.TenantID {
+		current := f.current
+		if other, ok := f.extra[strings.TrimPrefix(r.URL.Path, "/metadata/definitions/")]; ok {
+			current = other
+		}
+		if r.URL.Path != "/metadata/definitions/"+current.Definition.ID || r.Header.Get("X-Tenant-ID") != source.TenantID {
 			w.WriteHeader(404)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(f.current)
+		_ = json.NewEncoder(w).Encode(current)
 	}))
 	t.Cleanup(metadata.Close)
 	f.cfg.MetadataURL, f.cfg.HTTPClient = metadata.URL, metadata.Client()

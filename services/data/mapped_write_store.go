@@ -11,12 +11,14 @@ import (
 )
 
 type mappedMutationStore struct {
-	tx      *sql.Tx
-	table   *mappedTable
-	p       c.Principal
-	current c.CurrentDefinition
-	state   mappedWriteState
-	h       *handler
+	tx               *sql.Tx
+	table            *mappedTable
+	p                c.Principal
+	current          c.CurrentDefinition
+	state            mappedWriteState
+	h                *handler
+	platformTx       *sql.Tx
+	recheckRelations []func(context.Context) error
 }
 
 func (s *mappedMutationStore) Tx() *sql.Tx { return s.tx }
@@ -42,23 +44,33 @@ func (h *handler) withMappedMutationStore(ctx context.Context, p c.Principal, cu
 	if status != "ready" || actual != current.ETag {
 		return problem(409, "mapping_unavailable", "Schema 正在生效或映射已改变，请重试")
 	}
-	tx, err := tables[0].db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	state, enabled, err := readMappedWriteState(ctx, tables[0], current, tx)
-	if err != nil {
-		return err
-	}
-	if !enabled {
-		return mappedWriteUnsupported("mapped_write_not_initialized")
-	}
-	store := &mappedMutationStore{tx: tx, table: tables[0], p: p, current: current, state: state, h: h}
-	if err := fn(store); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return h.cfg.Engine.WithTx(ctx, func(platformTx *sql.Tx) error {
+		if err := h.gate(ctx, platformTx, p, current); err != nil {
+			return err
+		}
+		tx, err := tables[0].db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		state, enabled, err := readMappedWriteState(ctx, tables[0], current, tx)
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return mappedWriteUnsupported("mapped_write_not_initialized")
+		}
+		store := &mappedMutationStore{tx: tx, table: tables[0], p: p, current: current, state: state, h: h, platformTx: platformTx}
+		if err := fn(store); err != nil {
+			return err
+		}
+		for _, check := range store.recheckRelations {
+			if err := check(ctx); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	})
 }
 
 func (s *mappedMutationStore) Lookup(ctx context.Context, match mutationMatch) (c.Instance, bool, error) {
@@ -123,13 +135,7 @@ func (s *mappedMutationStore) Lookup(ctx context.Context, match mutationMatch) (
 }
 
 func (s *mappedMutationStore) Insert(ctx context.Context, item c.Instance) error {
-	changed := []string{}
-	for _, p := range s.current.Definition.Schema.Properties {
-		if string(item.Values[p.ID]) != "null" {
-			changed = append(changed, p.ID)
-		}
-	}
-	if err := s.checkRelationChanges(ctx, changed); err != nil {
+	if err := s.checkCreateRelations(ctx, item); err != nil {
 		return err
 	}
 	columns, marks, args := []string{s.table.quoted(s.table.keyColumn)}, []string{"?"}, []any{item.ID}

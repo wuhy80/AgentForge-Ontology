@@ -192,3 +192,10 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 同日新增 [版本HTTP生命周期](sources_version_integration_test.go)、[物理连接回归](source_versions_test.go)和[来源主表能力认证](source_version_matrix_test.go)。来源/映射/Link测试可用 `MYSQL_SOURCE_TEST_DSN` 指定独立外部MySQL，未设时回退 `MYSQL_TEST_DSN`，平台控制库仍由后者指定；PostgreSQL继续用 `POSTGRES_SOURCE_TEST_DSN`。本批实际版本及模块/真实集成/浏览器结果统一见[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)，待适配版本不因测试入口存在而视为已认证。
 
 同日离线迁移的真实 MySQL 定向测试已通过，覆盖完整字段及空字符串/NULL/长正文/精确数值保留、源表不变、整批准备与激活、DDL 中断恢复，以及目标接管、数据漂移、托管 Link 依赖、来源变化、缩减清单和部分准备批次的拒绝。迁移 CLI 另验证同一 MySQL 实例上的 Metadata/Data 维护锁互不自阻塞；这些隔离用例不代表跨实例持续隔离、生产恢复或性能验收。
+## 2026-11-08 同源外键创建增量
+
+显式认证/初始化的专用 MySQL 单主表，创建对象时可同时填入已发布 `foreign_key` Link 的持键字段。该动作还须具备 `link.create` 和两个端点的 `instance.read`；提交的持键对象及目标对象都执行读取行条件。两端须同源、单主表且均已初始化，目标 UUID 必须存在。跨来源、未认证目标、歧义映射和现有外键修改继续拒绝；关联表写入和端点删除不在此次开放范围。
+
+事务持有平台 Schema/Link gate，来源事务持有写入 gate 和目标行锁，提交前复核授权。对象、外键事实、幂等回执、对象/关系 outbox 在同一来源事务中提交；不写平台影子关系表，也不宣称跨库业务原子提交。create 最小表单/能力发现仅在具备关系与端点权限时开放对应 FK 字段；提交时仍重新检查实际目标和行权限。patch 字段继续保护既有 FK。
+
+隔离 MySQL 26.7.0 的 `TestMySQLMappedForeignKeyCreateAuthorizationAndRollback` 验证成功创建、关系权限拒绝、目标行权限拒绝、目标不存在、失败不留对象、关系事件同事务提交、既有 FK 修改与删除拒绝；原来源写入与发布排空测试通过。附加 DML-only/跨库级联账号用例未配置，明确跳过。公网来源设施初始化和真实业务导入结果分别记录，不能混作同一验收。
