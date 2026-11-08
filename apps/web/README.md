@@ -13,6 +13,10 @@ npm.cmd run dev
 
 开发地址为`http://127.0.0.1:5173`。Metadata、Data、Execution后端分别运行在`18080`、`18081`、`18082`；同源`/api/metadata`、`/api/data`、`/api/execution`分别移除`/api`前缀转发至公开路由。启动仓库的`scripts/start-dev.ps1`后，以忽略目录`.cache/dev/admin.json`初始化的租户、用户名和密码登录；重复启动不会重置已有密码。正常流程不需要签发或粘贴访问凭证，也不向浏览器提供数据库、服务密钥或可切换租户头。
 
+按用户确认，开发代理新增独立应用 OntoApp 的可选共同入口：`/ontoapp/` 转发到其前端 `127.0.0.1:5180`，`/api/ontoapp` 转发到其独立配置后端 `127.0.0.1:18083`。另行启动 OntoApp，并在其本地配置设置 `ONTOAPP_BASE_PATH=/ontoapp/`、`ONTOAPP_PUBLIC_ORIGIN=http://127.0.0.1:5173` 后，访问 `http://127.0.0.1:5173/ontoapp/`。代理保留真实 Host、Origin 和 Cookie，沿用工作台已有的公开认证接口；Ontology 不读写 OntoApp 的独立配置数据库。该共同入口不修改 Ontology 后端来源配置，后续接入与验证由 OntoApp 仓库的接入说明维护。
+
+用户随后指定 OntoApp 使用 `http://127.0.0.1:4173/` 网关数据源，已增加专用 `/api/ontoapp-ontology/*` 路由到此预览网关的 `/api/*`，不改变工作台自身的 Metadata/Data 路由。该规则须在 `/api/ontoapp` 之前匹配，保留实际 5173 Host/Origin，不以更改来源绕过授权；4173 须单独保持运行。该配置的源名称、地址、模拟与真实 HTTP 验证结果维护在 OntoApp 的接入说明和验证记录中。
+
 会话由 HttpOnly、SameSite=Strict Cookie 承载，最长8小时；页面刷新时重新读取当前会话。浏览器通过同源请求携带 Cookie，并由 API 层为登录以外的非安全方法请求添加内存中的 CSRF token；服务端同时校验 `Origin`。这也适用于 POST 查询和预览。退出调用后端注销会话，账号停用、密码重置和角色绑定变化会撤销旧会话。首次登录后可从工作台修改密码。
 
 Vite 的开发和产物预览代理仅适用于本机验证。`npm.cmd run preview` 使用4173端口，须相应配置 Metadata 的 `ONTOLOGY_PUBLIC_ORIGIN` 才能登录和提交修改；生产部署仍须配置公开 API 网关、HTTPS 与对应来源。
