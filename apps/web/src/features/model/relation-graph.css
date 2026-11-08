@@ -1,43 +1,43 @@
-.relation-graph { min-width: 0; overflow: hidden; border: 1px solid #dce6df; border-radius: 12px; background: #f8fbf9; }
-.relation-graph-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 7px 12px; gap: 8px; border-bottom: 1px solid #e2eae5; background: #fff; }
-.relation-graph-toolbar > span { display: inline-flex; align-items: center; gap: 7px; color: #496252; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.relation-graph { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--canvas); }
+.relation-graph-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 7px 12px; gap: 8px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.relation-graph-toolbar > span { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .relation-graph-toolbar > div { display: flex; flex-wrap: wrap; gap: 2px; }
-.relation-tool { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 29px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #5e7366; cursor: pointer; }
-.relation-tool:hover, .relation-tool:focus-visible { background: #eef5f0; border-color: #c7dace; color: #23634a; }
+.relation-tool { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 29px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+.relation-tool:hover, .relation-tool:focus-visible { background: var(--primary-soft); border-color: var(--line); color: var(--primary); }
 .relation-graph-surface { position: relative; height: 500px; width: 100%; min-width: 0; }
 .relation-graph.compact .relation-graph-surface { height: 330px; }
-.relation-graph .react-flow__node { border-radius: 10px; }
-.relation-graph .react-flow__node:focus-visible { outline: 2px solid #318467; outline-offset: 4px; }
-.relation-schema-node { width: 205px; box-sizing: border-box; position: relative; padding: 15px 16px 12px; background: #fff; color: #304f3e; border: 1px solid #c8dace; border-radius: 10px; box-shadow: 0 3px 12px #244f3610; }
-.relation-schema-node.is-selected { border: 2px solid #347d60; padding: 14px 15px 11px; box-shadow: 0 0 0 4px #397c6014; }
+.relation-graph .react-flow__node { border-radius: 7px; }
+.relation-graph .react-flow__node:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
+.relation-schema-node { width: 205px; box-sizing: border-box; position: relative; padding: 15px 16px 12px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 3px 12px var(--shadow); }
+.relation-schema-node.is-selected { border: 2px solid var(--accent); padding: 14px 15px 11px; box-shadow: 0 0 0 4px var(--accent-soft); }
 .relation-schema-node.is-draft { border-style: dashed; }
 .relation-schema-heading { display: flex; align-items: center; gap: 9px; }
 .relation-schema-heading > strong { font-size: 14px; font-weight: 650; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.relation-schema-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; background: #eef5ef; color: #47765b; }
-.relation-schema-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 6px; color: #819187; font-size: 10px; }
+.relation-schema-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; background: var(--surface-raised); color: var(--ink); }
+.relation-schema-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 6px; color: var(--muted); font-size: 11px; }
 .relation-state { padding: 2px 5px; border-radius: 4px; white-space: nowrap; }
-.relation-state.active { background: #edf5ef; color: #567f62; }
-.relation-state.draft { background: #fbf5e8; color: #a18140; }
-.relation-external-category { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-top: 7px; color: #87978b; font-size: 10px; }
-.relation-graph .react-flow__handle { width: 10px; height: 10px; background: #6d9c80; border: 2px solid #fff; }
-.relation-graph .react-flow__handle.connectable:hover { background: #207452; transform: translateY(-50%) scale(1.3); }
-.relation-schema-restricted { min-height: 98px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-style: dashed; background: #f2f4f2; color: #8c968f; }
+.relation-state.active { background: var(--success-soft); color: var(--success); }
+.relation-state.draft { background: var(--warning-soft); color: var(--warning); }
+.relation-external-category { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding-top: 7px; color: var(--muted); font-size: 11px; }
+.relation-graph .react-flow__handle { width: 10px; height: 10px; background: var(--accent); border: 2px solid var(--line); }
+.relation-graph .react-flow__handle.connectable:hover { background: var(--primary-soft); transform: translateY(-50%) scale(1.3); }
+.relation-schema-restricted { min-height: 98px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-style: dashed; background: var(--surface-raised); color: var(--muted); }
 .relation-schema-restricted strong { font-size: 12px; }
-.relation-schema-restricted small { flex-basis: 100%; padding-left: 25px; font-size: 10px; }
-.relation-edge-label { position: absolute; pointer-events: all; cursor: pointer; max-width: 200px; padding: 6px 9px; border: 1px solid #d6e3d9; border-radius: 7px; background: #fbfdfb; color: #54705f; box-shadow: 0 1px 3px #1e493910; font-family: inherit; }
+.relation-schema-restricted small { flex-basis: 100%; padding-left: 25px; font-size: 11px; }
+.relation-edge-label { position: absolute; pointer-events: all; cursor: pointer; max-width: 200px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px var(--shadow); font-family: inherit; }
 .relation-edge-label > span { display: flex; justify-content: center; gap: 6px; align-items: center; }
 .relation-edge-label strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; font-size: 11px; font-weight: 600; }
-.relation-edge-label b { flex: none; font-size: 10px; font-weight: 550; color: #84978a; }
-.relation-edge-label small { display: block; max-width: 178px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; font-size: 9px; color: #91a093; }
-.relation-edge-label:hover, .relation-edge-label:focus-visible, .relation-edge-label.is-selected { border-color: #4b8b6b; background: #eef7f0; color: #285f43; outline: none; box-shadow: 0 0 0 2px #55927016; }
-.relation-edge-label.is-draft { border-style: dashed; background: #fffaf0; }
-.relation-graph-footer { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; gap: 8px; background: #fff; border-top: 1px solid #e2eae5; color: #8a9a8e; font-size: 10px; }
+.relation-edge-label b { flex: none; font-size: 11px; font-weight: 550; color: var(--muted); }
+.relation-edge-label small { display: block; max-width: 178px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; font-size: 11px; color: var(--muted); }
+.relation-edge-label:hover, .relation-edge-label:focus-visible, .relation-edge-label.is-selected { border-color: var(--primary); background: var(--primary-soft); color: var(--ink); outline: none; box-shadow: 0 0 0 2px var(--shadow); }
+.relation-edge-label.is-draft { border-style: dashed; background: var(--warning-soft); }
+.relation-graph-footer { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; gap: 8px; background: var(--surface); border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .relation-graph-footer > span { display: inline-flex; align-items: center; gap: 5px; }
 .relation-graph-footer i { display: inline-block; height: 0; width: 15px; margin-left: 5px; }
-.relation-legend-current { border-top: 2px solid #5c8b75; }
-.relation-legend-draft { border-top: 2px dashed #b08b40; }
-.relation-graph-budget { margin: 0; padding: 9px 12px; font-size: 11px; line-height: 1.6; background: #fff8e9; color: #917545; }
-.relation-graph-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; box-sizing: border-box; text-align: center; color: #8ca193; }
+.relation-legend-current { border-top: 2px solid var(--edge); }
+.relation-legend-draft { border-top: 2px dashed var(--warning); }
+.relation-graph-budget { margin: 0; padding: 9px 12px; font-size: 11px; line-height: 1.6; background: var(--warning-soft); color: var(--warning); }
+.relation-graph-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; box-sizing: border-box; text-align: center; color: var(--muted); }
 .relation-graph-empty strong { font-size: 13px; }
 .relation-graph-empty p { margin: 0; font-size: 12px; }
 @media (max-width: 600px) {

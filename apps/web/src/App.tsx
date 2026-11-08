@@ -34,6 +34,7 @@ import { OrganizationsPage } from './features/organizations/OrganizationsPage'
 import { SourcesPage } from './features/sources/SourcesPage'
 import { ConnectionsPage } from './features/connections/ConnectionsPage'
 import { OAuthConsentPage } from './features/connections/OAuthConsentPage'
+import { ThemeSwitcher } from './components/ThemeSwitcher'
 
 const QueryPage = lazy(() => import('./features/query/QueryPage').then((module) => ({ default: module.QueryPage })))
 const OntologyPage = lazy(() => import('./features/ontology/OntologyPage').then((module) => ({ default: module.OntologyPage })))
@@ -147,6 +148,7 @@ function Connect({ onConnect, reason }: { onConnect: (tenant: string, username: 
   }
   return (
     <div className="connect-page">
+      <div className="connect-appearance"><ThemeSwitcher /></div>
       <section className="connect-story">
         <Brand light />
         <div className="connect-story-content">
@@ -510,6 +512,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
             {loading && loaded && <LoaderCircle size={13} className="spin" aria-label="正在刷新" />}
           </div>
           <div className="topbar-right">
+            <ThemeSwitcher />
             <label className="workspace-category">
               <span>当前分类</span>
               <select aria-label="当前分类" value={categoryId} onChange={(event) => selectCategory(event.target.value)} disabled={!categories.length || loading}>

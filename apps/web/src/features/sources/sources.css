@@ -7,30 +7,30 @@
 .sources-directory, .sources-editor { min-width: 0; padding: 20px; }
 .sources-directory h2, .sources-editor h2 { font-size: 16px; margin: 0 0 18px; }
 .sources-list { width: 100%; min-width: 860px; }
-.sources-list .is-active { background: #f1f7f0; }
+.sources-list .is-active { background: var(--primary-soft); }
 .sources-list strong { font-size: 13px; }
 .sources-list td { vertical-align: middle; }
-.sources-list-empty { text-align: center; padding: 32px 16px; color: #7b897d; }
+.sources-list-empty { text-align: center; padding: 32px 16px; color: var(--muted); }
 .sources-row-actions { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
 .sources-row-actions .button { font-size: 12px; padding: 6px 8px; }
 .sources-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .sources-panel-heading h2 { margin: 0; }
 .sources-fields { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.sources-fields label { display: grid; gap: 7px; font-size: 12px; color: #607264; min-width: 0; }
+.sources-fields label { display: grid; gap: 7px; font-size: 12px; color: var(--muted); min-width: 0; }
 .sources-fields .sources-checkbox { display: flex; align-items: center; gap: 6px; }
 .sources-fields .sources-wide { grid-column: 1 / -1; }
 .sources-wide small { line-height: 1.7; }
-.sources-editor-actions { border-top: 1px solid #e7ece5; padding-top: 18px; margin-top: 22px; }
-.source-compatibility { margin-top: 20px; padding: 15px; border: 1px solid #e2e9e1; border-radius: 8px; min-width: 0; }
+.sources-editor-actions { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 22px; }
+.source-compatibility { margin-top: 20px; padding: 15px; border: 1px solid var(--line); border-radius: 7px; min-width: 0; }
 .source-compatibility-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .source-compatibility h3 { font-size: 13px; margin: 0; }
 .source-compatibility p { font-size: 12px; line-height: 1.7; margin: 10px 0 0; overflow-wrap: anywhere; }
 .source-compatibility dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0 0; font-size: 12px; }
-.source-compatibility dt { color: #7b897d; margin-bottom: 5px; }
+.source-compatibility dt { color: var(--muted); margin-bottom: 5px; }
 .source-compatibility dd { margin: 0; overflow-wrap: anywhere; }
 .source-compatibility-wide { grid-column: 1 / -1; }
-.source-compatibility-reason { color: #a54535; }
-.sources-tables { border-top: 1px solid #e7ece5; margin-top: 22px; padding-top: 16px; }
+.source-compatibility-reason { color: var(--primary); }
+.sources-tables { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 16px; }
 .sources-tables h3 { font-size: 13px; overflow-wrap: anywhere; }
 .sources-table-buttons { display: flex; flex-wrap: wrap; gap: 7px; }
 .sources-table-buttons button { max-width: 100%; overflow-wrap: anywhere; }
@@ -53,9 +53,9 @@
 .source-database-info dt { margin-bottom: 7px; color: var(--muted); font-size: 12px; }
 .source-database-info dd { margin: 0; overflow-wrap: anywhere; }
 .source-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 22px 0 0; }
-.source-metric { min-width: 0; padding: 16px; background: #f7faf6; border: 1px solid #e5ece2; border-radius: 9px; }
+.source-metric { min-width: 0; padding: 16px; background: var(--surface-subtle); border: 1px solid var(--line); border-radius: 7px; }
 .source-metric dt { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.source-metric dt span { font-size: 10px; color: #6b836d; }
+.source-metric dt span { font-size: 11px; color: var(--muted); }
 .source-metric dd { display: flex; align-items: baseline; gap: 8px; margin-top: 11px; }
 .source-metric dd strong { font-size: 23px; font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
 .source-metric dd small { font-size: 11px; color: var(--muted); flex-shrink: 0; }
@@ -70,23 +70,23 @@
 .source-catalog-summary { margin: -3px 0 16px; color: var(--muted); }
 .source-catalog-summary span { margin: 0 5px; }
 .source-namespace { display: flex; align-items: end; gap: 7px; margin-bottom: 12px; }
-.source-namespace label { display: grid; gap: 7px; min-width: 0; flex: 1; font-size: 12px; color: #607264; }
+.source-namespace label { display: grid; gap: 7px; min-width: 0; flex: 1; font-size: 12px; color: var(--muted); }
 .source-search { position: relative; min-width: 0; }
 .source-search > svg { position: absolute; top: 50%; left: 11px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
 .source-manager .source-search > input { width: 100%; padding-left: 34px; font-size: 12px; }
 .source-table-list { max-height: 600px; overflow: auto; margin-top: 16px; border: 1px solid var(--line); border-radius: 7px; }
 .source-table-list table { table-layout: fixed; width: 100%; min-width: 205px; }
 .source-table-list thead { position: sticky; top: 0; z-index: 1; }
-.source-table-list th { background: #f5f8f3; }
+.source-table-list th { background: var(--surface-subtle); }
 .source-table-list th:first-child { width: 60%; }
 .source-table-list th, .source-table-list td { padding: 11px 6px; font-size: 11px; }
 .source-table-list th:not(:first-child), .source-table-list td:not(:first-child) { text-align: center; }
 .source-table-list td:first-child { padding: 0; }
-.source-table-list button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 13px 10px; text-align: left; background: transparent; border: 0; color: #45634e; cursor: pointer; font: inherit; font-size: 12px; }
+.source-table-list button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 13px 10px; text-align: left; background: transparent; border: 0; color: var(--ink); cursor: pointer; font: inherit; font-size: 12px; }
 .source-table-list button span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .source-table-list button svg { flex-shrink: 0; }
-.source-table-list tr:hover, .source-table-list tr.is-active { background: #edf5ee; }
-.source-table-list tr.is-active td:first-child { box-shadow: inset 3px 0 var(--green); }
+.source-table-list tr:hover, .source-table-list tr.is-active { background: var(--primary-soft); }
+.source-table-list tr.is-active td:first-child { box-shadow: inset 3px 0 var(--primary); }
 .source-table-list button:disabled { cursor: default; opacity: .65; }
 .source-table-list .sources-list-empty { padding: 30px 14px !important; text-align: center; }
 .source-pagination { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 16px; font-size: 11px; color: var(--muted); }
@@ -96,9 +96,9 @@
 .source-console-heading p { margin: 0 0 18px; overflow-wrap: anywhere; }
 .source-view-tabs { display: flex; border-bottom: 1px solid var(--line); gap: 20px; }
 .source-view-tabs > button { position: relative; border: 0; padding: 10px 0 13px; background: transparent; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
-.source-view-tabs > button[aria-selected="true"] { color: var(--green); font-weight: 600; }
-.source-view-tabs > button[aria-selected="true"]::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--green); }
-.source-manager button:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.source-view-tabs > button[aria-selected="true"] { color: var(--primary); font-weight: 600; }
+.source-view-tabs > button[aria-selected="true"]::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: var(--primary); }
+.source-manager button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .source-details-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 15px; }
 .source-details-toolbar p { margin: 0; }
 .source-details-toolbar .source-search { flex: 1; max-width: 290px; min-width: 170px; }
@@ -110,7 +110,7 @@
 .source-indexes-table table { min-width: 420px; }
 .source-index-label { display: block; font-size: 11px; white-space: nowrap; }
 .source-index-label + .source-index-label { margin-top: 7px; }
-.source-index-label small { display: block; color: var(--muted); font-size: 10px; }
+.source-index-label small { display: block; color: var(--muted); font-size: 11px; }
 .source-empty { padding: 42px 10px; text-align: center; }
 .source-preview .source-empty svg { vertical-align: middle; }
 .source-sql .sources-panel-heading { margin-bottom: 12px; }

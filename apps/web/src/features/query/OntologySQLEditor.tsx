@@ -1,9 +1,10 @@
+import { editorTheme } from '../../components/editor-theme'
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { Annotation, EditorState, Prec } from '@codemirror/state';
 import { EditorView, drawSelection, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { autocompletion, closeCompletion, completionKeymap, startCompletion } from '@codemirror/autocomplete';
-import { defaultHighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language';
+import { StreamLanguage } from '@codemirror/language';
 import { lintGutter, setDiagnostics } from '@codemirror/lint';
 import type { OntologySQLCompletions, SQLDiagnostic, SQLRange } from '../../lib/types';
 
@@ -89,7 +90,7 @@ export const OntologySQLEditor = forwardRef<SQLEditorHandle, Props>(function Ont
       parent: host.current,
       state: EditorState.create({ doc: latest.current.text, extensions: [
         lineNumbers(), highlightActiveLine(), drawSelection(), history(), lintGutter(), language,
-        syntaxHighlighting(defaultHighlightStyle),
+        editorTheme,
         EditorView.contentAttributes.of({ 'aria-label': 'OntologySQL 编辑器', 'aria-multiline': 'true', spellcheck: 'false', autocapitalize: 'off' }),
         Prec.highest(keymap.of([{ key: 'Mod-Enter', run(current) { if (composing.current || current.composing) return false; latest.current.onRun(); return true; } }])),
         keymap.of([...completionKeymap, ...defaultKeymap, ...historyKeymap, indentWithTab]),
@@ -125,11 +126,11 @@ export const OntologySQLEditor = forwardRef<SQLEditorHandle, Props>(function Ont
           if (update.docChanged && !update.transactions.some((transaction) => transaction.annotation(external))) latest.current.onChange(update.state.doc.toString());
         }),
         EditorView.theme({
-          '&': { fontSize: '13px', minHeight: '265px', maxHeight: '520px', backgroundColor: 'var(--surface, #fff)' },
+          '&': { fontSize: '13px', minHeight: '265px', maxHeight: '520px', backgroundColor: 'var(--editor)' },
           '.cm-content': { fontFamily: 'Consolas, "Microsoft YaHei", monospace', padding: '14px 0', minHeight: '265px' },
           '.cm-scroller': { overflow: 'auto', lineHeight: '1.8' },
-          '.cm-gutters': { backgroundColor: '#f8fafc', color: '#94a3b8', border: 'none' },
-          '.cm-activeLine': { backgroundColor: '#f1f5f955' },
+          '.cm-gutters': { backgroundColor: 'var(--editor)', color: 'var(--muted)', border: 'none' },
+          '.cm-activeLine': { backgroundColor: 'var(--editor-active)' },
           '.cm-tooltip-autocomplete': { maxWidth: 'min(420px, 85vw)' },
           '&.cm-focused': { outline: 'none' },
         }),

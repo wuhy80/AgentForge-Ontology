@@ -25,6 +25,7 @@ async function fixture(page: Page, language: Language, kind: 'function' | 'actio
   await page.route('**/api/**', async (route) => {
     const request = route.request(), url = new URL(request.url()), method = request.method(), path = url.pathname
     const reply = (json: unknown, status = 200) => route.fulfill({ status, json })
+    if (path === '/api/metadata/auth/connections') return reply({ data: [], hasMore: false })
     if (path === '/api/metadata/auth/session') return reply({ user: { id: 'author', tenantId, username: 'author', displayName: '源码作者', enabled: true, administrator: false, roleIds: [], etag: 'user' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture-csrf' })
     if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
     if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, operations: ['query'] })

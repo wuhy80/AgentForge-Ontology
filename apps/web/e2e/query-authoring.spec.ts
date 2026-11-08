@@ -30,6 +30,7 @@ async function fixture(page: Page) {
     const method = request.method()
     const reply = (json: unknown, status = 200) => route.fulfill({ status, json })
     if (method === 'GET') {
+      if (path === '/api/metadata/auth/connections') return reply({ data: [], hasMore: false })
       if (path === '/api/metadata/auth/session') return reply({ user: { id: 'reader', tenantId, username: 'reader', displayName: '查询用户', administrator: false, enabled: true, roleIds: [], etag: 'account' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture-csrf' })
       if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
       if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'] })

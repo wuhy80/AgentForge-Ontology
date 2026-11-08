@@ -119,7 +119,7 @@ function OntologyGraphContent({ records, categories, categoryId, mode, selectedI
     })
     setEdges(model.edges.map(edge => {
       const active = edge.record.definition.id === selectedId && edge.kind === 'relation' || edge.source === selectedId || edge.target === selectedId
-      const color = active ? '#397f64' : edge.kind === 'relation' ? '#7b9f8a' : '#9aa5b8'
+      const color = active ? 'var(--accent)' : edge.kind === 'relation' ? 'var(--edge)' : 'var(--edge-dependency)'
       return { id: edge.id, source: edge.source, target: edge.target, sourceHandle: 'source', targetHandle: 'target', type: 'ontology',
         selectable: true, focusable: true, selected: edge.record.definition.id === selectedId,
         ariaLabel: edge.kind === 'relation' ? `关系：${edge.record.definition.name}` : `${edge.record.definition.name}：${edge.label}`,
@@ -199,7 +199,7 @@ function OntologyGraphContent({ records, categories, categoryId, mode, selectedI
       minZoom={.15} maxZoom={2.5} fitView fitViewOptions={{ padding: .26, maxZoom: 1.1 }}
       nodesConnectable={false} edgesReconnectable={false} deleteKeyCode={null} panOnScroll selectionOnDrag={false} zoomOnDoubleClick={false}
       proOptions={{ hideAttribution: true }} ariaLabelConfig={{ 'node.a11yDescription.default': '按回车查看定义，方向键调整个人布局。', 'edge.a11yDescription.default': '按回车查看关系或引用来源。' }}>
-      <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d9e4dc" />
+      <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--grid)" />
     </ReactFlow> : <div className="ontology-graph-empty"><ScanSearch size={30} /><strong>当前范围没有可显示的{mode === 'relations' ? '对象关系' : '定义依赖'}</strong><p>可调整目录筛选，或选择其他分类。</p></div>}</div>
     <div className="ontology-graph-footer"><span><i className={mode === 'relations' ? 'ontology-legend-relation' : 'ontology-legend-dependency'} />{mode === 'relations' ? 'Link 业务关系' : '定义引用 · 虚线'}</span><span>当前画布 {model.nodes.length} 个节点 · {model.edges.length} 条连线</span></div>
     {focusId && <div className="ontology-graph-focus"><span>仅显示当前对象的相邻定义</span><button type="button" onClick={() => onFocus(undefined)}>展开当前范围</button></div>}

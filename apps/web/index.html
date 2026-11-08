@@ -3,7 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#153e35" />
+    <meta name="theme-color" content="#080f1c" />
+    <script>
+      // Apply the saved palette before styles and React render the first frame.
+      ;(() => {
+        let theme = 'deep'
+        try { if (localStorage.getItem('agentforge.theme') === 'light') theme = 'light' } catch {}
+        document.documentElement.dataset.theme = theme
+        document.documentElement.style.colorScheme = theme === 'deep' ? 'dark' : 'light'
+        document.querySelector('meta[name="theme-color"]').content = theme === 'deep' ? '#080f1c' : '#f2f5fa'
+      })()
+    </script>
     <meta name="description" content="AgentForge Ontology 中文模型与数据工作台" />
     <title>Ontology · AgentForge</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

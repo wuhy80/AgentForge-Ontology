@@ -142,7 +142,7 @@ function RelationGraphContent({ schemas, links, categories, categoryId, focusSch
     })
     setEdges(model.edges.map((edge) => {
       const current = edge.record.status === 'active'
-      const color = edge.restricted ? '#87968e' : current ? '#5c8b75' : '#b08b40'
+      const color = edge.restricted ? 'var(--muted)' : current ? 'var(--edge)' : 'var(--warning)'
       return { id: edge.id, source: edge.source, target: edge.target, sourceHandle: 'source', targetHandle: 'target', type: 'relation',
         selected: edge.record.definition.id === selectedLink, selectable: true, focusable: true,
         ariaLabel: `关系：${edge.record.definition.name}（${statusText(edge.record)}）`,
@@ -222,7 +222,7 @@ function RelationGraphContent({ schemas, links, categories, categoryId, focusSch
         nodesConnectable={!disabled && !!onConnect} nodesDraggable={!disabled} edgesReconnectable={false} deleteKeyCode={null}
         panOnScroll selectionOnDrag={false} proOptions={{ hideAttribution: true }}
         ariaLabelConfig={{ 'node.a11yDescription.default': '按回车选择对象，方向键移动布局，按 Escape 取消选择。', 'node.a11yDescription.keyboardDisabled': '按回车选择对象。', 'edge.a11yDescription.default': '按回车选择关系。', 'controls.ariaLabel': '画布操作' }}>
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d4e3db" />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--grid)" />
       </ReactFlow> : <div className="relation-graph-empty"><GitBranch size={30} /><strong>暂无可显示的关系模型</strong><p>添加对象模型后，可在这里连接和管理关系。</p></div>}
     </div>
     <div className="relation-graph-footer"><span><i className="relation-legend-current" />当前态<i className="relation-legend-draft" />草稿</span><span>{model.nodes.filter((node) => !node.restricted).length} 个对象 · {model.edges.length} 条关系</span></div>

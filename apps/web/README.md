@@ -4,6 +4,8 @@ React + TypeScript + Vite 前端，对接仓库现有的Metadata、Data和Execut
 
 ## 开发与构建
 
+正式工作台支持「深空蓝」和「精密白」，可从顶栏或登录页右上角切换，默认深空蓝；同源浏览器记住选择并同步标签页，存储不可用时仍可临时切换。源码与SQL编辑器、关系图、表单和弹窗同步适配，切换保留未保存编辑及撤销记录。完整规则与覆盖边界见[工作台视觉升级](../../docs/界面视觉升级.md)。
+
 需要 Node.js 22.12+ 或 24；已实测 24.4.0。在此目录执行：
 
 ```powershell
@@ -49,7 +51,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [本体全景](src/features/ontology/OntologyPage.tsx) | `#ontology`只读浏览当前分类的五类生效定义，提供对象关系图、定义依赖图、详情联动、搜索筛选、稳定个人布局及既有定义/数据跳转；实现边界与验证见[本体全景](../../docs/本体全景.md) |
 | [源码编辑器](src/components/PythonSourceEditor.tsx) | Function及直接源码Action独立使用的CodeMirror编辑器；Python、JavaScript、Go高亮、中文参数补全、语法辅助、格式化及参数改名引用提醒；共同边界见[Function](../../docs/模块/Function.md#javascript与go扩展2026-11-08已确认) |
 | [数据源配置](src/features/sources/SourcesPage.tsx) | 表格列出连接及兼容状态，每行测试/编辑/管理；密码只写入，编辑沿用版本、TLS、租户隔离及ETag |
-| [数据库管理](src/features/sources/SourceManager.tsx) | 基础信息与真实指标、每页20条目录及字段/主键列计数、默认值/注释/索引；进入专属预览Tab自动刷新，缩窄目录与暖杏SQL编辑器/只读工具，默认字段页不查行，共享来源禁用物理业务行读取；[主要规则](../../docs/数据源.md#数据库管理工作台2026-11-08已确认) |
+| [数据库管理](src/features/sources/SourceManager.tsx) | 基础信息与真实指标、每页20条目录及字段/主键列计数、默认值/注释/索引；进入专属预览Tab自动刷新，缩窄目录与随工作台主题切换的SQL编辑器/只读工具，默认字段页不查行，共享来源禁用物理业务行读取；[主要规则](../../docs/数据源.md#数据库管理工作台2026-11-08已确认) |
 | [数据探索](src/features/query/QueryPage.tsx) | 默认OntologySQL，顶部指导、左侧模型/右侧字段、双击与键盘插入、CodeMirror懒加载、参数、服务端补全/诊断、结果详情/关联及续页；支持单模型及最多4条INNER Link的可视化配置和SQL双向转换，具体边界见查询主要说明 |
 | [可视化关联](src/features/query/VisualRelations.tsx) | 授权模型搜索/分页、路径预览及确认、正反方向与角色改名；[绑定辅助](src/features/query/visualRows.ts)保持Schema/Link/字段稳定ID，执行直接走同一QuerySpec |
 | [实例详情](src/features/query/InstanceDialog.tsx) | 单条创建/读取/修改/确认删除，保持精度、幂等及并发凭证 |

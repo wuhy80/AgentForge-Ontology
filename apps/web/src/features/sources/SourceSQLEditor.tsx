@@ -1,8 +1,9 @@
+import { editorTheme } from '../../components/editor-theme'
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef } from 'react'
 import { Annotation, Compartment, EditorState, Prec, Transaction } from '@codemirror/state'
 import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers, placeholder } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { bracketMatching, defaultHighlightStyle, indentUnit, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
+import { bracketMatching, indentUnit, StreamLanguage } from '@codemirror/language'
 
 export type SourceSQLEditorHandle = { focus(): void }
 export type SourceSQLEditorProps = {
@@ -74,7 +75,7 @@ export const SourceSQLEditor = forwardRef<SourceSQLEditorHandle, SourceSQLEditor
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, annotations: [externalChange.of(true), Transaction.addToHistory.of(false)] })
     }
     const view = new EditorView({ parent: host.current, state: EditorState.create({ doc: latest.current.value, extensions: [
-      sqlLanguage, syntaxHighlighting(defaultHighlightStyle), lineNumbers(), drawSelection(), highlightActiveLine(), highlightActiveLineGutter(), bracketMatching(), indentUnit.of('  '), history(),
+      sqlLanguage, editorTheme, lineNumbers(), drawSelection(), highlightActiveLine(), highlightActiveLineGutter(), bracketMatching(), indentUnit.of('  '), history(),
       placeholder('编写只读 SELECT 查询，或从“填入查询”选择模板…'),
       access.current.of(accessExtensions()),
       Prec.highest(keymap.of([{ key: 'Mod-Enter', run(current) { if (!current.state.readOnly && !composing.current && !current.composing) latest.current.onRun(); return true } }])),

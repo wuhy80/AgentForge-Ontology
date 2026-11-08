@@ -13,50 +13,50 @@
 .connections-create form { display: grid; gap: 20px; margin-top: 20px; }
 .connections-create form > .button { justify-self: start; }
 .connections-scopes { margin: 0; padding: 0; border: 0; display: grid; gap: 14px; min-width: 0; }
-.connections-scopes legend { padding: 0 0 12px; font-size: 12px; font-weight: 500; color: #526056; }
+.connections-scopes legend { padding: 0 0 12px; font-size: 12px; font-weight: 500; color: var(--ink); }
 .connections-scopes label { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
-.connections-scopes input { margin-top: 3px; accent-color: #497955; flex-shrink: 0; }
+.connections-scopes input { margin-top: 3px; accent-color: var(--ink); flex-shrink: 0; }
 .connections-scopes strong { font-size: 13px; font-weight: 500; }
-.connections-scopes small { display: block; margin-top: 4px; color: #899487; font-size: 12px; line-height: 1.7; }
-.connections-guide ol { padding-left: 20px; margin: 0 0 20px; color: #6a7c6d; font-size: 13px; line-height: 1.9; }
+.connections-scopes small { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.connections-guide ol { padding-left: 20px; margin: 0 0 20px; color: var(--muted); font-size: 13px; line-height: 1.9; }
 .connections-guide li + li { margin-top: 8px; }
-.connections-guide pre { margin: 18px 0 0; padding: 18px; background: #f6f7f2; border: 1px solid #e6e8dc; border-radius: 8px; font-size: 11px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.connections-guide pre { margin: 18px 0 0; padding: 18px; background: var(--surface-subtle); border: 1px solid var(--line); border-radius: 7px; font-size: 11px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
 .connections-guide .field-hint { align-items: flex-start; }
-.connections-secret { border-color: #b7cbae; background: #f9fbf5; }
-.connections-secret p { color: #68805d; line-height: 1.9; font-size: 13px; }
+.connections-secret { border-color: var(--line); background: var(--surface-subtle); }
+.connections-secret p { color: var(--muted); line-height: 1.9; font-size: 13px; }
 .connections-secret textarea { font-family: monospace; overflow-wrap: anywhere; }
 .connections-inline { margin-top: 16px; flex-wrap: wrap; font-size: 12px; }
 .connections-list > ul { list-style: none; margin: 0; padding: 0; }
-.connections-list > ul > li { position: relative; padding: 18px 120px 18px 0; border-top: 1px solid #e9ede4; overflow-wrap: anywhere; }
+.connections-list > ul > li { position: relative; padding: 18px 120px 18px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .connections-item-title, .connections-item-detail { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .connections-item-title strong { font-size: 14px; }
-.connections-item-detail { margin: 8px 0; font-size: 12px; color: #70816c; }
+.connections-item-detail { margin: 8px 0; font-size: 12px; color: var(--muted); }
 .connections-list > ul > li > .button { position: absolute; top: 22px; right: 0; }
 .connections-list small { font-size: 11px; }
-.oauth-page { min-height: 100dvh; padding: 32px 20px 60px; background: #f5f7f1; color: #34483c; }
+.oauth-page { min-height: 100dvh; padding: 32px 20px 60px; background: var(--surface-subtle); color: var(--ink); }
 .oauth-brand { max-width: 600px; margin: 0 auto 26px; font-size: 18px; font-weight: 650; letter-spacing: -.4px; }
-.oauth-brand span { display: block; margin-top: 3px; font-size: 9px; letter-spacing: 2.7px; color: #7a8e75; }
+.oauth-brand span { display: block; margin-top: 3px; font-size: 11px; letter-spacing: 2.7px; color: var(--muted); }
 .oauth-card { padding: 36px; max-width: 600px; margin: 0 auto; }
-.oauth-emblem { display: flex; align-items: center; justify-content: center; width: 54px; height: 54px; background: #eaf0e4; color: #628157; border-radius: 16px; margin-bottom: 24px; }
+.oauth-emblem { display: flex; align-items: center; justify-content: center; width: 54px; height: 54px; background: var(--surface-raised); color: var(--muted); border-radius: 7px; margin-bottom: 24px; }
 .oauth-card h1 { margin: 9px 0 18px; font-size: 26px; }
 .oauth-card > p { line-height: 1.9; font-size: 13px; }
-.oauth-client { padding: 20px 0; border-block: 1px solid #e7ecdf; margin-top: 22px; }
+.oauth-client { padding: 20px 0; border-block: 1px solid var(--line); margin-top: 22px; }
 .oauth-client strong { display: block; font-size: 18px; overflow-wrap: anywhere; }
-.oauth-client span { display: block; color: #7c8e73; font-size: 12px; margin-top: 7px; }
+.oauth-client span { display: block; color: var(--muted); font-size: 12px; margin-top: 7px; }
 .oauth-destinations { margin: 22px 0; display: grid; gap: 14px; }
 .oauth-destinations div { min-width: 0; }
-.oauth-destinations dt { font-size: 11px; color: #899880; margin-bottom: 4px; }
+.oauth-destinations dt { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
 .oauth-destinations dd { margin: 0; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
 .oauth-card h2 { font-size: 14px; margin: 26px 0 18px; }
 .oauth-scope-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 17px; }
 .oauth-scope-list li { display: flex; align-items: flex-start; gap: 12px; }
-.oauth-scope-list svg { color: #64885b; flex-shrink: 0; margin-top: 2px; }
+.oauth-scope-list svg { color: var(--muted); flex-shrink: 0; margin-top: 2px; }
 .oauth-scope-list strong { font-size: 13px; font-weight: 500; }
 .oauth-scope-list p { font-size: 12px; margin: 5px 0 0; line-height: 1.8; }
-.oauth-boundary { padding: 15px; margin: 26px 0; background: #f4f6ef; border-radius: 7px; color: #74846b; }
+.oauth-boundary { padding: 15px; margin: 26px 0; background: var(--surface-raised); border-radius: 7px; color: var(--muted); }
 .oauth-actions { display: flex; justify-content: flex-end; gap: 12px; }
-.oauth-footer { margin-top: 28px; padding-top: 17px; border-top: 1px solid #e7ecdf; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.oauth-footer a { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: #67855c; }
+.oauth-footer { margin-top: 28px; padding-top: 17px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.oauth-footer a { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
 @media (max-width: 1000px) { .connections-layout { grid-template-columns: 1fr; } }
 @media (max-width: 600px) {
   .connections-heading { align-items: flex-start; flex-direction: column; gap: 15px; }

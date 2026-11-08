@@ -1,9 +1,10 @@
+import { editorTheme } from './editor-theme'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Annotation, Compartment, EditorState, Transaction } from '@codemirror/state'
 import { EditorView, drawSelection, highlightActiveLine, highlightActiveLineGutter, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { autocompletion, closeBrackets, closeBracketsKeymap, closeCompletion, completionKeymap, startCompletion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
-import { bracketMatching, defaultHighlightStyle, indentOnInput, indentUnit, syntaxHighlighting, syntaxTree } from '@codemirror/language'
+import { bracketMatching, indentOnInput, indentUnit, syntaxTree } from '@codemirror/language'
 import { globalCompletion, localCompletionSource, python } from '@codemirror/lang-python'
 import { javascript, localCompletionSource as javascriptLocalCompletion } from '@codemirror/lang-javascript'
 import { go, localCompletionSource as goLocalCompletion } from '@codemirror/lang-go'
@@ -192,7 +193,7 @@ export function PythonSourceEditor(props: PythonSourceEditorProps) {
       state: EditorState.create({
         doc: latest.current.value,
         extensions: [
-          grammar.current.of(languageExtensions(latest.current.language ?? 'python')), syntaxHighlighting(defaultHighlightStyle),
+          grammar.current.of(languageExtensions(latest.current.language ?? 'python')), editorTheme,
           lineNumbers(), highlightActiveLine(), highlightActiveLineGutter(), drawSelection(), lintGutter(),
           history(), bracketMatching(), closeBrackets(), indentOnInput(),
           access.current.of(accessExtensions()),
