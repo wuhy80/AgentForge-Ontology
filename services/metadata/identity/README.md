@@ -2,9 +2,11 @@
 
 本包拥有租户账号、身份用户组、角色绑定、会话、当前权限策略/草稿及审计。使用 `identity.NewStore(db, opa, origin)`，将 `store.NewHandler()` 接入公开 `/metadata/auth/`、`/metadata/admin/`；所有管理接口自行检查当前 cookie 会话与管理员标记。`identity.Migrations` 须追加到 Metadata 迁移列表并显式执行，普通请求不建表。013/014 迁移新增身份用户组及成员关联表，原有迁移保持不变。
 
+Metadata以`ONTOLOGY_PUBLIC_ORIGIN`指定主工作台来源，默认`http://127.0.0.1:5173`；可用`ONTOLOGY_ADDITIONAL_PUBLIC_ORIGINS`配置逗号分隔的附加可信来源，默认空。服务启动前调用`store.ConfigureAdditionalOrigins(...)`校验，非法配置拒绝启动。仓库开发启动脚本显式添加`http://127.0.0.1:4173`，使开发与产物预览可同时登录和提交POST；手工启动服务须自行设置此项。来源、同源Host、Cookie及CSRF边界统一见[权限设计](../../../docs/权限/权限设计.md#当前实现协议2026-11-07)，不添加CORS放行或改写浏览器Origin。
+
 `store.Bootstrap(ctx, tenant, username, password)` 只初始化空租户，重复执行不覆盖任何已有账号或密码。初始管理员有独立的管理员标记及显式业务授权角色，管理员标记本身不授予业务数据权限。密码为6–72字节，经 bcrypt 存储；用户管理不提供跨租户入口、自助注册或任意认证身份切换。
 
-登录返回 `contracts.Session`，随机会话写入 HttpOnly、SameSite=Strict、Path=/ 的 `ontology_session` cookie，HTTPS 来源设置 Secure；数据库只保存会话摘要。有效期8小时，每次使用读取当前账号和角色，账号停用、密码/角色/管理员变化吊销旧会话。修改请求须带 `X-CSRF-Token`，浏览器 Origin 须匹配构造器配置；公共服务中间件还要求明确 Origin，CLI 调用同样提交工作台 Origin。自助改密吊销全部旧会话，再返回新会话及 CSRF。
+登录返回 `contracts.Session`，随机会话写入 HttpOnly、SameSite=Strict、Path=/ 的 `ontology_session` cookie，HTTPS 来源设置 Secure；数据库只保存会话摘要。有效期8小时，每次使用读取当前账号和角色，账号停用、密码/角色/管理员变化吊销旧会话。修改请求须带 `X-CSRF-Token`，浏览器 Origin 须匹配主来源或显式配置的附加来源；公共服务中间件还要求明确 Origin，CLI 调用同样提交工作台 Origin。自助改密吊销全部旧会话，再返回新会话及 CSRF。
 
 管理路由包括 users、user-groups、roles、policy、policy/publish、simulate 和 audit；用户/角色列表返回 `{data:[]}`，超过2000条明确失败。审计仅返回最近200条，以 `{data:[],hasMore:true|false}` 明确是否还有更早记录。修改用户/用户组/角色及策略保存/生效须带双引号包围的强 If-Match，缺失返回428、冲突返回412。策略草稿不改变当前授权，生效、用户及角色变更在同一事务更新授权状态并记录无密码/会话值的审计。策略模拟不执行数据读写。
 

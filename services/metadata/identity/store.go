@@ -27,13 +27,14 @@ const sessionLifetime = 8 * time.Hour
 const maxList = 2000
 
 type Store struct {
-	DB            *sql.DB
-	OPA           *platform.OPAAuthorizer
-	Origin        string
-	OAuthIssuer   string
-	MCPResource   string
-	loginMu       sync.Mutex
-	loginAttempts map[string]loginAttempt
+	DB                *sql.DB
+	OPA               *platform.OPAAuthorizer
+	Origin            string
+	additionalOrigins map[string]bool
+	OAuthIssuer       string
+	MCPResource       string
+	loginMu           sync.Mutex
+	loginAttempts     map[string]loginAttempt
 }
 
 func NewStore(db *sql.DB, opa *platform.OPAAuthorizer, origin string) *Store {

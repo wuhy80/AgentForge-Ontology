@@ -5,7 +5,9 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -22,8 +24,32 @@ func unsafeMethod(method string) bool {
 	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
 }
 
+// ConfigureAdditionalOrigins runs before serving requests. Origin remains the
+// canonical URL for OAuth redirects and cookie security; aliases are exact
+// browser origins and must use the same scheme as that canonical URL.
+func (s *Store) ConfigureAdditionalOrigins(origins ...string) error {
+	primary, err := url.Parse(s.Origin)
+	if err != nil || !validPublicURL(s.Origin, false) {
+		return fmt.Errorf("工作台主来源须为HTTPS或本机回环HTTP来源")
+	}
+	allowed := map[string]bool{}
+	for _, raw := range origins {
+		origin := strings.TrimSpace(raw)
+		if origin == "" {
+			continue
+		}
+		u, err := url.Parse(origin)
+		if err != nil || !validPublicURL(origin, false) || origin != u.Scheme+"://"+u.Host || u.Scheme != primary.Scheme || strings.ContainsAny(u.Host, "*\\") {
+			return fmt.Errorf("附加工作台来源须为与主来源同协议的完整来源，不能含路径、通配符、查询或片段")
+		}
+		allowed[origin] = true
+	}
+	s.additionalOrigins = allowed
+	return nil
+}
+
 func (s *Store) checkOrigin(origin string) error {
-	if origin != "" && (s.Origin == "" || origin != s.Origin) {
+	if origin != "" && origin != s.Origin && !s.additionalOrigins[origin] {
 		return &platform.AccessError{Status: 403, Code: "invalid_origin", Message: "请求来源不受信任"}
 	}
 	return nil

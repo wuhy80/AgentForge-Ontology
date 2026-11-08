@@ -139,6 +139,24 @@ func TestMySQLIdentityLifecycle(t *testing.T) {
 	if _, err := store.CheckSession(ctx, contracts.SessionCheck{Token: admin.cookie.Value, Method: "POST", CSRFToken: admin.session.CSRFToken}); err != nil {
 		t.Fatal("trusted CLI check requires CSRF but can omit browser Origin")
 	}
+	previewCheck := contracts.SessionCheck{Token: admin.cookie.Value, Method: "POST", CSRFToken: admin.session.CSRFToken, Origin: "http://localhost:4173"}
+	if _, err := store.CheckSession(ctx, previewCheck); err == nil {
+		t.Fatal("unconfigured preview origin accepted")
+	}
+	if err := store.ConfigureAdditionalOrigins(previewCheck.Origin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CheckSession(ctx, previewCheck); err != nil {
+		t.Fatal("configured preview origin rejected the existing browser session")
+	}
+	previewCheck.CSRFToken = strings.Repeat("0", 64)
+	if _, err := store.CheckSession(ctx, previewCheck); err == nil {
+		t.Fatal("preview origin bypassed CSRF")
+	}
+	previewCheck.CSRFToken, previewCheck.Origin = admin.session.CSRFToken, "http://attacker.test"
+	if _, err := store.CheckSession(ctx, previewCheck); err == nil {
+		t.Fatal("preview alias allowed an unrelated origin")
+	}
 	sum := sha256.Sum256([]byte(admin.cookie.Value))
 	var storedHash string
 	if err := engine.DB().QueryRow("SELECT token_hash FROM af_identity_sessions WHERE tenant_id=? AND user_id=?", tenant, admin.session.User.ID).Scan(&storedHash); err != nil || storedHash != hex.EncodeToString(sum[:]) || storedHash == admin.cookie.Value {

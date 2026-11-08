@@ -21,7 +21,7 @@ npm.cmd run dev
 
 会话由 HttpOnly、SameSite=Strict Cookie 承载，最长8小时；页面刷新时重新读取当前会话。浏览器通过同源请求携带 Cookie，并由 API 层为登录以外的非安全方法请求添加内存中的 CSRF token；服务端同时校验 `Origin`。这也适用于 POST 查询和预览。退出调用后端注销会话，账号停用、密码重置和角色绑定变化会撤销旧会话。首次登录后可从工作台修改密码。
 
-Vite 的开发和产物预览代理仅适用于本机验证。`npm.cmd run preview` 使用4173端口，须相应配置 Metadata 的 `ONTOLOGY_PUBLIC_ORIGIN` 才能登录和提交修改；生产部署仍须配置公开 API 网关、HTTPS 与对应来源。
+Vite 的开发和产物预览代理仅适用于本机验证。`npm.cmd run preview` 使用4173端口；仓库开发启动脚本已为Metadata显式配置5173主来源与4173附加来源，两个入口可同时登录、表预览和提交修改。手工启动Metadata时设置`ONTOLOGY_ADDITIONAL_PUBLIC_ORIGINS=http://127.0.0.1:4173`，配置及边界见[身份模块](../../services/metadata/identity/README.md)。生产部署仍须配置公开API网关、HTTPS与对应来源。
 
 ```powershell
 npm.cmd test
