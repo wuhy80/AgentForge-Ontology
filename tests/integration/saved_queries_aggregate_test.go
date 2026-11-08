@@ -16,6 +16,7 @@ func verifySavedQueriesAndAggregatesHTTP(t *testing.T, admin, foreign *publicSec
 	t.Helper()
 	queryURL, savedURL := dataURL+"/data/query", dataURL+"/data/saved-queries"
 	definitionURL := metadataURL + "/metadata/definitions/" + schemaID
+	sdk := startDataSetSDKHTTP(t, admin, client, dataURL, schemaID, code, state, priority)
 	query := c.QuerySpec{From: c.Source{SchemaID: schemaID}, Select: []string{}, Aggregate: &c.AggregateQuery{Measures: []c.AggregateMeasure{{ID: "mCount", Op: "count", Name: "数量"}, {ID: "mSum", Op: "sum", Field: priority, Name: "合计"}, {ID: "mAvg", Op: "avg", Field: priority, Name: "平均"}}}, Page: c.Page{Limit: 10}}
 	var result c.QueryResult
 	admin.request("POST", queryURL, query, nil, 200, &result)
@@ -121,6 +122,7 @@ func verifySavedQueriesAndAggregatesHTTP(t *testing.T, admin, foreign *publicSec
 	if len(result.Data) != 1 || result.Data[0].ID != originalID || string(result.Data[0].Values[priority]) != `"9007199254740993"` {
 		t.Fatal("saved query rebound an old Chinese name to a different schema")
 	}
+	sdk.stage("renamed", nil)
 	input.Name = "改名后的查询"
 	admin.request("PUT", itemURL, input, map[string]string{"If-Match": `"` + saved.ETag + `"`}, 200, &reloaded)
 	admin.request("PUT", itemURL, input, map[string]string{"If-Match": `"` + saved.ETag + `"`}, 412, nil)
@@ -166,6 +168,7 @@ func verifySavedQueriesAndAggregatesHTTP(t *testing.T, admin, foreign *publicSec
 	}
 	limitedAggregate.Aggregate.Measures = []c.AggregateMeasure{{ID: "mSecret", Op: "sum", Field: priority}}
 	reader.request("POST", queryURL, limitedAggregate, nil, 403, nil)
+	sdk.prepareReader(admin, reader, metadataURL, dataURL, schemaID, queryRule.ID, code)
 	// Policy activation changes access immediately without editing the template
 	// or destroying its owner identity. Clearing an invalid template stays safe.
 	admin.request("GET", metadataURL+"/metadata/admin/policy", nil, nil, 200, &policy)
@@ -178,6 +181,7 @@ func verifySavedQueriesAndAggregatesHTTP(t *testing.T, admin, foreign *publicSec
 	policy.Current.Rules = rules
 	headers = admin.request("PUT", metadataURL+"/metadata/admin/policy", policy.Current, map[string]string{"If-Match": `"` + policy.ETag + `"`}, 200, &policy)
 	admin.request("POST", metadataURL+"/metadata/admin/policy/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
+	sdk.stage("revoked", nil)
 	reader.request("GET", savedURL+"/"+limited.ID, nil, nil, 403, nil)
 	reader.request("POST", savedURL+"/"+limited.ID+"/execute", c.SavedQueryExecuteRequest{}, nil, 403, nil)
 	reader.request("GET", savedURL, nil, nil, 200, &empty)

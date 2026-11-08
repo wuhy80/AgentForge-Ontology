@@ -139,6 +139,8 @@ func main() {
                 ('GET', '/api/ontoapp-ontology/metadata/definitions/a%2Db', '/data/schemas/a-b/form'),
                 ('GET', '/api/ontoapp-ontology/data/query/context?limit=50', '/data/query/context?limit=50'),
                 ('POST', '/api/data/query', '/data/query'),
+                ('POST', '/api/data/query/bind', '/data/query/bind'),
+                ('POST', '/api/ontoapp-ontology/data/query/bind', '/data/query/bind'),
                 ('POST', '/api/data/transactions', '/data/transactions'),
                 ('POST', '/api/data/transactions/status', '/data/transactions/status'),
                 ('POST', '/api/ontoapp-ontology/data/transactions', '/data/transactions'),
@@ -198,6 +200,8 @@ func main() {
                 assert status == 200 and value['path'] == '/data/schemas/model/write-capabilities'
                 checks += 1
             for method, path in [('GET','/api/data/transactions'),('PUT','/api/data/transactions/status'),
+                                 ('GET','/api/data/query/bind'),('PUT','/api/data/query/bind'),
+                                 ('POST','/api/data/query/bind/execute'),('GET','/api/ontoapp-ontology/data/query/bind'),
                                  ('DELETE','/api/data/saved-queries'),('PATCH','/api/data/saved-queries/query-id'),
                                  ('GET','/api/data/saved-queries/query-id/execute'),('POST','/api/data/saved-queries/query-id'),
                                  ('GET','/api/ontoapp-ontology/data/saved-queries/query-id/execute'),

@@ -356,69 +356,19 @@ func (h *handler) queryAggregate(ctx context.Context, p c.Principal, current c.C
 // It deliberately does not call query executors, publication gates or SELECT
 // over business tables. Parameters must already have typed validation samples.
 func (h *handler) validateBoundQuery(ctx context.Context, p c.Principal, q c.QuerySpec) (c.QuerySpec, error) {
-	raw, err := json.Marshal(q)
-	if err != nil {
-		return q, err
-	}
-	var detached c.QuerySpec
-	if err = json.Unmarshal(raw, &detached); err != nil {
-		return q, err
-	}
-	q = detached
 	if q.Rows != nil || q.Via != nil {
 		return q, problem(422, "saved_query_unsupported", "保存查询首批仅支持单Schema实体或聚合查询")
 	}
-	current, err := h.resolve(ctx, p, q.From)
-	if err != nil {
-		return q, err
-	}
-	dec, err := h.authorize(ctx, p, "instance.query", current.Definition.ID)
-	if err != nil {
-		return q, err
-	}
 	q.Page.Cursor = ""
-	if q.Aggregate != nil {
-		compiled, err := compileAggregateQuery(current.Definition, current.ETag, p, dec, q, h.cfg.CursorSecret)
-		if err != nil {
-			return q, err
-		}
-		q = compiled.Bound
-	} else {
-		if _, err = compileQuery(current.Definition, current.ETag, p, dec, q, h.cfg.CursorSecret); err != nil {
-			return q, err
-		}
-		if err = validateOntologySQLCapabilities(current.Definition, dec, q); err != nil {
-			return q, err
-		}
-		q.From = c.Source{SchemaID: current.Definition.ID}
-		for i, key := range q.Select {
-			property, _ := findProperty(current.Definition.Schema, key)
-			q.Select[i] = property.ID
-		}
-		for i, order := range q.OrderBy {
-			property, _ := findProperty(current.Definition.Schema, order.Field)
-			q.OrderBy[i].Field = property.ID
-		}
-	}
-	var bind func(*c.Expression)
-	bind = func(e *c.Expression) {
-		if e == nil {
-			return
-		}
-		if e.Field != "" {
-			property, _ := findProperty(current.Definition.Schema, e.Field)
-			e.Field = property.ID
-		}
-		for i := range e.Args {
-			bind(&e.Args[i])
-		}
-	}
-	bind(q.Where)
-	if err = h.recheck(ctx, p, "instance.query", current.Definition.ID, dec); err != nil {
+	bound, err := h.compileBoundQuery(ctx, p, q)
+	if err != nil {
 		return q, err
 	}
-	if err = h.recheckEnums(ctx, current); err != nil {
-		return q, err
+	if err = h.recheck(ctx, p, "instance.query", bound.current.Definition.ID, bound.decision); err != nil {
+		return bound.Query, err
 	}
-	return q, nil
+	if err = h.recheckEnums(ctx, bound.current); err != nil {
+		return bound.Query, err
+	}
+	return bound.Query, nil
 }
