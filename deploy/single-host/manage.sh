@@ -45,7 +45,7 @@ build_release() {
                 go build -p=1 -trimpath -ldflags="-s -w" -o "/out/bin/$service" ./cmd/server
             done'
     docker run --rm --cpus=1 --memory=768m --memory-swap=1536m \
-        -v "$repo/apps/web:/source:ro" -v "$target:/out" -v "$cache/npm:/root/.npm" -v "$cache/web:/work" \
+        -v "$repo/apps/web:/source:ro" -v "$target:/out" -v "$cache/npm:/root/.npm" -v "$cache/web/$(revision):/work" \
         -e NODE_OPTIONS=--max-old-space-size=512 node:22-alpine sh -ec '
             cp -R /source/. /work/
             cd /work
@@ -110,7 +110,10 @@ case "$action" in
     stop) systemctl stop "${units[@]}" ;;
     start) systemctl start "${units[@]}"; ready ;;
     update)
-        git -C "$repo" diff --quiet && git -C "$repo" diff --cached --quiet
+        if ! git -C "$repo" diff --quiet || ! git -C "$repo" diff --cached --quiet; then
+            echo '代码目录有未提交修改，请先处理后再更新' >&2
+            exit 1
+        fi
         git -C "$repo" pull --ff-only
         # 释放锁后执行拉取版本的脚本，避免更新仍使用旧脚本。
         flock -u 9
