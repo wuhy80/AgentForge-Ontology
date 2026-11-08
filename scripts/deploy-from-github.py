@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 import re
 import shlex
+import shutil
 import subprocess
+import tempfile
 
 from release_archive import digest, verify
 
@@ -13,7 +15,7 @@ GITHUB_REPO = 'wuhy80/AgentForge-Ontology'
 
 
 def deploy(run_id, host, port, directory, upload_only):
-    run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{GITHUB_REPO}/actions/runs/{run_id}'], text=True))
+    run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{GITHUB_REPO}/actions/runs/{run_id}'], text=True, timeout=30))
     if run['status'] != 'completed' or run['conclusion'] != 'success' or run['path'] != '.github/workflows/build-linux.yml':
         raise SystemExit('仅接受本仓库 Linux 构建工作流的成功运行')
     revision = run['head_sha']
@@ -21,9 +23,13 @@ def deploy(run_id, host, port, directory, upload_only):
         raise SystemExit('无效提交号')
     destination = REPO / '.cache/artifacts' / str(run_id)
     destination.mkdir(parents=True, exist_ok=True)
-    subprocess.run(['gh', 'run', 'download', str(run_id), '--repo', GITHUB_REPO, '--name', 'ontology-linux-amd64-' + revision, '--dir', str(destination)], check=True)
     archive = destination / 'ontology-linux-amd64.tar.gz'
     checksum = archive.with_name(archive.name + '.sha256')
+    if not archive.is_file() or not checksum.is_file():
+        with tempfile.TemporaryDirectory(prefix='download-', dir=destination) as temporary:
+            subprocess.run(['gh', 'run', 'download', str(run_id), '--repo', GITHUB_REPO, '--name', 'ontology-linux-amd64-' + revision, '--dir', temporary], check=True, timeout=180)
+            for name in [archive.name, checksum.name]:
+                shutil.copyfile(Path(temporary) / name, destination / name)
     if checksum.read_text(encoding='ascii').split()[0] != digest(archive):
         raise SystemExit('制品整体摘要不匹配')
     verify(archive, revision)

@@ -52,9 +52,12 @@ def create(source, archive, revision):
 
 def verify(archive, revision=None, destination=None):
     with tarfile.open(archive, 'r:gz') as source:
-        members = source.getmembers()
-        if len(members) > 3000 or sum(item.size for item in members) > 512 * 1024 * 1024:
-            raise ValueError('制品超过资源预算')
+        members, total_size = [], 0
+        for item in source:
+            total_size += item.size
+            if len(members) >= 3000 or total_size > 512 * 1024 * 1024:
+                raise ValueError('制品超过资源预算')
+            members.append(item)
         names = set()
         for item in members:
             path = PurePosixPath(item.name)

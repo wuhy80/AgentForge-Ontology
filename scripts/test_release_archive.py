@@ -1,4 +1,5 @@
 import io
+import gzip
 import json
 from pathlib import Path
 import tarfile
@@ -82,6 +83,14 @@ class ReleaseArchiveTests(unittest.TestCase):
             self.rewrite(transform)
             with self.assertRaises(ValueError):
                 verify(self.archive)
+
+    def test_large_entry_rejected_before_reading_its_body(self):
+        entry = tarfile.TarInfo('web/large')
+        entry.size = 513 * 1024 * 1024
+        with gzip.open(self.archive, 'wb') as output:
+            output.write(entry.tobuf())
+        with self.assertRaisesRegex(ValueError, '资源预算'):
+            verify(self.archive)
 
 
 if __name__ == '__main__':
