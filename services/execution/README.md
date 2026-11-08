@@ -50,7 +50,7 @@ POST 请求使用 `contracts.InvocationRequest`，例如：
 
 首次完成返回 201，同键同请求重放返回 200，相同请求仍运行时返回 202；内容变化返回 `409 idempotency_conflict`。键限定 1～128 个字母、数字、`.`、`_`、`:` 或 `-`，在租户与发起用户范围内唯一。新计算使用新键，网络不确定时保留原键，不能为了重试生成新键。
 
-每个进程最多同时执行 4 个计算，不排队；超限在保存执行记录前返回 429，可稍后使用原键重试。记录先持久保存为 running，之后成为 succeeded、failed、timed_out 或 canceled。浏览器断开仍以独立短事务上下文保存已知终态。写入结果不确定时只能用原键/ID核对，不自动再跑。
+每个进程默认最多同时执行 4 个计算，可通过 `ONTOLOGY_EXECUTION_MAX_CONCURRENT` 配置为1～4，非法配置使启动失败；不排队，实际值见能力响应 `maxConcurrent`。超限在保存执行记录前返回 429，可稍后使用原键重试。记录先持久保存为 running，之后成为 succeeded、failed、timed_out 或 canceled。浏览器断开仍以独立短事务上下文保存已知终态。写入结果不确定时只能用原键/ID核对，不自动再跑。
 
 进程中断留下的 running 记录在执行时限加90秒后由当前有权读取它的请求标记为 interrupted，终态不可被迟到进程覆盖；这不是自动恢复执行。平台不自动删除历史记录或实现生产备份/保留策略。
 
@@ -90,6 +90,7 @@ go run ./cmd/server
 | `ONTOLOGY_JAVASCRIPT_IMAGE` | 已准备的Node22镜像，默认`node:22-alpine` |
 | `ONTOLOGY_GO_IMAGE` | 含可信启动器的Go镜像，默认`agentforge-go:1.25` |
 | `ONTOLOGY_DOCKER_BINARY` | 可选的可信 Docker CLI 路径 |
+| `ONTOLOGY_EXECUTION_MAX_CONCURRENT` | 每进程计算及源码工具并发上限，默认4，仅接受1～4 |
 
 在仓库根目录显式准备默认镜像：`docker pull python:3.12-alpine`、`docker pull node:22-alpine`、`docker build -t agentforge-go:1.25 -f deploy/execution/go/Dockerfile deploy/execution/go`。`scripts/start-dev.ps1`包含这些准备步骤；`-DependenciesOnly`只启动数据库/OPA。管理员自选Go镜像须预先准备，普通服务启动和请求不构建镜像。
 

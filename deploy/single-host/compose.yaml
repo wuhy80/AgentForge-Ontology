@@ -1,0 +1,42 @@
+name: agentforge-ontology
+services:
+  mysql:
+    image: mysql:26.7.0
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${ONTOLOGY_MYSQL_ROOT_PASSWORD:?required}
+    command:
+      - --innodb-buffer-pool-size=128M
+      - --innodb-redo-log-capacity=64M
+      - --max-connections=50
+      - --table-open-cache=256
+      - --performance-schema=OFF
+      - --mysqlx=OFF
+      - --skip-log-bin
+      - --max-allowed-packet=32M
+    ports: ["127.0.0.1:23307:3306"]
+    volumes: ["mysql:/var/lib/mysql"]
+    mem_limit: 512m
+    memswap_limit: 768m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+  opa:
+    image: ${ONTOLOGY_OPA_IMAGE:-openpolicyagent/opa:1.21.2-static}
+    pull_policy: never
+    restart: unless-stopped
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policy/ontology.rego", "/policy/data.example.json"]
+    volumes: ["../opa:/policy:ro"]
+    ports: ["127.0.0.1:28181:8181"]
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  mysql:

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -43,7 +44,14 @@ func run() error {
 		return fmt.Errorf("须配置Metadata地址及至少32字节的内部服务凭据")
 	}
 	checker := &platform.RemoteSessionChecker{URL: metadataURL, ServiceToken: service}
-	app := execution.NewHandler(execution.Config{Store: &execution.SQLStore{DB: engine.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metadataURL, ServiceToken: service}, Runner: &execution.DockerRunner{Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE")}})
+	maxConcurrent := 4
+	if raw := os.Getenv("ONTOLOGY_EXECUTION_MAX_CONCURRENT"); raw != "" {
+		maxConcurrent, err = strconv.Atoi(raw)
+		if err != nil || maxConcurrent < 1 || maxConcurrent > 4 {
+			return fmt.Errorf("ONTOLOGY_EXECUTION_MAX_CONCURRENT须为1到4的整数")
+		}
+	}
+	app := execution.NewHandler(execution.Config{Store: &execution.SQLStore{DB: engine.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metadataURL, ServiceToken: service}, Runner: &execution.DockerRunner{Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE")}, MaxConcurrent: maxConcurrent})
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18082"

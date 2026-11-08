@@ -1,0 +1,33 @@
+[Unit]
+Description=AgentForge Ontology %i
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ontology-%i
+Group=ontology-%i
+WorkingDirectory=/opt/agentforge-ontology
+EnvironmentFile=/etc/agentforge-ontology/%i.env
+Environment=GOMAXPROCS=1 GOMEMLIMIT=96MiB
+ExecStart=/var/lib/agentforge-ontology/current/bin/%i
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=70
+KillSignal=SIGTERM
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+MemoryMax=160M
+TasksMax=128
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
