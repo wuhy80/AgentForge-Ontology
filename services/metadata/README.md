@@ -25,6 +25,7 @@ go vet ./...
 | `ONTOLOGY_AUTH_ISSUER` | OAuth 对外 issuer；本地 MCP 为 `http://127.0.0.1:18084`，须与网关配置一致 |
 | `ONTOLOGY_MCP_RESOURCE` | 外部凭据绑定的资源，默认 `http://127.0.0.1:18084/mcp`，须与网关配置一致 |
 | `ONTOLOGY_LISTEN` | 监听地址，默认 `127.0.0.1:18080` |
+| `ONTOLOGY_TRUSTED_PROXY_CIDRS` | 可选的可信TLS终止代理网段，默认不信任；规则见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07) |
 | `ONTOLOGY_BOOTSTRAP_TENANT`、`ONTOLOGY_BOOTSTRAP_USERNAME`、`ONTOLOGY_BOOTSTRAP_PASSWORD` | 仅显式执行 `-bootstrap-admin` 时使用的初始租户及管理员账号 |
 
 ```powershell

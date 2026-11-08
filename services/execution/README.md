@@ -91,6 +91,7 @@ go run ./cmd/server
 | `ONTOLOGY_GO_IMAGE` | 含可信启动器的Go镜像，默认`agentforge-go:1.25` |
 | `ONTOLOGY_DOCKER_BINARY` | 可选的可信 Docker CLI 路径 |
 | `ONTOLOGY_EXECUTION_MAX_CONCURRENT` | 每进程计算及源码工具并发上限，默认4，仅接受1～4 |
+| `ONTOLOGY_TRUSTED_PROXY_CIDRS` | 可选的可信TLS终止代理网段，默认不信任；规则见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07) |
 
 在仓库根目录显式准备默认镜像：`docker pull python:3.12-alpine`、`docker pull node:22-alpine`、`docker build -t agentforge-go:1.25 -f deploy/execution/go/Dockerfile deploy/execution/go`。`scripts/start-dev.ps1`包含这些准备步骤；`-DependenciesOnly`只启动数据库/OPA。管理员自选Go镜像须预先准备，普通服务启动和请求不构建镜像。
 

@@ -77,5 +77,9 @@ func run() error {
 		addr = "127.0.0.1:18080"
 	}
 	log.Printf("Metadata listening on %s", addr)
-	return platform.Serve(ctx, addr, platform.ProtectSessionRoutes(service, true, accounts, mux))
+	protected, err := platform.TrustTLSProxy(platform.ProtectSessionRoutes(service, true, accounts, mux), os.Getenv("ONTOLOGY_TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return err
+	}
+	return platform.Serve(ctx, addr, protected)
 }

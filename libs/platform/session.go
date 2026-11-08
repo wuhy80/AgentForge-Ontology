@@ -63,7 +63,8 @@ func CheckRequestOrigin(r *http.Request) error {
 		return &AccessError{Status: 403, Code: "invalid_origin", Message: "请求来源无效，请从当前工作台重新提交"}
 	}
 	scheme := "http"
-	if r.TLS != nil {
+	proxyHTTPS, _ := r.Context().Value(proxyHTTPSContextKey{}).(bool)
+	if r.TLS != nil || proxyHTTPS {
 		scheme = "https"
 	}
 	if !strings.EqualFold(origin.Host, r.Host) || origin.Scheme != scheme {

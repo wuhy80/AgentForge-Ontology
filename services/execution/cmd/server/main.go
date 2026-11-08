@@ -58,7 +58,11 @@ func run() error {
 	}
 	// A 30-second computation needs room for current authorization, image
 	// inspection, durable outcome recording and response checks as well.
-	server := &http.Server{Addr: addr, Handler: platform.ProtectSessionRoutes(service, false, checker, app), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 90 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	protected, err := platform.TrustTLSProxy(platform.ProtectSessionRoutes(service, false, checker, app), os.Getenv("ONTOLOGY_TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return err
+	}
+	server := &http.Server{Addr: addr, Handler: protected, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 90 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
 	done := make(chan error, 1)
 	go func() { done <- server.ListenAndServe() }()
 	log.Printf("Execution listening on %s", addr)

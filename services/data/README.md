@@ -14,6 +14,8 @@ go run ./cmd/server
 
 所需配置为 `ONTOLOGY_MYSQL_DSN`、`ONTOLOGY_METADATA_URL`、`ONTOLOGY_SERVICE_TOKEN`、`ONTOLOGY_CURSOR_SECRET`；服务及游标密钥须各不相同且至少32字节。Data 通过 Metadata 的内部身份及决策接口使用当前权限，不需要用户签名密钥或直接配置 OPA；OPA 地址及可选凭据由 Metadata 持有。默认仅监听 `127.0.0.1:18081`，可用 `ONTOLOGY_LISTEN` 配置。服务启动不会自动迁移数据库；也没有绕过当前授权的允许全部模式。
 
+经HTTPS反向代理部署时可设置 `ONTOLOGY_TRUSTED_PROXY_CIDRS`，默认不信任转发头；实际对端、Host、Origin及CSRF规则见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07)。
+
 使用显式数据源时另配置独立且至少32字节的 `ONTOLOGY_DATA_SOURCE_KEY`，用于绑定租户及源身份的 AES-GCM 凭据加密。密码只写入，更新省略密码保留原值，显式空字符串清空，响应只返回 `passwordSet`。缺少密钥不影响旧默认存储启动，但源配置及解密明确拒绝。新增平台迁移也必须显式执行，普通请求与服务启动不建平台表；保存数据源或预览不执行目标 DDL。
 
 MySQL 需要支持 `utf8mb4_0900_bin` 排序规则及 16KiB 页的 InnoDB；当前集成验证使用 MySQL 26.7.0。实体表显式使用 `ROW_FORMAT=DYNAMIC`，UUID 列使用 ASCII，租户键使用二进制类型，物理列由稳定 field ID 派生，业务名称不进入 SQL 标识符。建模预检限制最多 100 个属性、32 个索引，保守核算 60000 字节逻辑行及 7000 字节页内预算，不支持的页大小在关闭 gate 前拒绝。表内值保留真实类型，`int64`、`decimal` 在 JSON 中使用字符串，时间使用带时区的 RFC 3339 字符串并精确到微秒；超出范围或精度会拒绝。
