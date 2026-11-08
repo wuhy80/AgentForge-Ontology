@@ -36,7 +36,6 @@ type Store struct {
 	MCPResource       string
 	loginMu           sync.Mutex
 	abuseSeed         maphash.Seed
-	loginAttempts     [16384]loginAttempt
 	publicAttempts    [4096]loginAttempt
 	publicTotals      [4]loginAttempt
 	loginSlots        chan struct{}

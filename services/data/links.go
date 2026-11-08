@@ -290,6 +290,10 @@ func (h *handler) queryLink(ctx context.Context, p c.Principal, target c.Current
 
 func readLocalProjection(ctx context.Context, tx *sql.Tx, compiled compiledQuery, schemaID string) (c.QueryResult, json.RawMessage, error) {
 	result := c.QueryResult{Data: []c.Instance{}, Fields: compiled.Projection}
+	budget, err := newQueryBudget(safeQueryProperties(compiled.Projection))
+	if err != nil {
+		return result, nil, err
+	}
 	var lastValue json.RawMessage
 	rows, err := tx.QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
@@ -309,6 +313,9 @@ func readLocalProjection(ctx context.Context, tx *sql.Tx, compiled compiledQuery
 			result.HasMore = true
 			break
 		}
+		if err = budget.checkDatabaseRow(values); err != nil {
+			return result, nil, err
+		}
 		item := c.Instance{ID: dbString(values[0]), ETag: dbString(values[1]), SchemaID: schemaID, Values: map[string]json.RawMessage{}}
 		for i, property := range compiled.ScanFields {
 			raw, err := rawDatabaseValue(property, values[i+2])
@@ -324,6 +331,9 @@ func readLocalProjection(ctx context.Context, tx *sql.Tx, compiled compiledQuery
 					break
 				}
 			}
+		}
+		if err = budget.add(item); err != nil {
+			return result, nil, err
 		}
 		result.Data = append(result.Data, item)
 	}

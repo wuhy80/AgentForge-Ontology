@@ -72,6 +72,13 @@ func selectInstance(ctx context.Context, tx *sql.Tx, d c.Definition, tenant, id 
 	if err != nil {
 		return out, err
 	}
+	budget, err := newQueryBudget(nil)
+	if err != nil {
+		return out, err
+	}
+	if err = budget.checkDatabaseRow(values); err != nil {
+		return out, err
+	}
 	out.ID = dbString(values[0])
 	out.ETag = dbString(values[1])
 	for i, p := range d.Schema.Properties {
@@ -80,6 +87,9 @@ func selectInstance(ctx context.Context, tx *sql.Tx, d c.Definition, tenant, id 
 			return out, e
 		}
 		out.Values[p.ID] = raw
+	}
+	if err = budget.add(out); err != nil {
+		return out, err
 	}
 	return out, nil
 }
@@ -126,7 +136,7 @@ func buildValues(s *c.Schema, input map[string]json.RawMessage, base map[string]
 			} else if !p.Required && p.Nullable {
 				out[p.ID] = json.RawMessage("null")
 			} else {
-				return nil, problem(422, "missing_field", "缺少属性: "+p.Name)
+				return nil, problem(422, "missing_field", "缺少必填属性或模型要求的值")
 			}
 		}
 	}
@@ -258,6 +268,10 @@ func (h *handler) create(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out = c.Instance{ID: c.NewID(), SchemaID: current.Definition.ID, ETag: c.NewID(), Values: values}
+		budget := jsonBudget{remaining: c.MaxDataResponseBytes - 1}
+		if err = budget.add(out); err != nil {
+			return err
+		}
 		cols := []string{"`tenant_id`", "`id`", "`etag`"}
 		marks := []string{"?", "?", "?"}
 		args := []any{p.TenantID, out.ID, out.ETag}
@@ -445,6 +459,10 @@ func (h *handler) change(w http.ResponseWriter, r *http.Request, deleting bool) 
 			out = old
 			out.Values = values
 			out.ETag = c.NewID()
+			budget := jsonBudget{remaining: c.MaxDataResponseBytes - 1}
+			if err = budget.add(out); err != nil {
+				return err
+			}
 			sets := []string{"`etag`=?"}
 			args := []any{out.ETag}
 			keys := make([]string, 0, len(req.Values))
@@ -537,6 +555,10 @@ func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySp
 		return c.QueryResult{}, err
 	}
 	result := c.QueryResult{Data: []c.Instance{}, Fields: compiled.Projection}
+	budget, err := newQueryBudget(safeQueryProperties(compiled.Projection))
+	if err != nil {
+		return result, err
+	}
 	var lastValue json.RawMessage
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := h.gate(ctx, tx, p, current); err != nil {
@@ -560,6 +582,9 @@ func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySp
 				result.HasMore = true
 				break
 			}
+			if err = budget.checkDatabaseRow(values); err != nil {
+				return err
+			}
 			item := c.Instance{ID: dbString(values[0]), ETag: dbString(values[1]), SchemaID: current.Definition.ID, Values: map[string]json.RawMessage{}}
 			for i, f := range compiled.ScanFields {
 				raw, e := rawDatabaseValue(f, values[i+2])
@@ -575,6 +600,9 @@ func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySp
 						break
 					}
 				}
+			}
+			if err = budget.add(item); err != nil {
+				return err
 			}
 			result.Data = append(result.Data, item)
 		}

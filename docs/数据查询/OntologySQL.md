@@ -245,11 +245,13 @@ LIMIT 对应最终页大小；游标建议作为查询请求参数传递，沿�
 
 | 入口 | 首批协议 |
 | --- | --- |
-| `GET /data/query/context` | `categoryId/schemaId/search/cursor/limit` 可选过滤；limit默认30、最大50，返回 `models` 和可选 `nextCursor`。模型含分类、Schema稳定ID/中文名及授权字段；字段含类型、可空性、精度、`filterable/sortable`，不含物理映射或业务数据 |
+| `GET /data/query/context` | `categoryId/schemaId/search/cursor/limit` 可选过滤；limit默认30、范围1～50，同时按完整模型执行1MiB分页，返回 `models` 和可选 `nextCursor`。仅需当前instance.query；模型含分类、Schema稳定ID/中文名及授权字段，字段含类型、可空性、精度、filterable/sortable，不含物理映射或业务数据 |
 | `POST /data/query/ontology-sql/analyze` | 正文 `text/parameters/defaultCategoryId/requestId`，返回 `requestId/textHash/diagnostics/parameters/fields/ready`；完整可执行时含稳定ID的 `query`；关联查询还提供授权 `scope`，缺参时也可用于角色选择。缺参仍返回类型和出现范围，`provided=false/ready=false`，不读取业务行 |
 | `POST /data/query/ontology-sql/complete` | 同上并提交从0开始的UTF-16 `cursorOffset`；返回 `items`，每项含 `label/insertText/detail/kind/range`。容忍未完成语法，最多50项；仅使用授权模型与字段，WHERE/ORDER按实际能力过滤 |
 | `POST /data/query/ontology-sql/format` | 同一词法/语法前端格式化，返回 `text/diagnostics/requestId/textHash`；字符串、标识符、注释保留，不完整语句不通过删除片段修复 |
 | `POST /data/query/ontology-sql` | 正文与analyze相同；检查完整且参数齐全才执行，返回QueryResult的 `data/fields/hasMore/nextCursor`，关联查询另有 `rowMode/rows`，附加实际绑定的 `query/requestId/textHash`。后续页携带此query及游标提交既有 `/data/query`，继续重新授权 |
+
+目录已使用独立业务发现桥，原会话在Metadata恢复并复核；内部每次最多20份定义、2MiB，数据库每批最多5份并先关闭cursor再授权。公开目录包含游标最多1MiB，按完整模型分页，不静默删字段；单模型超限返回422 `directory_budget`。游标最多4096字符、15分钟有效，HMAC绑定租户/用户、分类/模型/搜索/limit、最后模型ETag和授权State；每页重新授权，篡改、跨上下文、绑定定义或权限变化拒绝。其他模型的并发变化不提供历史快照。目录从准入及会话校验开始整体4秒，为OntoApp单次5秒留传输余量；客户端累计4MiB/100页等预算仍独立生效，真实代表目录压力与时延未验收。SQL文本模型解析及关系发现仍要求其原有定义/组织读取授权，不能把目录只需instance.query推广到完整SQL编辑协议。
 
 路径及字段辅助均为POST只读编辑接口，使用同一会话/CSRF校验，响应 `no-store`：
 

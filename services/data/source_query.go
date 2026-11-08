@@ -329,6 +329,10 @@ func querySourceWithLimit(ctx context.Context, db *sql.DB, source c.DataSource, 
 		return out, problem(422, "source_query_failed", "无法读取查询列")
 	}
 	budget := 0
+	responseBudget, err := newQueryBudget(out.Columns)
+	if err != nil {
+		return out, err
+	}
 	for rows.Next() {
 		if len(out.Rows) == p.limit {
 			out.HasMore = true
@@ -341,6 +345,9 @@ func querySourceWithLimit(ctx context.Context, db *sql.DB, source c.DataSource, 
 		}
 		if err = rows.Scan(destinations...); err != nil {
 			return out, problem(422, "source_query_failed", "无法读取查询结果")
+		}
+		if err = responseBudget.checkDatabaseRow(values); err != nil {
+			return out, err
 		}
 		row := make([]*string, len(values))
 		for i, value := range values {
@@ -364,6 +371,9 @@ func querySourceWithLimit(ctx context.Context, db *sql.DB, source c.DataSource, 
 				return out, problem(422, "budget_exceeded", "结果超过4 MiB，请减少字段或 LIMIT 后重试")
 			}
 			row[i] = &s
+		}
+		if err = responseBudget.add(row); err != nil {
+			return out, err
 		}
 		out.Rows = append(out.Rows, row)
 	}

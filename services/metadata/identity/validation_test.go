@@ -1,8 +1,10 @@
 package identity
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -41,26 +43,13 @@ func TestPasswordsAndTypedPolicyValues(t *testing.T) {
 	}
 }
 
-func TestLoginBudgetHasBoundedMemoryAndTypedErrors(t *testing.T) {
+func TestLoginBudgetRequiresSharedAuthority(t *testing.T) {
 	store := NewStore(nil, nil, "http://localhost:5173")
-	for attempt := 0; attempt < 5; attempt++ {
-		if err := store.loginBudget("subject"); err != nil {
-			t.Fatal(err)
-		}
-	}
 	var access *platform.AccessError
-	if !errors.As(store.loginBudget("subject"), &access) || access.Status != 429 {
-		t.Fatal("login limit lacks public error status")
-	}
-	for id := 0; id < 1024; id++ {
-		_ = store.loginBudget(string(rune(id)) + "other")
-	}
-	if store.loginBudget("unrelated-user") != nil {
-		t.Fatal("invented names blocked an unrelated user")
-	}
-	store.resetLoginBudget("subject")
-	if err := store.loginBudget("subject"); err != nil {
-		t.Fatal(err)
+	r := httptest.NewRequest("POST", "/metadata/auth/login", nil)
+	_, err := store.loginBudget(context.Background(), r, contracts.LoginRequest{Tenant: "tenant", Username: "subject"})
+	if !errors.As(err, &access) || access.Status != 503 || access.Code != "login_protection_unavailable" {
+		t.Fatal("missing shared login protection must fail closed")
 	}
 }
 

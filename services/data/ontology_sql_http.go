@@ -2,6 +2,7 @@ package data
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
@@ -24,6 +26,7 @@ func (h *handler) registerOntologySQL(mux *http.ServeMux) {
 		return func(w http.ResponseWriter, r *http.Request) { w.Header().Set("Cache-Control", "no-store"); next(w, r) }
 	}
 	mux.HandleFunc("GET /data/query/context", noStore(h.queryContextHTTP))
+	mux.HandleFunc("GET /data/schemas/{schemaId}/form", noStore(h.formDefinitionHTTP))
 	mux.HandleFunc("POST /data/query/ontology-sql/analyze", noStore(h.analyzeOntologySQLHTTP))
 	mux.HandleFunc("POST /data/query/ontology-sql/complete", noStore(h.completeOntologySQLHTTP))
 	mux.HandleFunc("POST /data/query/ontology-sql/format", noStore(h.formatOntologySQLHTTP))
@@ -391,6 +394,10 @@ func (h *handler) resolveOntologySQLSource(r *http.Request, p c.Principal, categ
 }
 
 func (h *handler) queryContextHTTP(w http.ResponseWriter, r *http.Request) {
+	// Leave a transport margin within OntoApp's five-second upstream budget.
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, err := h.principal(r)
 	if err != nil {
 		writeError(w, err)
@@ -405,7 +412,11 @@ func (h *handler) queryContextHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	values := r.URL.Query()
-	for _, value := range []string{values.Get("categoryId"), values.Get("schemaId"), values.Get("cursor"), values.Get("search")} {
+	if len(values.Get("cursor")) > queryDirectoryCursorReserve {
+		writeError(w, problem(400, "invalid_query_context", "目录游标过长"))
+		return
+	}
+	for _, value := range []string{values.Get("categoryId"), values.Get("schemaId"), values.Get("search")} {
 		if len(value) > 256 {
 			writeError(w, problem(400, "invalid_query_context", "查询目录参数过长"))
 			return
@@ -419,114 +430,84 @@ func (h *handler) queryContextHTTP(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-func (h *handler) ontologySQLContext(r *http.Request, p c.Principal, categoryID, schemaID, search, after string, limit int) (c.QueryContext, error) {
+func (h *handler) ontologySQLContext(r *http.Request, p c.Principal, categoryID, schemaID, search, cursor string, limit int) (c.QueryContext, error) {
 	out := c.QueryContext{Models: []c.QueryContextModel{}}
-	categories, err := h.sqlCategories(r, p)
+	fingerprint := directoryFingerprint(categoryID, schemaID, search, limit)
+	after, err := h.directoryAfter(r, p, cursor, fingerprint)
 	if err != nil {
 		return out, err
 	}
 	search = nameKey(search)
-	if schemaID != "" {
-		current, err := h.current(r.Context(), p.TenantID, schemaID)
-		if err != nil {
-			if hiddenSQLSource(err) {
-				return out, nil
+	scanned, used, state := 0, queryDirectoryCursorReserve+128, ""
+	var last c.BusinessDirectoryEntry
+	finish := func(more bool) (c.QueryContext, error) {
+		if len(out.Models) > 0 {
+			if e := h.recheck(r.Context(), p, "instance.query", last.Current.Definition.ID, last.Decision); e != nil {
+				return out, e
 			}
-			return out, err
-		}
-		d := current.Definition
-		if d.ID != schemaID || categoryID != "" && categoryID != d.CategoryID {
-			return out, nil
-		}
-		definitionDecision, err := h.authorize(r.Context(), p, "definition.read", d.ID)
-		if err != nil {
-			if hiddenSQLSource(err) {
-				return out, nil
+			if more {
+				out.NextCursor, err = h.directoryCursor(p, last.Current, last.Decision, fingerprint)
+				if err != nil {
+					return out, err
+				}
 			}
-			return out, err
 		}
-		if definitionDecision.RowFilter != nil || definitionDecision.NewRowFilter != nil {
-			return out, problem(422, "unsupported_authorization", "定义目录不支持带行条件的授权")
-		}
-		if err := validateSchema(d); err != nil {
-			return out, nil
-		}
-		decision, err := h.authorize(r.Context(), p, "instance.query", d.ID)
-		if err != nil {
-			if hiddenSQLSource(err) {
-				return out, nil
-			}
-			return out, err
-		}
-		if err := validateOntologySQLDecision(d, decision); err != nil {
-			return out, err
-		}
-		model := queryContextModel(d, decision, categories[d.CategoryID])
-		if model.Category != "" && len(model.Fields) > 0 && matchesQueryContext(model, search) {
-			out.Models = append(out.Models, model)
+		encoded, e := json.Marshal(out)
+		if e != nil || len(encoded)+1 > queryDirectoryMaxBytes {
+			return out, problem(422, "directory_budget", "查询目录响应超过字节预算，请缩小范围")
 		}
 		return out, nil
 	}
-	scanned := 0
-	for page := 0; page < 11; page++ {
-		values := url.Values{"kind": {"schema"}, "view": {"current"}, "limit": {"100"}, "after": {after}}
-		if categoryID != "" {
-			values.Set("categoryId", categoryID)
+	for page := 0; page < sqlDirectoryBudget; page++ {
+		list, e := h.businessDirectory(r, categoryID, schemaID, after)
+		if e != nil {
+			return out, e
 		}
-		var list struct {
-			Data       []c.CurrentDefinition `json:"data"`
-			HasMore    bool                  `json:"hasMore"`
-			NextCursor string                `json:"nextCursor"`
+		scanned += list.Scanned
+		if scanned > sqlDirectoryBudget {
+			return out, problem(422, "directory_budget", "查询目录超过扫描预算，请指定分类或缩小范围")
 		}
-		if err := h.sqlDirectoryGET(r, "/metadata/definitions?"+values.Encode(), &list); err != nil {
-			return out, err
-		}
-		for _, current := range list.Data {
-			scanned++
-			if scanned > sqlDirectoryBudget {
-				return out, problem(422, "directory_budget", "查询目录超过扫描预算，请指定分类或缩小范围")
+		for _, entry := range list.Entries {
+			d, decision := entry.Current.Definition, entry.Decision
+			if d.TenantID != p.TenantID || entry.Current.ETag == "" || !decision.Allow || decision.State == "" {
+				return out, problem(503, "metadata_unavailable", "业务目录身份或授权响应无效")
 			}
-			d := current.Definition
-			if d.TenantID != p.TenantID {
-				return out, problem(503, "metadata_unavailable", "目录租户不一致")
+			if state != "" && state != decision.State {
+				return out, problem(409, "authorization_changed", "授权已改变，请重新读取目录")
 			}
-			if current.Status != "active" || d.Kind != c.KindSchema || d.Schema == nil || (schemaID != "" && schemaID != d.ID) || (categoryID != "" && categoryID != d.CategoryID) {
+			state = decision.State
+			if entry.Current.Status != "active" || d.Kind != c.KindSchema || d.Schema == nil || schemaID != "" && d.ID != schemaID || categoryID != "" && d.CategoryID != categoryID {
+				return out, problem(503, "metadata_unavailable", "业务目录模型响应无效")
+			}
+			if validateSchema(d) != nil {
 				continue
 			}
-			if err := validateSchema(d); err != nil {
+			if e = validateOntologySQLDecision(d, decision); e != nil {
+				return out, e
+			}
+			model := queryContextModel(d, decision, entry.Category)
+			if model.Category == "" || len(model.Fields) == 0 || !matchesQueryContext(model, search) {
 				continue
 			}
-			decision, err := h.authorize(r.Context(), p, "instance.query", d.ID)
-			if err != nil {
-				if hiddenSQLSource(err) {
-					continue
-				}
-				return out, err
+			encoded, e := json.Marshal(model)
+			if e != nil {
+				return out, e
 			}
-			if err := validateOntologySQLDecision(d, decision); err != nil {
-				return out, err
+			if len(encoded)+queryDirectoryCursorReserve+128 > queryDirectoryMaxBytes {
+				return out, problem(422, "directory_budget", "单个模型超过目录字节预算，不能截断字段")
 			}
-			model := queryContextModel(d, decision, categories[d.CategoryID])
-			if model.Category == "" {
-				continue
+			if len(out.Models) == limit || used+len(encoded)+1 > queryDirectoryMaxBytes {
+				return finish(true)
 			}
-			if len(model.Fields) == 0 {
-				continue
-			}
-			if !matchesQueryContext(model, search) {
-				continue
-			}
-			if len(out.Models) == limit {
-				out.NextCursor = out.Models[len(out.Models)-1].SchemaID
-				return out, nil
-			}
+			used += len(encoded) + 1
 			out.Models = append(out.Models, model)
+			last = entry
 		}
 		if !list.HasMore {
-			return out, nil
+			return finish(false)
 		}
-		if list.NextCursor == "" || list.NextCursor == after {
-			return out, problem(503, "metadata_unavailable", "目录分页响应不合法")
+		if list.NextCursor <= after {
+			return out, problem(503, "metadata_unavailable", "业务目录分页未前进")
 		}
 		after = list.NextCursor
 	}

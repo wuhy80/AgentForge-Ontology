@@ -3,12 +3,15 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,6 +32,17 @@ func raw(v any) json.RawMessage { b, _ := json.Marshal(v); return b }
 type harness struct {
 	t      *testing.T
 	client *http.Client
+}
+
+type legacyOntologySessionChecker func(context.Context, c.SessionCheck) (c.Session, error)
+
+func (f legacyOntologySessionChecker) CheckSession(ctx context.Context, check c.SessionCheck) (c.Session, error) {
+	return f(ctx, check)
+}
+
+func legacyOntologyCookie(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }
 
 func (h harness) request(method, path, token, etag string, body any, want int, out any) http.Header {
@@ -111,11 +125,16 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 		h.request("DELETE", opaURL+"/v1/data/grants/"+url.PathEscape(tenant), "", "", nil, 204, nil)
 		h.request("DELETE", opaURL+"/v1/data/grants/"+url.PathEscape(otherTenant), "", "", nil, 204, nil)
 	})
+	// This old fixture explicitly adapts its verified bootstrap identities to
+	// opaque test sessions for the new internal discovery bridge. Production
+	// has no bootstrap fallback; public_security_test exercises real accounts.
+	legacySessions := map[string]c.Session{}
 	identity := func(subject, tenant string) string {
 		token, err := platform.SignToken(authSecret, c.Principal{Subject: subject, TenantID: tenant, ExpiresAt: time.Now().Add(time.Hour).Unix()})
 		if err != nil {
 			t.Fatal(err)
 		}
+		legacySessions[legacyOntologyCookie(token)] = c.Session{User: c.User{ID: subject, TenantID: tenant, Enabled: true, ETag: "legacy-test"}, ExpiresAt: time.Now().Add(time.Hour).Unix(), CSRFToken: strings.Repeat("c", 64)}
 		return token
 	}
 	admin, reader, other := identity("admin", tenant), identity("reader", tenant), identity("admin", otherTenant)
@@ -125,15 +144,29 @@ func TestMySQLAndOPAEndToEnd(t *testing.T) {
 	defer metaSrv.Close()
 	var failActivation atomic.Bool
 	dataApp := data.NewHandler(data.Config{Engine: de, Authorizer: authorizer, MetadataURL: metaSrv.URL, ServiceToken: serviceToken, CursorSecret: cursorSecret})
+	withLegacyTestCookie := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := platform.Principal(r); ok {
+			r = r.Clone(r.Context())
+			r.Header.Set("Cookie", "ontology_session="+legacyOntologyCookie(platform.Bearer(r)))
+			r.Header.Set("Origin", "http://"+r.Host)
+			r.Header.Set("X-CSRF-Token", strings.Repeat("c", 64))
+		}
+		dataApp.ServeHTTP(w, r)
+	})
 	dataSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/internal/publications/activate" && failActivation.Load() {
 			platform.WriteError(w, 503, "injected_failure", "verification interrupted activation")
 			return
 		}
-		platform.ProtectRoutes(authSecret, serviceToken, false, dataApp).ServeHTTP(w, r)
+		platform.ProtectRoutes(authSecret, serviceToken, false, withLegacyTestCookie).ServeHTTP(w, r)
 	}))
 	defer dataSrv.Close()
-	metaApp := metadata.NewHandler(metadata.Config{Engine: me, Authorizer: authorizer, DataURL: dataSrv.URL, ServiceToken: serviceToken, HTTPClient: h.client})
+	metaApp := metadata.NewHandler(metadata.Config{Engine: me, Authorizer: authorizer, SessionChecker: legacyOntologySessionChecker(func(_ context.Context, check c.SessionCheck) (c.Session, error) {
+		if session, ok := legacySessions[check.Token]; ok {
+			return session, nil
+		}
+		return c.Session{}, &platform.AccessError{Status: 401, Code: "unauthenticated", Message: "unknown test session"}
+	}), DataURL: dataSrv.URL, ServiceToken: serviceToken, HTTPClient: h.client})
 	metaMux.Handle("/", platform.ProtectRoutes(authSecret, serviceToken, true, metaApp))
 
 	t.Log("real OPA decisions; tenant-scoped organization and current-definition publication")

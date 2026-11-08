@@ -43,6 +43,7 @@ configure_units() {
     install -d -m 755 /etc/systemd/system/agentforge-ontology@execution.service.d
     rm -f /etc/systemd/system/agentforge-ontology@execution.service.d/docker.conf
     install -m 644 "$repo/deploy/single-host/security-headers.conf" "$config/nginx-security-headers.conf"
+    install -m 644 "$repo/deploy/single-host/proxy-headers.conf" "$config/nginx-proxy-headers.conf"
     # Rootless Docker with cgroup v2 requires the dedicated user's systemd
     # manager and bus. A system unit with User= is not a supported substitute.
     local sandbox_uid sandbox_home=/var/lib/ontology-sandbox

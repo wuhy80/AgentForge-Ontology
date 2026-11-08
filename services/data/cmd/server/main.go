@@ -59,7 +59,7 @@ func run() error {
 		addr = "127.0.0.1:18081"
 	}
 	log.Printf("Data listening on %s", addr)
-	protected, err := platform.TrustTLSProxy(platform.ProtectSessionRoutes(service, false, checker, app), os.Getenv("ONTOLOGY_TRUSTED_PROXY_CIDRS"))
+	protected, err := platform.TrustTLSProxy(platform.AuditRequests("data", data.ProtectResources(platform.ProtectSessionRoutes(service, false, checker, app))), os.Getenv("ONTOLOGY_TRUSTED_PROXY_CIDRS"))
 	if err != nil {
 		return err
 	}

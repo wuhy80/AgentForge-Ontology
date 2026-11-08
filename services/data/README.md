@@ -45,6 +45,7 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `PATCH`、`DELETE /data/schemas/{schemaId}/instances/{entityId}` | 必须携带最近读取结果的 `If-Match` |
 | `POST /data/query` | 中文名称或稳定 ID 绑定、类型化筛选、投影、排序和签名游标 |
 | `GET /data/query/context` | 按当前目录及实例查询权限返回最小模型/字段能力，支持分类、模型、搜索及分页 |
+| `GET /data/schemas/{schemaId}/form?operation=create` | 默认create，可显式patch；只返回当前可见字段及对应写权限的安全表单描述，具体语义见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07) |
 | `POST /data/query/ontology-sql/analyze`、`complete`、`format` | 单Schema及最多4条INNER Link的OntologySQL检查、参数推断、UTF-16诊断、上下文补全及格式化；不扫描业务数据 |
 | `POST /data/query/ontology-sql/paths`、`insert-field` | 只读授权路径候选及多角色字段插入，保留筛选与参数；不读取业务行 |
 | `POST /data/query/ontology-sql` | 编译为稳定ID的QuerySpec并进入同一执行器，返回原查询结果及实际绑定的query供续页 |
@@ -81,6 +82,8 @@ MCP 接入另接受 Metadata 签发的 `mcp_` 外部 Bearer，仅允许窄路由
 `GET /data/capabilities` 新增 `rowQueries=true/maxRowJoins=4/queryPathPlanning=true`；`maxLinkHops=1` 表示既有固定实例via接口，并非INNER关联行上限。路径规划仅查授权元数据，使用候选不跳过运行时物理和权限校验。
 
 ## 正确性与限制
+
+2026-11-08补充公网资源预算：Data每进程同时最多处理1个操作，最多4个等待者且最多等待250ms；等待发生在会话远程校验和正文读取之前，超出返回429 `data_busy`及`Retry-After: 1`，取消及时出队。同进程多个handler共用预算，健康/就绪探针豁免。该默认值面向160M单服务模板保守设置，不代表吞吐验收。请求context最多15秒，过期/取消返回受控JSON；数据库取消依赖实际驱动的QueryContext支持。完整JSON响应最多8 MiB，先计入编码转义、字段和游标开销，再有界编码与缓冲后提交，超限返回422 `response_budget`，不会先发送部分成功结果。实例、映射、Link关联行及来源SQL在逐行积累期间也检查预算；创建/更新在提交前限制完整实例状态，幂等身份与冲突规则不变。调用方遇到响应超限应减少投影或分页，不能静默截断；目录更严格的字节分页以OntologySQL主说明为准。单个数据库行在Scan前仍可能由驱动分配接收内存，以上不是对任意恶意来源报文的完整内存隔离，来源网络和数据库读取预算仍需受控。
 
 Data 在同一事务内提交实例、创建幂等记录和 outbox，并在更新及删除时检查当前 ETag。幂等重试返回原创建结果，读取仍检查当前权限；同键不同意图拒绝。创建、修改同时检查可写字段和新行条件，修改还检查旧行条件。查询权限在 SQL 中先于排序和分页执行，不通过读取一页后删行实现行过滤。
 

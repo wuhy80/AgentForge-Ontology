@@ -1,7 +1,6 @@
 package identity
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,8 +10,21 @@ import (
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 )
 
+func TestSharedLoginBucketsAreStableAndSeparateInventedAccounts(t *testing.T) {
+	secret := []byte(strings.Repeat("s", 32))
+	bucket, key := sharedLoginBucket(secret, "tenant/account/ip", true)
+	again, againKey := sharedLoginBucket(secret, "tenant/account/ip", true)
+	invented, inventedKey := sharedLoginBucket(secret, "tenant/account/ip", false)
+	if bucket != again || string(key) != string(againKey) || bucket >= loginBucketsPerClass || invented != bucket+loginBucketsPerClass || string(inventedKey) != string(key) {
+		t.Fatal("shared login bucket partition or persistence changed")
+	}
+	other, otherKey := sharedLoginBucket([]byte(strings.Repeat("x", 32)), "tenant/account/ip", true)
+	if other == bucket && string(otherKey) == string(key) {
+		t.Fatal("stored secret does not key the bucket")
+	}
+}
+
 func TestUntrustedForwardingCannotSelectLoginBudget(t *testing.T) {
-	s := NewStore(nil, nil, "https://workbench.test")
 	input := c.LoginRequest{Tenant: "tenant", Username: "admin"}
 	r := httptest.NewRequest("POST", "/metadata/auth/login", nil)
 	r.RemoteAddr = "198.51.100.1:10000"
@@ -35,14 +47,6 @@ func TestUntrustedForwardingCannotSelectLoginBudget(t *testing.T) {
 	if keys[0] == keys[1] {
 		t.Fatal("trusted proxy merged independent browsers")
 	}
-	for i := 0; i < 5; i++ {
-		if err := s.loginBudget(keys[0]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if s.loginBudget(keys[0]) == nil || s.loginBudget(keys[1]) != nil {
-		t.Fatal("account failure budget isolation failed")
-	}
 }
 
 func TestAnonymousRegistrationRateLimitPrecedesDatabase(t *testing.T) {
@@ -60,12 +64,5 @@ func TestAnonymousRegistrationRateLimitPrecedesDatabase(t *testing.T) {
 		if w.Code != want {
 			t.Fatalf("request %d status=%d want=%d", i, w.Code, want)
 		}
-	}
-	// Thousands of invented account names cannot exhaust a growing state table.
-	for i := 0; i < 4096; i++ {
-		_ = s.loginBudget(fmt.Sprintf("invented-%d", i))
-	}
-	if len(s.loginAttempts) != 16384 {
-		t.Fatal("admission memory changed with usernames")
 	}
 }

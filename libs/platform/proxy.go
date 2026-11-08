@@ -10,6 +10,7 @@ import (
 
 type proxyHTTPSContextKey struct{}
 type proxyClientAddressKey struct{}
+type proxyTrustedContextKey struct{}
 
 // ClientAddress uses only the TCP peer unless a configured proxy supplies a
 // single valid X-Real-IP. The edge must overwrite that header.
@@ -49,7 +50,7 @@ func TrustTLSProxy(app http.Handler, cidrs string) (http.Handler, error) {
 		if err == nil {
 			for _, prefix := range prefixes {
 				if prefix.Contains(peer.Addr().Unmap()) {
-					ctx := r.Context()
+					ctx := context.WithValue(r.Context(), proxyTrustedContextKey{}, true)
 					if r.TLS == nil && len(proto) == 1 && proto[0] == "https" {
 						ctx = context.WithValue(ctx, proxyHTTPSContextKey{}, true)
 					}

@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -232,6 +233,15 @@ func TestLinkCompilersRequireResolvedRelationContext(t *testing.T) {
 
 func TestManagedLinkCardinalityAndConcurrentWrites(t *testing.T) {
 	f := newMappedIntegrationFixture(t, "mysql", os.Getenv("MYSQL_TEST_DSN"))
+	// This is a database concurrency contract, including contention across
+	// replicas. Trusted in-process test context bypasses process admission so
+	// eight writes still reach MySQL concurrently; production HTTP cannot set
+	// this private ownership marker. Admission/429 is tested separately.
+	storageApp := f.app
+	f.app = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(r.Context(), dataBudgetContextKey{}, dataServiceLimiter)
+		storageApp.ServeHTTP(w, r.WithContext(ctx))
+	})
 	property := c.Property{ID: c.NewID(), Name: "名称", DataType: "string", Required: true}
 	schema := c.Definition{ID: c.NewID(), TenantID: f.tenant, CategoryID: c.NewID(), GroupID: c.NewID(), Kind: c.KindSchema, Name: "基数测试对象", Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{property}}}
 	operation := c.NewID()

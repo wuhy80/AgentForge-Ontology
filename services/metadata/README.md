@@ -74,6 +74,8 @@ go run ./cmd/server
 
 MCP 外部 Bearer 仅开放受限发现、查询和当前纯计算路由，每次由身份服务恢复真实用户并核验范围，继续执行业务权限。`POST /internal/metadata/query-directory` 是 Data 使用的窄内部目录桥，同时校验服务凭据和真实调用者；它不授予外部凭据读取完整定义、源码或物理映射的权限。外部认证协议见 [identity](identity/README.md#外部连接与-mcp-oauth2026-11-08-已接入)，客户端配置见 [MCP 服务](../mcp/README.md)。
 
+普通业务目录另使用 `POST /internal/metadata/business-directory`，同时校验服务令牌、原始Cookie/MCP会话及当前instance.query，不要求definition.read/organization.read；此内部响应含Data裁剪所需的私有定义，不得直接公开。Metadata.Config.SessionChecker须显式接入权威身份服务，未配置拒绝；实际DTO见[business_directory.go](../../contracts/business_directory.go)，公开目录/表单见[Data](../data/README.md)，授权与裁剪边界唯一见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07)。
+
 组织及定义列表默认100条、最多200条，使用返回的 `nextCursor` 作为下一次 `after`。这与 Data 的查询游标分别处理。
 
 Link 增加可选 `storageBinding`：支持平台托管关联表、同外部数据源关联表和外键映射，字段及边界统一见 [Link](../../docs/模块/Link.md#当前关系数据库实现2026-11-07)。保存及发布均核对两端为同租户已生效 Schema、映射形状及同源约束，Data 继续核验真实表列和索引。已生效无绑定 Link 允许一次性追加绑定并通过同一 prepare/activate 流程生效；之后绑定、端点和基数不可修改。无绑定仍仅为定义，发布不会自动生成关系事实。方向发现接口返回定义与方向，实际邻接数据由 Data 的 `QuerySpec.via` 执行。

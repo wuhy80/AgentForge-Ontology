@@ -160,11 +160,11 @@ func createSession(ctx context.Context, tx *sql.Tx, user contracts.User) (contra
 }
 
 func cookieToken(r *http.Request) string {
-	cookie, err := r.Cookie(SessionCookieName)
+	token, _, err := platform.SessionCookie(r)
 	if err != nil {
 		return ""
 	}
-	return cookie.Value
+	return token
 }
 
 func (s *Store) setCookie(w http.ResponseWriter, token string) {
@@ -176,16 +176,18 @@ func (s *Store) clearCookie(w http.ResponseWriter) {
 }
 
 func (s *Store) sessionForRequest(r *http.Request) (contracts.Session, error) {
-	count := 0
-	for _, cookie := range r.Cookies() {
-		if cookie.Name == SessionCookieName {
-			count++
-		}
+	token, present, err := platform.SessionCookie(r)
+	if err != nil {
+		return contracts.Session{}, err
 	}
-	if count != 1 {
+	if !present {
 		return contracts.Session{}, problem(401, "unauthenticated", "请重新登录")
 	}
-	return s.CheckSession(r.Context(), contracts.SessionCheck{Token: cookieToken(r), CSRFToken: r.Header.Get("X-CSRF-Token"), Method: r.Method, Origin: r.Header.Get("Origin")})
+	session, err := s.CheckSession(r.Context(), contracts.SessionCheck{Token: token, CSRFToken: r.Header.Get("X-CSRF-Token"), Method: r.Method, Origin: r.Header.Get("Origin")})
+	if err == nil {
+		platform.AuditIdentity(r, session.User)
+	}
+	return session, err
 }
 
 // mutation rechecks the session and administrator inside the tenant write lock

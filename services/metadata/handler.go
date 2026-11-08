@@ -18,11 +18,12 @@ import (
 )
 
 type Config struct {
-	Engine       *storage.Engine
-	Authorizer   platform.Authorizer
-	DataURL      string
-	ServiceToken string
-	HTTPClient   *http.Client
+	Engine         *storage.Engine
+	Authorizer     platform.Authorizer
+	SessionChecker platform.SessionChecker
+	DataURL        string
+	ServiceToken   string
+	HTTPClient     *http.Client
 }
 
 type handler struct {
@@ -46,6 +47,7 @@ func NewHandler(cfg Config) http.Handler {
 		h.client = &http.Client{Timeout: 30 * time.Second}
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /internal/metadata/business-directory", h.businessDirectoryHTTP)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)

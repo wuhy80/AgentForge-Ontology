@@ -77,14 +77,13 @@ func CheckRequestOrigin(r *http.Request) error {
 // credentials and caller-supplied tenant/user headers cannot select an identity.
 func SessionRequest(r *http.Request) (contracts.SessionCheck, error) {
 	check := contracts.SessionCheck{Method: r.Method, Origin: r.Header.Get("Origin"), CSRFToken: r.Header.Get("X-CSRF-Token")}
+	token, cookiePresent, cookieError := SessionCookie(r)
 	if strings.HasPrefix(Bearer(r), "mcp_") {
 		if !ValidAccessToken(Bearer(r)) {
 			return check, &AccessError{Status: 401, Code: "unauthenticated", Message: "外部连接凭据无效"}
 		}
-		for _, cookie := range r.Cookies() {
-			if cookie.Name == SessionCookieName {
-				return check, &AccessError{Status: 401, Code: "ambiguous_credentials", Message: "请分别使用浏览器会话或外部连接凭据"}
-			}
+		if cookiePresent || cookieError != nil {
+			return check, &AccessError{Status: 401, Code: "ambiguous_credentials", Message: "请分别使用浏览器会话或外部连接凭据"}
 		}
 		if _, allowed := AccessRoute(r.Method, r.URL.Path); !allowed {
 			return check, &AccessError{Status: 403, Code: "connection_scope_denied", Message: "外部连接不允许此接口"}
@@ -99,14 +98,11 @@ func SessionRequest(r *http.Request) (contracts.SessionCheck, error) {
 		check.AccessToken, check.Path = Bearer(r), r.URL.Path
 		return check, nil
 	}
-	count := 0
-	for _, cookie := range r.Cookies() {
-		if cookie.Name == SessionCookieName {
-			count++
-			check.Token = cookie.Value
-		}
+	if cookieError != nil {
+		return check, cookieError
 	}
-	if count != 1 || !opaqueCredential.MatchString(check.Token) {
+	check.Token = token
+	if !cookiePresent {
 		return check, &AccessError{Status: 401, Code: "unauthenticated", Message: "请登录后继续"}
 	}
 	if err := CheckRequestOrigin(r); err != nil {
@@ -168,6 +164,7 @@ func ProtectSessionRoutes(serviceToken string, metadata bool, checker SessionChe
 			return
 		}
 		principal := contracts.Principal{Subject: session.User.ID, TenantID: session.User.TenantID, ExpiresAt: session.ExpiresAt}
+		AuditIdentity(r, session.User)
 		ctx := WithSessionUser(r.Context(), session.User)
 		app.ServeHTTP(w, r.WithContext(WithPrincipal(ctx, principal)))
 	})

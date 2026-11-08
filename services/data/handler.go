@@ -67,7 +67,7 @@ func NewHandler(cfg Config) http.Handler {
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"backend": "mysql", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "layouts": []string{"single"}, "operations": []string{"create", "read", "patch", "delete", "query"}, "sourceDrivers": []string{"mysql", "postgresql"}, "mappedOperations": []string{"read", "query"}, "mappedUpdates": "nullable-fields-and-indexes", "maxMappedTables": maxMappedTables, "crossSourceProjection": true, "crossSourceConditions": false, "crossSourceTransactions": false, "dataTypes": []string{"string", "text", "longtext", "uuid", "int64", "decimal", "boolean", "timestamp"}, "maxTextBytes": c.MaxTextBytes, "maxLongTextBytes": c.MaxLongTextBytes, "maxRequestBytes": c.MaxDataRequestBytes, "maxPageSize": 100, "maxSortFields": 1, "links": true, "linkStorageModes": []string{"managed", "junction", "foreign_key"}, "linkDirections": []string{"out", "in"}, "maxLinkHops": 1, "rowQueries": true, "maxRowJoins": maxRowQueryJoins, "queryPathPlanning": true, "managedLinkOperations": []string{"create", "query", "delete"}, "mappedLinkOperations": []string{"query"}, "crossSourceLinks": false, "ontologySQL": true, "ontologySQLFeatures": []string{"select", "where", "parameters", "orderBy", "limit", "analyze", "complete", "format", "joinLink", "paths", "insertField"}, "maxOntologySQLBytes": 64 << 10, "maxOntologySQLParameters": 64, "maxOntologySQLCompletions": 50, "batch": false, "calculatedProperties": false})
+		writeJSON(w, 200, map[string]any{"backend": "mysql", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "layouts": []string{"single"}, "operations": []string{"create", "read", "patch", "delete", "query"}, "sourceDrivers": []string{"mysql", "postgresql"}, "mappedOperations": []string{"read", "query"}, "mappedUpdates": "nullable-fields-and-indexes", "maxMappedTables": maxMappedTables, "crossSourceProjection": true, "crossSourceConditions": false, "crossSourceTransactions": false, "dataTypes": []string{"string", "text", "longtext", "uuid", "int64", "decimal", "boolean", "timestamp"}, "maxTextBytes": c.MaxTextBytes, "maxLongTextBytes": c.MaxLongTextBytes, "maxRequestBytes": c.MaxDataRequestBytes, "maxResponseBytes": c.MaxDataResponseBytes, "maxConcurrentRequests": c.MaxDataConcurrentRequests, "maxQueuedRequests": c.MaxDataQueuedRequests, "maxQueueWaitMS": c.MaxDataQueueWaitMS, "maxPageSize": 100, "maxSortFields": 1, "links": true, "linkStorageModes": []string{"managed", "junction", "foreign_key"}, "linkDirections": []string{"out", "in"}, "maxLinkHops": 1, "rowQueries": true, "maxRowJoins": maxRowQueryJoins, "queryPathPlanning": true, "managedLinkOperations": []string{"create", "query", "delete"}, "mappedLinkOperations": []string{"query"}, "crossSourceLinks": false, "ontologySQL": true, "ontologySQLFeatures": []string{"select", "where", "parameters", "orderBy", "limit", "analyze", "complete", "format", "joinLink", "paths", "insertField"}, "maxOntologySQLBytes": 64 << 10, "maxOntologySQLParameters": 64, "maxOntologySQLCompletions": 50, "batch": false, "calculatedProperties": false})
 	})
 	mux.HandleFunc("POST /internal/publications/prepare", h.prepare)
 	mux.HandleFunc("POST /internal/publications/activate", h.activate)
@@ -78,19 +78,36 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("PATCH /data/schemas/{schemaId}/instances/{entityId}", h.patch)
 	mux.HandleFunc("DELETE /data/schemas/{schemaId}/instances/{entityId}", h.delete)
 	mux.HandleFunc("POST /data/query", h.query)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-		defer cancel()
-		mux.ServeHTTP(w, r.WithContext(ctx))
-	})
+	return withDataBudgets(mux)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	raw, err := encodeBudgetedJSON(v)
+	if err != nil {
+		w.Header().Del("ETag")
+		var api *apiError
+		if errors.As(err, &api) {
+			status = api.status
+			raw, _ = json.Marshal(c.Error{Code: api.code, Message: api.message})
+		} else {
+			status = http.StatusInternalServerError
+			raw, _ = json.Marshal(c.Error{Code: "response_encoding", Message: "无法安全生成响应，请核对状态后重试"})
+		}
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(raw)
 }
 func writeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		writeJSON(w, http.StatusGatewayTimeout, c.Error{Code: "request_timeout", Message: "请求超时，请缩小查询范围或核对写入状态后重试"})
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		writeJSON(w, http.StatusRequestTimeout, c.Error{Code: "request_canceled", Message: "请求已取消，请核对状态后重试"})
+		return
+	}
 	var e *apiError
 	if errors.As(err, &e) {
 		writeJSON(w, e.status, c.Error{Code: e.code, Message: e.message})

@@ -110,11 +110,6 @@ func (s *Store) loginHTTP(w http.ResponseWriter, r *http.Request) error {
 	if err := decode(r, &input); err != nil {
 		return err
 	}
-	key := loginKey(r, input)
-	if err := s.loginBudget(key); err != nil {
-		w.Header().Set("Retry-After", "900")
-		return err
-	}
 	select {
 	case s.loginSlots <- struct{}{}:
 		defer func() { <-s.loginSlots }()
@@ -122,12 +117,28 @@ func (s *Store) loginHTTP(w http.ResponseWriter, r *http.Request) error {
 		w.Header().Set("Retry-After", "1")
 		return problem(429, "login_busy", "登录请求较多，请稍后重试")
 	}
-	session, token, err := s.login(r.Context(), input)
+	reservation, err := s.loginBudget(r.Context(), r, input)
 	if err != nil {
+		retry := "5"
+		var access *platform.AccessError
+		if errors.As(err, &access) && access.Status == http.StatusTooManyRequests {
+			retry = "900"
+		}
+		w.Header().Set("Retry-After", retry)
 		return err
 	}
-	s.resetLoginBudget(key)
+	session, token, err := s.login(r.Context(), input)
+	if err != nil {
+		if !loginFailure(err) {
+			_ = s.releaseLoginBudget(r.Context(), reservation)
+		}
+		return err
+	}
+	if err := s.releaseLoginBudget(r.Context(), reservation); err != nil {
+		return err
+	}
 	s.setCookie(w, token)
+	platform.AuditIdentity(r, session.User)
 	writeJSON(w, 200, session)
 	return nil
 }

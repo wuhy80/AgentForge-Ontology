@@ -167,7 +167,7 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 		}
 		platform.WriteJSON(w, 200, result)
 	}))
-	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, DataURL: dataServer.URL, ServiceToken: serviceToken}))
+	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, DataURL: dataServer.URL, ServiceToken: serviceToken}))
 	login := func(tenantID, username string) (*executionHTTP, c.Session) {
 		h := &executionHTTP{t: t}
 		var session c.Session

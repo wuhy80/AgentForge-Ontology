@@ -317,6 +317,10 @@ func mappedRawValue(property c.Property, value any) (json.RawMessage, error) {
 
 func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled mappedCompiledQuery, schemaID string) (c.QueryResult, json.RawMessage, error) {
 	result := c.QueryResult{Fields: compiled.Projection, Data: []c.Instance{}}
+	budget, err := newQueryBudget(safeQueryProperties(compiled.Projection))
+	if err != nil {
+		return result, nil, err
+	}
 	primary := tables[0]
 	rows, err := primary.db.QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
@@ -333,6 +337,10 @@ func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled m
 			dest[i] = &values[i]
 		}
 		if err = rows.Scan(dest...); err != nil {
+			_ = rows.Close()
+			return result, nil, err
+		}
+		if err = budget.checkDatabaseRow(values); err != nil {
 			_ = rows.Close()
 			return result, nil, err
 		}
@@ -357,6 +365,10 @@ func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled m
 			if _, selected := item.Values[property.ID]; selected {
 				item.Values[property.ID] = raw
 			}
+		}
+		if err = budget.add(item); err != nil {
+			_ = rows.Close()
+			return result, nil, err
 		}
 		result.Data = append(result.Data, item)
 	}
@@ -421,6 +433,10 @@ func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled m
 				_ = rows.Close()
 				return result, nil, err
 			}
+			if err = budget.checkDatabaseRow(values); err != nil {
+				_ = rows.Close()
+				return result, nil, err
+			}
 			id, err := mappedDatabaseID(table, values[0])
 			if err != nil {
 				_ = rows.Close()
@@ -438,6 +454,10 @@ func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled m
 			for i, property := range properties {
 				raw, err := mappedRawValue(property, values[i+1])
 				if err != nil {
+					_ = rows.Close()
+					return result, nil, err
+				}
+				if err = budget.add(raw); err != nil {
 					_ = rows.Close()
 					return result, nil, err
 				}

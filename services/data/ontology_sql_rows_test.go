@@ -32,6 +32,14 @@ func rowSQLDefinitions() []c.Definition {
 func rowSQLTestHandler(t *testing.T, definitions []c.Definition, deny string) http.Handler {
 	t.Helper()
 	metadata := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveBusinessDirectoryFixture(t, w, r, definitions, func(d c.Definition) c.Decision {
+			if d.ID == deny {
+				return c.Decision{}
+			}
+			return c.Decision{Allow: true, State: "static", ReadFields: []string{"*"}}
+		}) {
+			return
+		}
 		if r.URL.Path == "/metadata/categories" {
 			writeJSON(w, 200, map[string]any{"data": []c.Organization{{ID: "category-a", TenantID: "tenant-a", Name: "生产管理"}}, "hasMore": false})
 			return

@@ -624,6 +624,10 @@ type rowQueryRunner interface {
 func readRowQuery(ctx context.Context, runner rowQueryRunner, plan *rowQueryPlan, compiled rowCompiledQuery) (c.QueryResult, rowCursorValues, error) {
 	result := c.QueryResult{RowMode: true, Data: []c.Instance{}, Rows: []c.QueryRow{}, Fields: compiled.Fields}
 	last := rowCursorValues{}
+	budget, err := newQueryBudget(safeQueryProperties(compiled.Fields))
+	if err != nil {
+		return result, last, err
+	}
 	rows, err := runner.QueryContext(ctx, compiled.SQL, compiled.Args...)
 	if err != nil {
 		return result, last, problem(422, "source_query_failed", "无法执行关联行查询，请核对源结构及数据库读取权限")
@@ -639,6 +643,9 @@ func readRowQuery(ctx context.Context, runner rowQueryRunner, plan *rowQueryPlan
 			dest[i] = &values[i]
 		}
 		if err = rows.Scan(dest...); err != nil {
+			return result, last, err
+		}
+		if err = budget.checkDatabaseRow(values); err != nil {
 			return result, last, err
 		}
 		item := c.QueryRow{Values: map[string]json.RawMessage{}, Entities: []c.QueryRowEntity{}}
@@ -675,6 +682,9 @@ func readRowQuery(ctx context.Context, runner rowQueryRunner, plan *rowQueryPlan
 					break
 				}
 			}
+		}
+		if err = budget.add(item); err != nil {
+			return result, last, err
 		}
 		result.Rows = append(result.Rows, item)
 	}

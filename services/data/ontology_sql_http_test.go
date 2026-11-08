@@ -21,9 +21,12 @@ func ontologySQLTestHandler(t *testing.T, definition c.Definition, queryDecision
 	hidden := definition
 	hidden.ID, hidden.Name = "ffffffff-ffff-ffff-ffff-ffffffffffff", "不可见模型"
 	metadata := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveBusinessDirectoryFixture(t, w, r, []c.Definition{definition}, func(c.Definition) c.Decision { return queryDecision }) {
+			return
+		}
 		switch r.URL.Path {
 		case "/metadata/categories", "/metadata/definitions":
-			if r.Header.Get("Authorization") != "Bearer caller-token" || r.Header.Get("Cookie") != "ontology_session=caller-session" || r.Header.Get("X-Tenant-ID") != "" {
+			if r.Header.Get("Authorization") != "Bearer caller-token" || r.Header.Get("Cookie") != "ontology_session="+strings.Repeat("s", 64) || r.Header.Get("X-Tenant-ID") != "" {
 				t.Error("directory did not retain caller credentials exclusively")
 			}
 			if r.URL.Path == "/metadata/categories" {
@@ -88,7 +91,9 @@ func callOntologySQL(t *testing.T, app http.Handler, method, path string, body a
 	}
 	r := httptest.NewRequest(method, path, strings.NewReader(string(encoded)))
 	r.Header.Set("Authorization", "Bearer caller-token")
-	r.Header.Set("Cookie", "ontology_session=caller-session")
+	r.Header.Set("Cookie", "ontology_session="+strings.Repeat("s", 64))
+	r.Header.Set("X-CSRF-Token", strings.Repeat("c", 64))
+	r.Header.Set("Origin", "http://example.com")
 	r = r.WithContext(platform.WithPrincipal(r.Context(), c.Principal{TenantID: "tenant-a", Subject: "reader"}))
 	w := httptest.NewRecorder()
 	app.ServeHTTP(w, r)

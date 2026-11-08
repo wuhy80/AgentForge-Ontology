@@ -47,4 +47,18 @@ var externalMigrations = []storage.Migration{
 	{ID: "018_identity_oauth_registration_guard", SQL: `CREATE TABLE af_identity_oauth_registration_guard (id TINYINT NOT NULL PRIMARY KEY) ENGINE=InnoDB`},
 	{ID: "019_identity_oauth_registration_guard_seed", SQL: `INSERT INTO af_identity_oauth_registration_guard (id) VALUES (1)`},
 	{ID: "020_identity_oauth_codes_expiry", SQL: `ALTER TABLE af_identity_oauth_codes ADD INDEX ix_identity_oauth_codes_expiry (expires_at)`},
+	{ID: "021_identity_login_budget_key", SQL: `CREATE TABLE af_identity_login_budget_key (
+ id TINYINT NOT NULL PRIMARY KEY,
+ secret VARBINARY(32) NOT NULL,
+ CONSTRAINT ck_identity_login_key_id CHECK (id=1)
+) ENGINE=InnoDB`},
+	{ID: "022_identity_login_budget_key_seed", SQL: `INSERT INTO af_identity_login_budget_key (id,secret) VALUES (1,RANDOM_BYTES(32))`},
+	{ID: "023_identity_login_budgets", SQL: `CREATE TABLE af_identity_login_budgets (
+ bucket_id INT UNSIGNED NOT NULL PRIMARY KEY,
+ key_hash BINARY(32) NOT NULL,
+ generation BINARY(16) NOT NULL DEFAULT '',
+ attempt_count SMALLINT UNSIGNED NOT NULL,
+ expires_at BIGINT NOT NULL,
+ CONSTRAINT ck_identity_login_budget_bucket CHECK (bucket_id<131072)
+) ENGINE=InnoDB`},
 }
