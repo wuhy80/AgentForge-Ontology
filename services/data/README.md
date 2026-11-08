@@ -33,7 +33,8 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `GET /data/source-versions` | 管理员或模型作者读取服务端版本系列和supported/pending状态 |
 | `POST /data/sources/test`、`POST /data/sources/{id}/test` | 管理员测试连接与兼容状态；已有源可提交完整表单及If-Match并复用省略密码，空体/null沿用已保存配置测试 |
 | `GET /data/sources/{id}/tables`、`GET /data/sources/{id}/tables/{table}` | 只读表、列及索引目录，可选namespace；表列表批量返回可选字段/主键列计数，列详情可返回默认值和注释，展示描述不改变结构签名 |
-| `POST /data/sources/{id}/query` | 当前租户管理员携带来源配置If-Match及`contracts.SourceQuery`，查询专属来源；有界单表SELECT，返回`SourceQueryResult`。实际语法、限额及共享来源拒绝规则见[数据源配置](../../docs/数据源.md#列表与数据库管理2026-11-07) |
+| `POST /data/sources/{id}/query` | 当前租户管理员携带来源配置If-Match及`SourceQuery{sql,limit?}`查询专属来源；有界单表SELECT或固定排行模板，返回`SourceQueryResult`。实际语法、限额及共享来源拒绝规则见[数据源配置](../../docs/数据源.md#sql只读控制台2026-11-08增量已确认) |
+| `POST /data/sources/{id}/sql/analyze`、`POST /data/sources/{id}/sql/format` | 同一管理员/专属来源/If-Match边界的静态工具，输入SourceQuery，成功返回sql/valid/dialect/message；不连接来源数据库，不执行查询 |
 | `GET /data/schemas/{schemaId}/storage-mapping` | 按对象 `definition.edit` 授权读取当前生效的主表及逐属性物理映射，含实际目录的列类型、存在状态；不返回凭据或业务行 |
 | `POST /data/schemas/{schemaId}/instances` | 显式创建；必须提交幂等键 |
 | `GET /data/schemas/{schemaId}/instances/{entityId}` | 按当前行列授权读取 |
@@ -60,6 +61,8 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 当前一个 Schema 最多映射8张来源表。主表提供稳定标识，关联来源按同类型唯一键匹配，每个主对象每来源最多一行，没有关联行的属性返回 `null`。跨来源属性可以投影；筛选、排序及权限行条件仅支持主表属性，涉及其他来源的条件明确拒绝。查询逐源读取，不承诺跨数据库的一致快照或事务。显式来源的实例创建、修改和删除当前拒绝，避免把默认存储的幂等/outbox事务保证套用到多个数据库。
 
 2026-11-08已补齐数据库管理工作台后端：管理员`GET /data/sources/{id}/overview`真实观测、批量表字段/主键列计数及列默认值/注释。指标数值使用字符串并携带可用性、统计范围和口径，权限不足时该项不可用而不伪造0；MySQL的Questions差分为实例QPS，PostgreSQL本轮不提供QPS。目录展示描述不改变结构签名；概览交付前复核会话、管理员及来源配置ETag。详细字段及口径唯一见[数据库管理工作台](../../docs/数据源.md#数据库管理工作台2026-11-08已确认)，前后端分项验证见项目总览。表预览继续使用既有专属来源有界单表查询，共享来源不可通过管理页读取物理业务行。
+
+同日已按用户确认实现只读SQL控制台增量：`SourceQuery.limit`、`/sql/analyze`和`/sql/format`工具及固定目录排行模板。请求limit省略或0按100处理，其他值及SQL LIMIT须1～100，执行取两者较小值。工具沿当前管理员、同租户、启用专属来源及配置If-Match边界，仅做词法/封闭语法校验和格式化，不连接来源库或执行SQL，不承诺表存在及数据库读取权限；共享来源拒绝。实际DTO、模板与统计口径唯一见[SQL只读控制台](../../docs/数据源.md#sql只读控制台2026-11-08增量已确认)。CREATE/INSERT/UPDATE及DDL未进入本轮。
 
 能力响应中 `operations` 表示默认存储；`mappedOperations` 为 `read/query`，`sourceDrivers` 为 `mysql/postgresql`，`mappedUpdates` 为 `nullable-fields-and-indexes`。`crossSourceProjection` 为真，`crossSourceConditions` 与 `crossSourceTransactions` 为假；客户端应结合 Schema 是否具有 `storageBinding` 决定可用操作。
 
@@ -96,6 +99,8 @@ QuerySpec 目前每页为 1 至 100 条、最多一个业务排序字段并以�
 托管关系在显式发布中建表、核验索引/外键并经持久 gate 激活，普通启动及查询不创建表。业务事务串行检查端点与基数，关系/outbox 原子提交；对象有关联时默认限制删除。外部绑定通过实际目录验证，保留来源系统的维护边界。关系授权为独立 `link.query/create/delete`，已有租户须显式授权；两端实例授权继续检查，不通过读取一页后隐藏行实现。这里不承诺跨服务原子撤权或外部源跨表快照。
 
 ## 验证
+
+2026-11-08只读SQL控制台增量以`scripts/check.ps1 -SourceIntegration`完整通过八个Go模块测试及vet，另通过可信Go启动器vet。真实MySQL/PostgreSQL验证普通查询请求limit生效、四种固定排行SQL执行和系统/`af_`表过滤；PostgreSQL另以临时角色核对SELECT与schema USAGE双重权限及未知reltuples返回NULL。HTTP模块覆盖静态工具离线不连接来源、当前管理员/租户/If-Match/启停/共享来源边界，交付前撤权、注销及ETag变化后拒绝，真实query的请求上限与会话复核。用例仅创建和清理随机测试表、schema及NOLOGIN角色，没有平台迁移，不作为新生产权限、性能或三库共同认证。
 
 2026-11-08数据库管理增量以`scripts/check.ps1 -SourceIntegration`完整通过八个Go模块测试及vet，另通过可信Go启动器vet；最终目录计数改动另通过Data真实MySQL/PostgreSQL模块测试及vet。真实数据库验证概览、目录、默认值SQL NULL/原文、中文注释、展示描述变化后结构签名保持及批量字段/主键列计数。HTTP模块回归使用既有fixture注入会话检查器，覆盖跨租户和交付前撤销管理员、注销、配置ETag更新的拒绝；该项不冒充新增完整真实登录链或生产撤权验收。没有新增平台迁移；前端交互、本地Data就绪及缓存账号登录401导致的真实浏览器验收未完成均见项目总览。
 

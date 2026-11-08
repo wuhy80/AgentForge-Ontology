@@ -2,7 +2,7 @@ import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation, ScriptRuntime, SourceToolResult,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
-  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SourceQueryResult, SchemaStorageMapping, SourceVersionOption, SourceOverview,
+  DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SourceQueryResult, SourceSQLToolResult, SchemaStorageMapping, SourceVersionOption, SourceOverview,
   SchemaLink, LinkInstance,
   QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
   QueryPathsRequest, QueryPathsResult, QueryFieldInsertionRequest, QueryFieldInsertionResult,
@@ -230,8 +230,14 @@ export class ApiClient {
   getSourceOverview(id: string, signal?: AbortSignal): Promise<SourceOverview> {
     return this.request(`/api/data/sources/${encodeURIComponent(id)}/overview`, { signal })
   }
-  queryDataSource(id: string, sql: string, etag: string, signal?: AbortSignal): Promise<SourceQueryResult> {
-    return this.request(`/api/data/sources/${encodeURIComponent(id)}/query`, { method: 'POST', body: { sql }, etag, signal })
+  queryDataSource(id: string, sql: string, etag: string, signal?: AbortSignal, limit?: number): Promise<SourceQueryResult> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}/query`, { method: 'POST', body: { sql, ...(limit !== undefined ? { limit } : {}) }, etag, signal })
+  }
+  analyzeSourceSQL(id: string, sql: string, etag: string, signal?: AbortSignal, limit?: number): Promise<SourceSQLToolResult> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}/sql/analyze`, { method: 'POST', body: { sql, ...(limit !== undefined ? { limit } : {}) }, etag, signal })
+  }
+  formatSourceSQL(id: string, sql: string, etag: string, signal?: AbortSignal, limit?: number): Promise<SourceSQLToolResult> {
+    return this.request(`/api/data/sources/${encodeURIComponent(id)}/sql/format`, { method: 'POST', body: { sql, ...(limit !== undefined ? { limit } : {}) }, etag, signal })
   }
   updateDataSource(id: string, input: DataSourceInput, etag: string): Promise<DataSource> {
     return this.request(`/api/data/sources/${encodeURIComponent(id)}`, { method: 'PUT', body: input, etag })

@@ -16,7 +16,7 @@ import (
 
 // Parse a closed SELECT grammar and emit new SQL. Never pass user SQL through
 // to the driver: SELECT alone permits functions, file IO and locking clauses.
-var sourceSQLToken = regexp.MustCompile("^(?:[\\s]+|`(?:``|[^`])+`|\"(?:\"\"|[^\"])+\"|'(?:''|[^'])*'|[\\p{L}_][\\p{L}\\p{N}_$]*|-?[0-9]+(?:\\.[0-9]+)?|<=|>=|<>|!=|[=<>*.,;()])")
+var sourceSQLToken = regexp.MustCompile("^(?:[\\s]+|`(?:``|[^`])+`|\"(?:\"\"|[^\"])+\"|'(?:''|[^'])*'|[\\p{L}_][\\p{L}\\p{N}_$]*|-?[0-9]+(?:\\.[0-9]+)?|<=|>=|<>|!=|[=<>*+.,;()])")
 var sourceSQLName = regexp.MustCompile(`^[\p{L}_][\p{L}\p{N}_$]*$`)
 var sourceSQLNumber = regexp.MustCompile(`^-?[0-9]+(?:\.[0-9]+)?$`)
 
@@ -29,6 +29,7 @@ type sourceSelect struct {
 	args             []any
 	where, order     string
 	limit            int
+	catalogTemplate  bool
 }
 
 func sourceSQLUnsupported() error {
@@ -147,19 +148,34 @@ func (p *sourceSelect) predicate(depth int) (string, error) {
 
 func parseSourceSelect(source c.DataSource, text string) (*sourceSelect, string, error) {
 	p := &sourceSelect{source: source, limit: 100}
+	var err error
+	p.tokens, err = lexSourceSQL(text)
+	if err != nil {
+		return nil, "", err
+	}
+	return parseSourceSelectTokens(p)
+}
+
+func lexSourceSQL(text string) ([]string, error) {
+	tokens := []string{}
 	if len(text) > 16<<10 || !utf8.ValidString(text) {
-		return nil, "", sourceSQLUnsupported()
+		return nil, sourceSQLUnsupported()
 	}
 	for rest := text; rest != ""; {
 		token := sourceSQLToken.FindString(rest)
-		if token == "" || len(p.tokens) >= 2048 {
-			return nil, "", sourceSQLUnsupported()
+		if token == "" || len(tokens) >= 2048 {
+			return nil, sourceSQLUnsupported()
 		}
 		rest = rest[len(token):]
 		if strings.TrimSpace(token) != "" {
-			p.tokens = append(p.tokens, token)
+			tokens = append(tokens, token)
 		}
 	}
+	return tokens, nil
+}
+
+func parseSourceSelectTokens(p *sourceSelect) (*sourceSelect, string, error) {
+	source := p.source
 	if !p.take("SELECT") {
 		return nil, "", sourceSQLUnsupported()
 	}
@@ -260,29 +276,35 @@ func parseSourceSelect(source c.DataSource, text string) (*sourceSelect, string,
 }
 
 func querySource(ctx context.Context, db *sql.DB, source c.DataSource, text string) (c.SourceQueryResult, error) {
+	return querySourceWithLimit(ctx, db, source, text, 0)
+}
+
+func querySourceWithLimit(ctx context.Context, db *sql.DB, source c.DataSource, text string, requestLimit int) (c.SourceQueryResult, error) {
 	started := time.Now()
 	out := c.SourceQueryResult{Columns: []string{}, Rows: [][]*string{}}
 	if source.TenantIsolation != "dedicated" {
 		return out, problem(422, "source_query_isolation", "共享数据库请通过模型数据探索查询；直接 SQL 仅开放给当前租户专属数据源")
 	}
-	p, statement, err := parseSourceSelect(source, text)
+	p, statement, err := parseSourceQuery(source, text, requestLimit)
 	if err != nil {
 		return out, err
 	}
-	table, err := readSourceTable(ctx, db, source, p.namespace, p.table)
-	if err != nil {
-		return out, err
-	}
-	for _, column := range p.columns {
-		found := false
-		for _, actual := range table.Columns {
-			if column == actual.Name {
-				found = true
-				break
-			}
+	if !p.catalogTemplate {
+		table, err := readSourceTable(ctx, db, source, p.namespace, p.table)
+		if err != nil {
+			return out, err
 		}
-		if !found {
-			return out, problem(422, "source_query_column", "查询字段不存在，请刷新表结构后核对")
+		for _, column := range p.columns {
+			found := false
+			for _, actual := range table.Columns {
+				if column == actual.Name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return out, problem(422, "source_query_column", "查询字段不存在，请刷新表结构后核对")
+			}
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -362,20 +384,14 @@ func (h *handler) sourceQueryHTTP(w http.ResponseWriter, r *http.Request) error 
 	if err = decode(w, r, &input); err != nil {
 		return err
 	}
-	source, _, err := h.loadSource(r.Context(), p.TenantID, r.PathValue("id"))
+	source, err := h.sourceSQLAccess(r, p)
 	if err != nil {
 		return err
 	}
-	if r.Header.Get("If-Match") == "" {
-		return problem(428, "precondition_required", "查询必须携带数据源 If-Match")
+	if _, _, err = parseSourceQuery(source, input.SQL, input.Limit); err != nil {
+		return err
 	}
-	if r.Header.Get("If-Match") != `"`+source.ETag+`"` {
-		return problem(412, "precondition_failed", "数据源已改变，请返回列表刷新后重试")
-	}
-	if source.TenantIsolation != "dedicated" {
-		return problem(422, "source_query_isolation", "共享数据库请通过模型数据探索查询；直接 SQL 仅开放给当前租户专属数据源")
-	}
-	if _, _, err = parseSourceSelect(source, input.SQL); err != nil {
+	if err = h.sourceOverviewSession(r, p); err != nil {
 		return err
 	}
 	db, current, err := h.openSource(r.Context(), p.TenantID, source.ID)
@@ -386,8 +402,11 @@ func (h *handler) sourceQueryHTTP(w http.ResponseWriter, r *http.Request) error 
 	if current.ETag != source.ETag {
 		return problem(412, "precondition_failed", "数据源已改变，请返回列表刷新后重试")
 	}
-	result, err := querySource(r.Context(), db, current, input.SQL)
+	result, err := querySourceWithLimit(r.Context(), db, current, input.SQL, input.Limit)
 	if err != nil {
+		return err
+	}
+	if err = h.sourceSQLDelivery(r, p, source); err != nil {
 		return err
 	}
 	writeJSON(w, 200, result)

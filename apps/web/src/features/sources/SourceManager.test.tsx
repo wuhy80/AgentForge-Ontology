@@ -5,6 +5,10 @@ import type { DataSource, SourceQueryResult, SourceTable, SourceTableInfo } from
 import { SourceManager, sourcePreviewSQL } from './SourceManager'
 import { SourcesPage } from './SourcesPage'
 
+vi.mock('./SourceSQLEditor', () => ({
+  SourceSQLEditor: ({ value, onChange, disabled }: { value: string; onChange: (value: string) => void; disabled: boolean }) => <textarea aria-label="SQL 语句" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />,
+}))
+
 const source: DataSource = { id: 'source', tenantId: 'tenant', name: '业务库', driver: 'mysql', host: 'localhost', port: 3306, database: 'business', username: 'reader', tlsMode: 'disable', tenantIsolation: 'dedicated', enabled: true, passwordSet: true, etag: 'source-etag' }
 const table: SourceTable = { namespace: 'business', name: 'orders', signature: 'signature', columns: [
   { name: 'id', databaseType: 'bigint', dataType: 'int64', nullable: false, primaryKey: true, generated: false, position: 1, comment: '订单主键' },
@@ -32,6 +36,10 @@ function mount(mocks = fixture(), saved = source) {
 }
 async function ready() { await screen.findByRole('cell', { name: '订单金额' }) }
 function selectTab(name: string) { fireEvent.click(screen.getByRole('tab', { name })) }
+function fillCurrentQuery() {
+  fireEvent.click(screen.getByRole('button', { name: '填入查询' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '当前表查询' }))
+}
 
 describe('数据源表格与数据库管理', () => {
   it('预览 SQL 按数据库方言引用命名空间与表名，标识中的引号不会逃逸', () => {
@@ -131,7 +139,7 @@ describe('数据源表格与数据库管理', () => {
     expect(within(fieldTable).queryByRole('cell', { name: 'amount' })).toBeNull()
   })
 
-  it('键盘方向键和 Home/End 切换 Tabs，进入预览和控制台不自动读取业务数据', async () => {
+  it('键盘方向键和 Home/End 切换 Tabs，仅进入预览时自动读取业务数据', async () => {
     const { mocks } = mount()
     await ready()
     const tabs = within(screen.getByRole('tablist', { name: '数据库管理视图' }))
@@ -145,31 +153,32 @@ describe('数据源表格与数据库管理', () => {
     expect(sql.getAttribute('aria-selected')).toBe('true')
     fireEvent.keyDown(sql, { key: 'Home' })
     expect(fields.getAttribute('aria-selected')).toBe('true')
-    expect(mocks.queryDataSource).not.toHaveBeenCalled()
+    expect(mocks.queryDataSource).toHaveBeenCalledTimes(1)
   })
 
-  it('预览与 SQL 显式执行且结果互相隔离，编辑 SQL 清除旧结果并保留精确值', async () => {
+  it('每次进入预览自动刷新，SQL独立执行，编辑SQL清旧结果并保留精确值', async () => {
     const { mocks } = mount()
+    mocks.queryDataSource.mockResolvedValueOnce(result).mockResolvedValueOnce(result).mockResolvedValueOnce({ ...result, rows: [['最新预览']] })
     await ready()
     selectTab('表数据预览')
-    expect(mocks.queryDataSource).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: '预览表数据' }))
+    expect(screen.queryByRole('button', { name: '预览表数据' })).toBeNull()
     await screen.findByText('9007199254740993.0001')
-    expect(mocks.queryDataSource).toHaveBeenLastCalledWith('source', 'SELECT * FROM `business`.`orders` LIMIT 100;', 'source-etag', expect.any(AbortSignal))
+    expect(mocks.queryDataSource).toHaveBeenLastCalledWith('source', 'SELECT * FROM `business`.`orders` LIMIT 100;', 'source-etag', expect.any(AbortSignal), 100)
     expect(screen.getByText('NULL')).toBeTruthy()
     expect(screen.getByText('空字符串')).toBeTruthy()
     selectTab('SQL控制台')
     expect(screen.queryByText('9007199254740993.0001')).toBeNull()
-    expect((screen.getByLabelText('SQL 语句') as HTMLTextAreaElement).value).toBe('SELECT * FROM `business`.`orders` LIMIT 100;')
+    expect((screen.getByLabelText('SQL 语句') as HTMLTextAreaElement).value).toBe('')
     fireEvent.change(screen.getByLabelText('SQL 语句'), { target: { value: 'SELECT amount FROM orders LIMIT 2;' } })
     fireEvent.click(screen.getByRole('button', { name: '执行 SQL' }))
     await screen.findByText('9007199254740993.0001')
-    expect(mocks.queryDataSource).toHaveBeenLastCalledWith('source', 'SELECT amount FROM orders LIMIT 2;', 'source-etag', expect.any(AbortSignal))
+    expect(mocks.queryDataSource).toHaveBeenLastCalledWith('source', 'SELECT amount FROM orders LIMIT 2;', 'source-etag', expect.any(AbortSignal), 100)
     fireEvent.change(screen.getByLabelText('SQL 语句'), { target: { value: 'SELECT amount FROM orders LIMIT 3;' } })
     expect(screen.queryByRole('region', { name: 'SQL 查询结果' })).toBeNull()
     selectTab('表数据预览')
     expect(screen.queryByText('9007199254740993.0001')).toBeNull()
-    expect(mocks.queryDataSource).toHaveBeenCalledTimes(2)
+    await screen.findByText('最新预览')
+    expect(mocks.queryDataSource).toHaveBeenCalledTimes(3)
   })
 
   it('切换 Tab 取消查询并拒绝不遵守取消信号的迟到结果', async () => {
@@ -179,14 +188,49 @@ describe('数据源表格与数据库管理', () => {
     mount(mocks)
     await ready()
     selectTab('SQL控制台')
+    fillCurrentQuery()
     fireEvent.click(screen.getByRole('button', { name: '执行 SQL' }))
     const signal = mocks.queryDataSource.mock.calls[0][3] as AbortSignal
     selectTab('表数据预览')
     expect(signal.aborted).toBe(true)
-    await act(async () => complete(result))
-    expect(screen.queryByText('9007199254740993.0001')).toBeNull()
+    await screen.findByText('9007199254740993.0001')
+    await act(async () => complete({ ...result, rows: [['迟到SQL结果']] }))
+    expect(screen.queryByText('迟到SQL结果')).toBeNull()
     selectTab('SQL控制台')
     expect(screen.queryByRole('region', { name: 'SQL 查询结果' })).toBeNull()
+  })
+
+  it('重新进入预览取消前一次加载，迟到预览不能覆盖新结果', async () => {
+    const mocks = fixture()
+    let complete!: (value: SourceQueryResult) => void
+    mocks.queryDataSource.mockImplementationOnce(() => new Promise((resolve) => { complete = resolve }))
+    mocks.queryDataSource.mockResolvedValueOnce({ ...result, rows: [['最新预览']] })
+    mount(mocks)
+    await ready()
+    selectTab('表数据预览')
+    const signal = mocks.queryDataSource.mock.calls[0][3] as AbortSignal
+    selectTab('字段详情')
+    expect(signal.aborted).toBe(true)
+    selectTab('表数据预览')
+    await screen.findByText('最新预览')
+    await act(async () => complete({ ...result, rows: [['过期预览']] }))
+    expect(screen.queryByText('过期预览')).toBeNull()
+    expect(screen.getByText('最新预览')).toBeTruthy()
+    expect(mocks.queryDataSource).toHaveBeenCalledTimes(2)
+  })
+
+  it('预览失败后重新进入才重试，页面不循环查询', async () => {
+    const { mocks } = mount()
+    mocks.queryDataSource.mockRejectedValueOnce(new ApiError(422, 'source_query_failed', '数据库读取暂时失败'))
+    await ready()
+    selectTab('表数据预览')
+    await screen.findByRole('alert')
+    expect(mocks.queryDataSource).toHaveBeenCalledTimes(1)
+    selectTab('字段详情')
+    selectTab('表数据预览')
+    await screen.findByText('9007199254740993.0001')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(mocks.queryDataSource).toHaveBeenCalledTimes(2)
   })
 
   it('刷新结构重新读取配置、概览、当前目录和所选表，不自动查业务数据', async () => {
@@ -210,7 +254,8 @@ describe('数据源表格与数据库管理', () => {
     mount(mocks, shared)
     await ready()
     selectTab('表数据预览')
-    expect((screen.getByRole('button', { name: '预览表数据' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: '预览表数据' })).toBeNull()
+    expect(screen.getByText(/共享数据库请通过/)).toBeTruthy()
     selectTab('SQL控制台')
     expect((screen.getByRole('button', { name: '执行 SQL' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByLabelText('SQL 语句') as HTMLTextAreaElement).disabled).toBe(true)
@@ -221,6 +266,7 @@ describe('数据源表格与数据库管理', () => {
     const { mocks, onDenied } = mount()
     await ready()
     selectTab('SQL控制台')
+    fillCurrentQuery()
     mocks.queryDataSource.mockRejectedValueOnce(new ApiError(status, 'forbidden', '管理权限已撤销'))
     fireEvent.click(screen.getByRole('button', { name: '执行 SQL' }))
     await waitFor(() => expect(onDenied).toHaveBeenCalledOnce())
@@ -253,6 +299,7 @@ describe('数据源表格与数据库管理', () => {
     const { mocks, onDenied } = mount()
     await ready()
     selectTab('SQL控制台')
+    fillCurrentQuery()
     mocks.queryDataSource.mockRejectedValueOnce(new ApiError(412, 'precondition_failed', '数据源配置已更新'))
     fireEvent.click(screen.getByRole('button', { name: '执行 SQL' }))
     expect((await screen.findByRole('alert')).textContent).toContain('刷新结构')
@@ -265,10 +312,11 @@ describe('数据源表格与数据库管理', () => {
     await waitFor(() => expect(mocks.getDataSource).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(mocks.inspectSourceTable).toHaveBeenCalledTimes(2))
     selectTab('SQL控制台')
+    fillCurrentQuery()
     await waitFor(() => expect((screen.getByRole('button', { name: '执行 SQL' }) as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: '执行 SQL' }))
     await screen.findByText('9007199254740993.0001')
-    expect(mocks.queryDataSource).toHaveBeenLastCalledWith('source', expect.any(String), 'source-updated', expect.any(AbortSignal))
+    expect(mocks.queryDataSource).toHaveBeenLastCalledWith('source', expect.any(String), 'source-updated', expect.any(AbortSignal), 100)
   })
 
   it('隐藏页面取消待定查询并清空旧内容，重新显示时读取服务器最新结构', async () => {
@@ -278,6 +326,7 @@ describe('数据源表格与数据库管理', () => {
     const rendered = mount(mocks)
     await ready()
     selectTab('SQL控制台')
+    fillCurrentQuery()
     fireEvent.click(screen.getByRole('button', { name: '执行 SQL' }))
     const signal = mocks.queryDataSource.mock.calls[0][3] as AbortSignal
     rendered.rerender(<SourceManager api={rendered.api} source={source} active={false} onBack={rendered.onBack} onDenied={rendered.onDenied} />)

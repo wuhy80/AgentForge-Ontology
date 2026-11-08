@@ -293,6 +293,7 @@ func TestSourceHTTPConnectionAndCatalogRealDrivers(t *testing.T) {
 	tenant := c.NewID()
 	t.Cleanup(func() { engine.DB().Exec("DELETE FROM af_data_sources WHERE tenant_id=?", tenant) })
 	requestTenant, sessionMode, sessionCalls := tenant, "", 0
+	requestSourceETag := ""
 	checker := sourceSessionCheckerFunc(func(_ context.Context, _ c.SessionCheck) (c.Session, error) {
 		sessionCalls++
 		user := c.User{ID: "source-http-admin", TenantID: requestTenant, Administrator: true, Enabled: true}
@@ -309,7 +310,13 @@ func TestSourceHTTPConnectionAndCatalogRealDrivers(t *testing.T) {
 		t.Helper()
 		body, _ := json.Marshal(input)
 		r := httptest.NewRequest(method, path, bytes.NewReader(body))
+		if requestSourceETag != "" {
+			r.Header.Set("If-Match", `"`+requestSourceETag+`"`)
+		}
 		r.AddCookie(&http.Cookie{Name: platform.SessionCookieName, Value: strings.Repeat("s", 48)})
+		r.Host = "workbench.test"
+		r.Header.Set("Origin", "http://workbench.test")
+		r.Header.Set("X-CSRF-Token", strings.Repeat("c", 48))
 		p := c.Principal{TenantID: requestTenant, Subject: "source-http-admin"}
 		ctx := platform.WithSessionUser(platform.WithPrincipal(ctx, p), c.User{ID: p.Subject, TenantID: p.TenantID, Administrator: true, Enabled: true})
 		w := httptest.NewRecorder()
@@ -417,6 +424,46 @@ func TestSourceHTTPConnectionAndCatalogRealDrivers(t *testing.T) {
 			if backend.driver == "postgresql" && (overview.Metrics.QPS.Available || overview.Metrics.QPS.Value != "" || overview.Metrics.QPS.Reason == "") {
 				t.Fatalf("PG fabricated QPS: %+v", overview.Metrics.QPS)
 			}
+			// Only this random test source changes mode; existing source configs
+			// and business rows remain untouched. Execute against our fixture table.
+			saved.TenantIsolation = "dedicated"
+			configBody, _ := json.Marshal(saved)
+			if _, err = engine.DB().ExecContext(ctx, "UPDATE af_data_sources SET config_json=?,tenant_isolation='dedicated' WHERE tenant_id=? AND id=?", string(configBody), tenant, saved.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = db.ExecContext(ctx, "INSERT INTO "+qualified+" VALUES(1,'first'),(2,'second'),(3,'third')"); err != nil {
+				t.Fatal(err)
+			}
+			requestSourceETag = saved.ETag
+			query := c.SourceQuery{SQL: "SELECT * FROM " + qualified + " ORDER BY id LIMIT 3", Limit: 1}
+			sessionCalls = 0
+			w = request("POST", "/data/sources/"+saved.ID+"/query", query)
+			var queryResult c.SourceQueryResult
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &queryResult) != nil || queryResult.Limit != 1 || len(queryResult.Rows) != 1 || !queryResult.HasMore || sessionCalls != 2 {
+				t.Fatalf("real HTTP query cap failed: %d %s", w.Code, w.Body)
+			}
+			for _, operation := range []string{"analyze", "format"} {
+				sessionCalls = 0
+				w = request("POST", "/data/sources/"+saved.ID+"/sql/"+operation, query)
+				var tool c.SourceSQLToolResult
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &tool) != nil || !tool.Valid || tool.Dialect != backend.driver {
+					t.Fatalf("real source SQL tool failed: %d %s", w.Code, w.Body)
+				}
+			}
+			for _, change := range []string{"revoke", "logout"} {
+				sessionMode = change
+				sessionCalls = 0
+				w = request("POST", "/data/sources/"+saved.ID+"/query", query)
+				want := 403
+				if change == "logout" {
+					want = 401
+				}
+				if w.Code != want || strings.Contains(w.Body.String(), `"rows"`) {
+					t.Fatalf("query delivered after %s: %d %s", change, w.Code, w.Body)
+				}
+			}
+			sessionMode = ""
+			requestSourceETag = ""
 			requestTenant = c.NewID()
 			sessionCalls = 0
 			if w = request("GET", "/data/sources/"+saved.ID+"/overview", nil); w.Code != 404 {

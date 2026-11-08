@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ArrowLeft, ChevronLeft, ChevronRight, Database, LoaderCircle, Play, RefreshCw, Search, Table2 } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Database, LoaderCircle, RefreshCw, Search, Table2, Terminal } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { DataSource, SourceDatabaseMetric, SourceIndex, SourceOverview, SourceQueryResult, SourceTable, SourceTableInfo } from '../../lib/types'
+import { buildSourceSQL } from '../../lib/source-sql'
+import { SourceSQLConsole } from './SourceSQLConsole'
 
 export function sourcePreviewSQL(driver: DataSource['driver'], table: SourceTableInfo): string {
-  const quote = (name: string) => driver === 'mysql' ? `\`${name.replaceAll('`', '``')}\`` : `"${name.replaceAll('"', '""')}"`
-  return `SELECT * FROM ${quote(table.namespace)}.${quote(table.name)} LIMIT 100;`
+  return buildSourceSQL(driver, 'current_table', table)
 }
 
 const views = [{ id: 'fields', label: '字段详情' }, { id: 'preview', label: '表数据预览' }, { id: 'sql', label: 'SQL控制台' }] as const
@@ -81,7 +82,7 @@ export function SourceManager({ api, source, active, onBack, onDenied }: { api: 
     const request = ++detailSequence.current, controller = new AbortController()
     detailRequest.current = controller; selectedRef.current = item
     setSelected(item); setTable(undefined); setFieldSearch(''); setInspecting(true); setError('')
-    setSQL(sourcePreviewSQL(saved.driver, item))
+    setSQL('')
     try {
       const value = await api.inspectSourceTable(saved.id, item.name, item.namespace, controller.signal)
       if (controller.signal.aborted || epoch !== generation.current || request !== detailSequence.current) return
@@ -141,15 +142,15 @@ export function SourceManager({ api, source, active, onBack, onDenied }: { api: 
     return abortAll
   }, [api, source.id, active])
 
-  async function execute(mode: 'preview' | 'sql') {
-    if (!current || !allowed || loading || inspecting || querying || (mode === 'preview' && !selected)) return
+  async function execute(mode: 'preview' | 'sql', limit = 100) {
+    if (!current || !allowed || loading || inspecting || (mode === 'sql' && querying) || (mode === 'preview' && !selected)) return
     const statement = mode === 'preview' && selected ? sourcePreviewSQL(current.driver, selected) : sql
     if (!statement.trim()) return
     cancelQueries()
     const epoch = generation.current, request = ++querySequence.current, controller = new AbortController()
     queryRequest.current = controller; setQuerying(true); setError('')
     try {
-      const value = await api.queryDataSource(current.id, statement, current.etag, controller.signal)
+      const value = await api.queryDataSource(current.id, statement, current.etag, controller.signal, limit)
       if (!controller.signal.aborted && epoch === generation.current && request === querySequence.current) {
         if (mode === 'preview') setPreview(value); else setResult(value)
       }
@@ -161,6 +162,9 @@ export function SourceManager({ api, source, active, onBack, onDenied }: { api: 
     cancelQueries(); setView(next)
     if (!stale) setError('')
   }
+  useEffect(() => {
+    if (active && view === 'preview' && allowed && table && !loading && !inspecting) void execute('preview')
+  }, [active, view, allowed, table, loading, inspecting, current?.id, current?.etag])
   const filtered = tables.filter((item) => `${item.namespace}.${item.name}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize)), currentPage = Math.min(page, pages)
   const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
@@ -195,7 +199,7 @@ export function SourceManager({ api, source, active, onBack, onDenied }: { api: 
         <nav className="source-pagination" aria-label="数据库表分页"><span>共 {filtered.length} 张 · 第 {currentPage} / {pages} 页</span><div><button type="button" className="button subtle" aria-label="上一页" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={15} /></button><button type="button" className="button subtle" aria-label="下一页" disabled={currentPage >= pages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={15} /></button></div></nav>
       </section>
       <section className="card source-management-content" aria-label="数据库控制台">
-        <div className="source-console-heading"><h2>数据库控制台{selected ? `：${selected.name}` : ''}</h2><p className="muted">{selected ? `${selected.namespace}.${selected.name}` : '从左侧选择数据表查看详情'}</p></div>
+        <div className="source-console-heading"><h2><Terminal size={18} />数据库控制台{selected ? `：${selected.name}` : ''}</h2><p className="muted">{selected ? `${selected.namespace}.${selected.name}` : '从左侧选择数据表查看详情'}</p></div>
         <div className="source-view-tabs" role="tablist" aria-label="数据库管理视图">{views.map((item, index) => <button key={item.id} type="button" id={`${tabId}-${item.id}-tab`} role="tab" aria-selected={view === item.id} aria-controls={`${tabId}-${item.id}-panel`} tabIndex={view === item.id ? 0 : -1} onClick={() => changeView(item.id)} onKeyDown={(event) => {
           const next = event.key === 'ArrowRight' ? (index + 1) % views.length : event.key === 'ArrowLeft' ? (index + views.length - 1) % views.length : event.key === 'Home' ? 0 : event.key === 'End' ? views.length - 1 : -1
           if (next >= 0) { event.preventDefault(); changeView(views[next].id); document.getElementById(`${tabId}-${views[next].id}-tab`)?.focus() }
@@ -208,8 +212,8 @@ export function SourceManager({ api, source, active, onBack, onDenied }: { api: 
           })}{!fields.length && <tr><td colSpan={6} className="sources-list-empty">没有匹配的字段。</td></tr>}</tbody></table></div>
           <h3>索引定义 <span className="muted">{table.indexes.length}</span></h3>{table.indexes.length ? <div className="table-wrap source-indexes-table"><table><thead><tr><th>索引名称</th><th>索引类型</th><th>包含字段</th><th>条件</th></tr></thead><tbody>{table.indexes.map((index) => <tr key={index.name}><td>{index.name}</td><td>{indexType(index)}</td><td>{index.columns.join(', ')}</td><td>{index.predicate || '—'}</td></tr>)}</tbody></table></div> : <p className="muted">未发现索引。</p>}</>}
         </section></div>}
-        {view === 'preview' && <div role="tabpanel" id={`${tabId}-preview-panel`} aria-labelledby={`${tabId}-preview-tab`} tabIndex={0}><section className="source-preview" aria-label="表数据预览"><div className="sources-panel-heading"><p className="muted">显式读取当前表的前 100 行数据。</p><button type="button" className="button primary" disabled={loading || inspecting || querying || !allowed || !table} onClick={() => void execute('preview')}>{querying ? <LoaderCircle size={15} className="spin" /> : <Play size={15} />}预览表数据</button></div>{blocked && <p className="notice">{blocked}</p>}{preview ? <QueryResult value={preview} label="表数据预览结果" /> : <p className="source-empty muted">{querying ? '正在读取表数据…' : '点击“预览表数据”加载当前表的数据。'}</p>}</section></div>}
-        {view === 'sql' && <div role="tabpanel" id={`${tabId}-sql-panel`} aria-labelledby={`${tabId}-sql-tab`} tabIndex={0}><section className="source-sql" aria-label="SQL 查询"><div className="sources-panel-heading"><h3>SQL 查询</h3><button type="button" className="button primary" disabled={loading || inspecting || querying || !allowed || !sql.trim()} onClick={() => void execute('sql')}>{querying ? <LoaderCircle size={15} className="spin" /> : <Play size={15} />}执行 SQL</button></div><p className="muted">支持单表 SELECT、WHERE（比较、LIKE、IS NULL、AND/OR）、ORDER BY 和 LIMIT，最多返回 100 行。</p>{blocked && <p className="notice">{blocked}</p>}<textarea className="field source-sql-input" aria-label="SQL 语句" spellCheck={false} disabled={loading || inspecting || !allowed} value={sql} placeholder="SELECT * FROM 表名 LIMIT 100;" onChange={(event) => { cancelQueries(); setSQL(event.target.value); if (!stale) setError('') }} />{result && <QueryResult value={result} label="SQL 查询结果" />}</section></div>}
+        {view === 'preview' && <div role="tabpanel" id={`${tabId}-preview-panel`} aria-labelledby={`${tabId}-preview-tab`} tabIndex={0}><section className="source-preview" aria-label="表数据预览"><p className="muted">每次进入此页签自动刷新当前表的前 100 行。</p>{blocked && <p className="notice">{blocked}</p>}{preview ? <QueryResult value={preview} label="表数据预览结果" /> : <p className="source-empty muted" role="status">{querying ? <><LoaderCircle size={17} className="spin" /> 正在读取表数据…</> : blocked ? '当前数据源不支持表数据预览。' : error ? '表数据加载失败，请重新进入此页签重试。' : '正在准备表数据…'}</p>}</section></div>}
+        {view === 'sql' && <div role="tabpanel" id={`${tabId}-sql-panel`} aria-labelledby={`${tabId}-sql-tab`} tabIndex={0}>{blocked && <p className="notice">{blocked}</p>}{current ? <SourceSQLConsole api={api} source={current} table={selected} serverVersion={overview?.serverVersion} sql={sql} busy={querying} disabled={loading || inspecting || !allowed} onSQLChange={(text) => { cancelQueries(); setSQL(text); if (!stale) setError('') }} onRun={(limit) => void execute('sql', limit)} onLimitChange={() => cancelQueries()} onError={report}>{result && <QueryResult value={result} label="SQL 查询结果" />}</SourceSQLConsole> : <p className="source-empty muted">请刷新结构后使用 SQL 控制台。</p>}</div>}
       </section>
     </div>
   </div>

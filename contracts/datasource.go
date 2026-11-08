@@ -115,7 +115,15 @@ type DataSourceTestResult struct {
 // SourceQuery is a bounded, read-only physical-table query for tenant admins.
 // It is distinct from business-model OntologySQL and requires a dedicated source.
 type SourceQuery struct {
-	SQL string `json:"sql"`
+	SQL   string `json:"sql"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type SourceSQLToolResult struct {
+	SQL     string `json:"sql"`
+	Valid   bool   `json:"valid"`
+	Dialect string `json:"dialect"`
+	Message string `json:"message"`
 }
 
 type SourceQueryResult struct {

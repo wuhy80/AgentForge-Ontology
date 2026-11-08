@@ -123,6 +123,43 @@ func TestSourceQueryRealDrivers(t *testing.T) {
 			if err != nil || len(filtered.Rows) != 1 || *filtered.Rows[0][0] != "" {
 				t.Fatalf("filter/empty string lost: %#v %v", filtered, err)
 			}
+			for _, test := range []struct {
+				sql         string
+				limit, want int
+			}{{"SELECT * FROM " + qualified + " ORDER BY id LIMIT 2", 1, 1}, {"SELECT * FROM " + qualified + " ORDER BY id LIMIT 1", 2, 1}, {"SELECT * FROM " + qualified + " ORDER BY id", 2, 2}} {
+				limited, err := querySourceWithLimit(ctx, db, source, test.sql, test.limit)
+				if err != nil || limited.Limit != test.want || len(limited.Rows) != test.want || !limited.HasMore {
+					t.Fatalf("real request limit ignored: %+v %v", limited, err)
+				}
+			}
+			analyzeSQL := "ANALYZE " + qualified
+			if source.Driver == "mysql" {
+				analyzeSQL = "ANALYZE TABLE " + qualified
+			}
+			if _, err = db.ExecContext(ctx, analyzeSQL); err != nil {
+				t.Fatal(err)
+			}
+			for _, template := range sourceCatalogTemplates(source.Driver) {
+				ranked, err := querySourceWithLimit(ctx, db, source, strings.TrimSuffix(template, "20")+"100", 100)
+				if err != nil || len(ranked.Columns) < 3 {
+					t.Fatalf("rank template failed on real %s: %+v %v", source.Driver, ranked, err)
+				}
+				found := false
+				for _, row := range ranked.Rows {
+					if row[1] == nil || strings.HasPrefix(strings.ToLower(*row[1]), "af_") || row[0] == nil || strings.HasPrefix(*row[0], "pg_") || *row[0] == "information_schema" {
+						t.Fatal("catalog rank exposed reserved table")
+					}
+					if *row[1] == name {
+						found = true
+						if strings.Contains(template, "estimated_rows") && (row[2] == nil || *row[2] != "3") {
+							t.Fatalf("analyzed row estimate incorrect: %+v", row)
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("rank omitted visible source table %s", name)
+				}
+			}
 			if _, err := querySource(ctx, db, source, "SELECT missing FROM "+qualified); err == nil {
 				t.Fatal("missing field accepted")
 			}

@@ -67,6 +67,25 @@ describe('ApiClient transport and complete directories', () => {
 })
 
 describe('ApiClient writes and errors', () => {
+  it('数据库查询和静态SQL工具均携带配置凭证、CSRF及实际行数上限', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => json({ valid: true, sql: 'SELECT * FROM orders;', dialect: 'mysql', message: '检查通过' }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient()
+    api.setCSRFToken('session-csrf')
+    const signal = new AbortController().signal
+    const sql = "SELECT amount FROM orders WHERE memo = '中文;订单' LIMIT 90;"
+    await api.queryDataSource('source/one', sql, 'source-etag', signal, 20)
+    await api.analyzeSourceSQL('source/one', sql, 'source-etag', signal, 20)
+    await api.formatSourceSQL('source/one', sql, 'source-etag', signal, 20)
+    for (const [index, suffix] of ['query', 'sql/analyze', 'sql/format'].entries()) {
+      const [path, options] = fetcher.mock.calls[index]
+      expect(path).toBe(`/api/data/sources/source%2Fone/${suffix}`)
+      expect(options).toMatchObject({ method: 'POST', signal })
+      expect(options.headers['If-Match']).toBe('"source-etag"')
+      expect(options.headers['X-CSRF-Token']).toBe('session-csrf')
+      expect(JSON.parse(options.body)).toEqual({ sql, limit: 20 })
+    }
+  })
   it('读取后端版本选项，测试当前编辑来源携带If-Match并省略保留密码', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(page([{ driver: 'mysql', versionLine: '26.7', status: 'supported', label: 'MySQL 26.7' }]))
       .mockResolvedValueOnce(json({ success: true, serverVersion: '26.7.0', compatibility: { compatibilityStatus: 'supported' } }))
