@@ -1,6 +1,6 @@
 # AgentForge-Ontology
 
-面向工业智能体（Industrial Agent）的本体管理与运行框架，使用 Go 开发。
+通用本体（Ontology）管理与运行框架，使用 Go 开发。面向不同领域统一管理业务对象、属性、关系、动作与函数，为业务应用、知识管理和智能体提供语义基础。项目定位与范围见[项目总览](docs/项目总览.md)。
 
 当前已提供首批Go Metadata、Data、Execution服务及React中文工作台，包含公共协议、认证授权、MySQL存储与Python纯计算运行器。已实现范围及验证结果见[项目总览](docs/项目总览.md#当前实现与验证2026-11-06)。
 
@@ -34,4 +34,4 @@ Schema、Enum、Link、Action、Function 统一使用单份当前生效定义，
 - [数据查询](docs/数据查询/README.md)：独立维护 [DataSet](docs/数据查询/DataSet.md) 公共查询语义、[OntologySQL](docs/数据查询/OntologySQL.md) 文本编译与[可视化查询编辑器](docs/数据查询/可视化查询编辑器.md)中文配置方案，各入口共用查询计划的设计仍为候选。
 - [数据读写](docs/数据读写.md)：Schema 动态单条/批量 CRUD、对象与关系事务及大规模导入的候选设计。
 - 公共机制：[存储引擎与数据库适配](docs/存储引擎.md)、[发布与迁移](docs/发布与迁移.md)、[执行与调度](docs/执行与调度.md)、[部署与运维](docs/部署与运维.md)、[性能与容量](docs/性能与容量.md)。
-- [工业 Agent 功能规划](docs/industrial-agent-ontology-plan.md)：工业应用场景与远期能力参考。
+- 应用场景：[个人知识库](docs/应用场景/个人知识库.md)（当前试点）、[工业应用场景参考](docs/industrial-agent-ontology-plan.md)（历史规划与远期能力参考）。
