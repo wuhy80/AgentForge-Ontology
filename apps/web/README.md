@@ -45,7 +45,8 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [源码编辑器](src/components/PythonSourceEditor.tsx) | Function及直接源码Action独立使用的CodeMirror编辑器；Python、JavaScript、Go高亮、中文参数补全、语法辅助、格式化及参数改名引用提醒；共同边界见[Function](../../docs/模块/Function.md#javascript与go扩展2026-11-08已确认) |
 | [数据源配置](src/features/sources/SourcesPage.tsx) | 表格列出连接及兼容状态，每行测试/编辑/管理；密码只写入，编辑沿用版本、TLS、租户隔离及ETag |
 | [数据库管理](src/features/sources/SourceManager.tsx) | 基础信息与真实指标、每页20条目录及字段/主键列计数、默认值/注释/索引；进入专属预览Tab自动刷新，缩窄目录与暖杏SQL编辑器/只读工具，默认字段页不查行，共享来源禁用物理业务行读取；[主要规则](../../docs/数据源.md#数据库管理工作台2026-11-08已确认) |
-| [数据探索](src/features/query/QueryPage.tsx) | 默认OntologySQL，顶部指导、左侧模型/右侧字段、双击与键盘插入、CodeMirror懒加载、参数、服务端补全/诊断、结果详情/关联及续页；保留可视化完整子集转换 |
+| [数据探索](src/features/query/QueryPage.tsx) | 默认OntologySQL，顶部指导、左侧模型/右侧字段、双击与键盘插入、CodeMirror懒加载、参数、服务端补全/诊断、结果详情/关联及续页；支持单模型及最多4条INNER Link的可视化配置和SQL双向转换，具体边界见查询主要说明 |
+| [可视化关联](src/features/query/VisualRelations.tsx) | 授权模型搜索/分页、路径预览及确认、正反方向与角色改名；[绑定辅助](src/features/query/visualRows.ts)保持Schema/Link/字段稳定ID，执行直接走同一QuerySpec |
 | [实例详情](src/features/query/InstanceDialog.tsx) | 单条创建/读取/修改/确认删除，保持精度、幂等及并发凭证 |
 | [用户与权限](src/features/admin/AdminPage.tsx) | 管理员创建/编辑账号、启停与密码重置、直接角色与用户组、权限草稿/生效/试算及最近200条审计 |
 | [用户组编辑](src/features/admin/UserGroupDialog.tsx) | 中文用户组、角色与成员搜索、启停、ETag冲突保留及当前会话变更提示；独立于模型目录分组 |
@@ -73,7 +74,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 
 本轮全量43个文件/388项测试通过；后续追加503重试/busy状态回归后，SQL控制台16项、编辑器5项及模板生成3项共24项定向通过，未推算为全量重跑结果。最终TypeScript/Vite生产构建通过；[管理布局](e2e/source-manager-layout.spec.ts)4条与[数据源映射](e2e/sources-mapping.spec.ts)3条共7条隔离Edge用例同次通过，1440px/390px截图人工核对暖杏主题、菜单与目录比例。浏览器使用fixture API；真实两库及HTTP边界结果见项目总览。本轮未重复缓存账号真实登录尝试，前批401限制继续保留，未修改账号密码。
 
-Link 编辑页可配置实际数据库映射，数据探索从每条结果的“关联数据”进入单跳正反查询并分页；平台关系可添加/移除，已有外部关系只读。未绑定关系显示仅定义，不把“已生效”展示成已有事实。操作使用独立 `link.query/create/delete`，现有租户由管理员在权限配置中显式添加并生效；两端对象仍独立授权。协议与当前限制见 [Link](../../docs/模块/Link.md#当前关系数据库实现2026-11-07)，同库能力不代表跨源关系、多跳或图查询已经开放。
+Link 编辑页可配置实际数据库映射，数据探索从每条结果的“关联数据”进入单跳正反查询并分页；平台关系可添加/移除，已有外部关系只读。未绑定关系显示仅定义，不把“已生效”展示成已有事实。操作使用独立 `link.query/create/delete`，现有租户由管理员在权限配置中显式添加并生效；两端对象仍独立授权。实例导航协议与限制见 [Link](../../docs/模块/Link.md#当前关系数据库实现2026-11-07)，有界多Link关联行及可视化配置另见[查询主要说明](../../docs/数据查询/可视化查询编辑器.md#可视化关联与模式互通2026-11-08已实现)；跨源关系及无界图查询继续后续。
 
 Function和直接源码Action各自选择Python、JavaScript或Go实现，配置源码、入口和1～30秒超时；已生效纯计算定义可更新代码并重新发布，参数类型与约束保持锁定。JavaScript使用同步普通函数，Go使用单文件`package main`及约定的`Main`入口，具体示例见[Function](../../docs/模块/Function.md#javascript与go扩展2026-11-08已确认)。切换语言时，自编源码需要确认是否替换为对应模板。三语言均按声明的中文参数名传入/返回对象，改名须同步源码；HTTP继续使用稳定属性ID，int64/decimal使用字符串。当前仅支持无副作用计算，网络、第三方依赖和平台数据访问未开放。运行器及实际协议见[Execution](../../services/execution/README.md)，本轮开发及分项实测状态见[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)。
 

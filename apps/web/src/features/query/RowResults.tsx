@@ -1,0 +1,5 @@
+import type { QueryResult, QuerySpec } from '../../lib/types';
+import { valueText } from './query';
+export function RowResults({ result, query }: { result: QueryResult; query: QuerySpec }) {
+  return <div className="table-wrap"><table className="query-data-table" aria-label="关联行查询结果"><thead><tr>{result.fields.map((field) => <th key={field.id}>{field.name}<small className="muted">{field.dataType}</small></th>)}<th>行来源</th></tr></thead><tbody>{result.rows?.map((row) => <tr key={row.id}>{result.fields.map((field) => <td key={field.id} title={valueText(row.values[field.id])}><span className={field.dataType === 'longtext' ? 'query-longtext-preview' : ''}>{valueText(row.values[field.id])}</span></td>)}<td><details className="ontology-row-origin"><summary>查看来源</summary><dl>{row.entities.map((entity) => <div key={entity.nodeId}><dt>{query.rows?.nodes.find((node) => node.id === entity.nodeId)?.alias ?? entity.nodeId}</dt><dd><code>{entity.instanceId}</code></dd></div>)}</dl></details></td></tr>)}</tbody></table></div>;
+}

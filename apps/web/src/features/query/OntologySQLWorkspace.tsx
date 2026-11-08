@@ -3,6 +3,7 @@ import { ArrowRight, BookOpen, Check, ChevronDown, Code2, Database, FolderTree, 
 import { ApiClient, ApiError } from '../../lib/api';
 import type { DefinitionRecord, JsonValue, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLRequest, Organization, QueryContextModel, QueryPathCandidate, QueryResult, QuerySpec, SQLDiagnostic, SQLParameter } from '../../lib/types';
 import { Dialog } from '../../components/Dialog';
+import { RowResults } from './RowResults';
 import { RelatedInstances } from './RelatedInstances';
 import { ValueInput } from './InstanceDialog';
 import { errorMessage, valueText } from './query';
@@ -11,10 +12,13 @@ import { proposeFieldInsertion } from './sqlInsertion';
 import type { ParameterDrafts } from './ontologySql';
 import type { QueryEditor } from './query';
 import type { SQLEditorHandle } from './OntologySQLEditor';
+import { loadRowContext } from './visualRows';
+import type { VisualRowsDraft } from './visualRows';
 
 const SQLEditor = lazy(() => import('./OntologySQLEditor'));
 export type SQLDraftMemory = { text: string; drafts: ParameterDrafts };
-export type SQLWorkspaceHandle = { toVisual: () => Promise<{ model: QueryContextModel; editor: QueryEditor } | undefined> };
+export type VisualConversion = { model: QueryContextModel; editor: QueryEditor; association?: VisualRowsDraft };
+export type SQLWorkspaceHandle = { toVisual: () => Promise<VisualConversion | undefined> };
 type Props = {
   api: ApiClient; categoryId: string; schemas: DefinitionRecord[]; categories?: Organization[];
   initialSchemaId?: string; selectionRequest?: number; onModel: () => void;
@@ -68,6 +72,7 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
   const alive = useRef(true);
   const generation = useRef(0);
   const checkController = useRef<AbortController | undefined>(undefined);
+  const conversionController = useRef<AbortController | undefined>(undefined);
   const runController = useRef<AbortController | undefined>(undefined);
   const formatController = useRef<AbortController | undefined>(undefined);
   const pathController = useRef<AbortController | undefined>(undefined);
@@ -82,13 +87,13 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
   useEffect(() => { draftCallback.current({ text, drafts }); }, [text, drafts]);
   useEffect(() => { alive.current = true; return () => {
     alive.current = false; generation.current++;
-    checkController.current?.abort(); runController.current?.abort(); formatController.current?.abort(); contextController.current?.abort(); pathController.current?.abort(); fieldController.current?.abort();
+    checkController.current?.abort(); conversionController.current?.abort(); runController.current?.abort(); formatController.current?.abort(); contextController.current?.abort(); pathController.current?.abort(); fieldController.current?.abort();
     for (const controller of completeControllers.current) controller.abort();
   }; }, []);
 
   const clearAuthorized = useCallback((message: string) => {
     generation.current++; contextGeneration.current++;
-    checkController.current?.abort(); runController.current?.abort(); formatController.current?.abort(); contextController.current?.abort(); pathController.current?.abort(); fieldController.current?.abort();
+    checkController.current?.abort(); conversionController.current?.abort(); runController.current?.abort(); formatController.current?.abort(); contextController.current?.abort(); pathController.current?.abort(); fieldController.current?.abort();
     for (const controller of completeControllers.current) controller.abort();
     setModels([]); setScopeModels([]); setAnalysis(undefined); setExecuted(undefined); setRelatedId(undefined); setDetailId(undefined);
     setPathProposal(undefined); setPendingTemplate(undefined); setPathBusy(false); setFieldBusy(false); setFieldAlias('');
@@ -131,7 +136,7 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
 
   function invalidate() {
     generation.current++;
-    checkController.current?.abort(); runController.current?.abort(); formatController.current?.abort(); pathController.current?.abort(); fieldController.current?.abort();
+    checkController.current?.abort(); conversionController.current?.abort(); runController.current?.abort(); formatController.current?.abort(); pathController.current?.abort(); fieldController.current?.abort();
     for (const controller of completeControllers.current) controller.abort();
     setBusy(false); setChecking(false); setStale(!!executed); setError(''); setNotice(''); setRelatedId(undefined); setDetailId(undefined);
     setPathProposal(undefined); setPathBusy(false); setFieldBusy(false);
@@ -198,14 +203,22 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
     if (latest.current.composing) throw new Error('请先完成中文输入');
     if (!latest.current.text.trim()) return undefined;
     checkController.current?.abort();
-    const controller = new AbortController(); checkController.current = controller; const current = generation.current;
+    conversionController.current?.abort();
+    const controller = new AbortController(); conversionController.current = controller; const current = generation.current;
     try {
       const result = await analyzeNow(controller.signal);
       if (!result?.ready || !result.query) throw new Error(result?.diagnostics[0]?.message ?? '请先补全语句和全部参数');
-      if (result.query.rows) throw new Error('多模型关联行查询不能转换为单模型可视化查询，请继续使用 OntologySQL');
       // Explicitly validate every typed input; never silently drop an invalid or missing value.
       parameterValues(result.parameters, latest.current.drafts);
       if (result.parameters.some((parameter) => !parameter.provided)) throw new Error('请先填写全部参数');
+      if (result.query.rows) {
+        const context = await loadRowContext(api, result.query.rows, categories, controller.signal);
+        if (controller.signal.aborted || !alive.current || current !== generation.current || latest.current.composing) throw new Error('查询已改变，请重新转换');
+        const model = context.models.find((item) => item.schemaId === result.query!.from.schemaId);
+        if (!model) throw new Error('关联起点不可查询');
+        const editor = queryToEditor(result.query, model, context);
+        return { model, editor, association: { rows: result.query.rows, context, editor } };
+      }
       const context = await api.queryContext({ schemaId: result.query.from.schemaId, limit: 1 }, controller.signal);
       if (controller.signal.aborted || !alive.current || current !== generation.current || latest.current.composing) throw new Error('查询已改变，请重新转换');
       const model = context.models.find((item) => item.schemaId === result.query!.from.schemaId);
@@ -465,10 +478,6 @@ export const OntologySQLWorkspace = forwardRef<SQLWorkspaceHandle, Props>(functi
     {relatedId && executed?.schema && !executed.result.rowMode && <RelatedInstances key={relatedId} api={api} schema={executed.schema} instanceId={relatedId} onClose={() => setRelatedId(undefined)} onForbidden={clearAuthorized} />}
   </div>;
 });
-
-function RowResults({ result, query }: { result: QueryResult; query: QuerySpec }) {
-  return <div className="table-wrap"><table className="query-data-table" aria-label="关联行查询结果"><thead><tr>{result.fields.map((field) => <th key={field.id}>{field.name}<small className="muted">{field.dataType}</small></th>)}<th>行来源</th></tr></thead><tbody>{result.rows?.map((row) => <tr key={row.id}>{result.fields.map((field) => <td key={field.id} title={valueText(row.values[field.id])}><span className={field.dataType === 'longtext' ? 'query-longtext-preview' : ''}>{valueText(row.values[field.id])}</span></td>)}<td><details className="ontology-row-origin"><summary>查看来源</summary><dl>{row.entities.map((entity) => <div key={entity.nodeId}><dt>{query.rows?.nodes.find((node) => node.id === entity.nodeId)?.alias ?? entity.nodeId}</dt><dd><code>{entity.instanceId}</code></dd></div>)}</dl></details></td></tr>)}</tbody></table></div>;
-}
 
 function SQLInstanceDetails({ api, id, schemaId, fields, onClose, onForbidden }: { api: ApiClient; id: string; schemaId: string; fields: QueryResult['fields']; onClose: () => void; onForbidden: (message: string) => void }) {
   const [values, setValues] = useState<Record<string, JsonValue>>();

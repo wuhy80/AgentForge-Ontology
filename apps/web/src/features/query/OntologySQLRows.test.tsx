@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError, type ApiClient } from '../../lib/api';
-import type { OntologySQLRequest, QueryContextModel, QueryPathsResult, QuerySpec } from '../../lib/types';
+import type { DefinitionRecord, OntologySQLRequest, QueryContextModel, QueryPathsResult, QuerySpec } from '../../lib/types';
 import { QueryPage } from './QueryPage';
 
 vi.mock('./OntologySQLEditor', () => ({ default: forwardRef(function TestEditor(props: { text: string; onChange: (text: string) => void; onComposition: (value: boolean) => void }, ref) {
@@ -23,10 +23,12 @@ const fields = [{ ...amount, id: 'n0.amount', name: 'o.金额' }, { ...name, id:
 const candidate = { id: 'path-1', fromAlias: 'o', steps: [{ linkId: 'order-customer', name: '订单客户', category: '业务', direction: 'out' as const, fromAlias: 'o', toAlias: 'c', target: customers }], text: joined };
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 const response = (request: OntologySQLRequest) => ({ requestId: request.requestId!, textHash: hash(request.text) });
+const schemas: DefinitionRecord[] = [orders, customers].map((model) => ({ etag: 'current', status: 'active', definition: { id: model.schemaId, tenantId: 'tenant', categoryId: 'business', groupId: 'group', kind: 'schema', name: model.name, schema: { mode: 'schema_2_db', storageLayout: 'single', properties: model.fields } } }));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((yes) => { resolve = yes; }); return { promise, resolve }; }
 function fixture(overrides: Record<string, unknown> = {}) {
   const api = {
     queryContext: vi.fn().mockResolvedValue({ models: [orders, customers] }),
+    getCurrent: vi.fn().mockResolvedValue({ status: 'active', etag: 'link', definition: { id: 'order-customer', kind: 'link', categoryId: 'business', name: '订单客户', link: { sourceSchemaId: 'orders', targetSchemaId: 'customers' } } }),
     analyzeOntologySQL: vi.fn().mockImplementation(async (request: OntologySQLRequest) => ({ ...response(request), fields: request.text.includes('JOIN LINK') ? fields : [amount], diagnostics: [], parameters: [], ready: true, query: request.text.includes('JOIN LINK') ? rowPlan : { from: { schemaId: 'orders' }, select: ['amount'], page: { limit: 25 } } })),
     planOntologySQLPaths: vi.fn().mockImplementation(async (request: OntologySQLRequest) => ({ ...response(request), candidates: [candidate], diagnostics: [], truncated: false })),
     insertOntologySQLField: vi.fn().mockImplementation(async (request: OntologySQLRequest) => ({ ...response(request), text: request.text.replace('"o"."金额"', '"o"."金额", "c"."名称"'), from: 0, to: 0, diagnostics: [] })),
@@ -37,7 +39,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
     query: vi.fn().mockResolvedValue({ rowMode: true, data: [], rows: [], fields, hasMore: false }),
     ...overrides,
   } as unknown as ApiClient;
-  render(<QueryPage api={api} categoryId="business" schemas={[]} onModel={vi.fn()} />);
+  render(<QueryPage api={api} categoryId="business" schemas={schemas} categories={[{ id: 'business', tenantId: 'tenant', name: '业务' }]} onModel={vi.fn()} />);
   return api;
 }
 async function inputSQL(value = source) { const input = await screen.findByRole('textbox', { name: 'OntologySQL 编辑器' }) as HTMLTextAreaElement; fireEvent.change(input, { target: { value } }); return input; }
@@ -163,12 +165,25 @@ describe('多 Link 查询工作台', () => {
     fireEvent.change(input, { target: { value: `${joined} ` } });
     expect((screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement).disabled).toBe(true);
   });
-  it('关联行查询不能转为单模型可视化，保留原 SQL', async () => {
-    fixture(); const input = await inputSQL(joined);
+  it('关联行完整转换为可视化并恢复SQL，角色与字段保持原绑定', async () => {
+    fixture(); await inputSQL(joined);
     fireEvent.click(screen.getByRole('tab', { name: '可视化查询' }));
-    await screen.findByText(/无法切换：多模型关联行查询不能转换/);
-    expect(input.value).toBe(joined);
-    expect(screen.getByRole('tab', { name: 'OntologySQL' }).getAttribute('aria-selected')).toBe('true');
+    const selected = await screen.findByRole('checkbox', { name: 'c.名称' });
+    expect((selected as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('模型角色 1') as HTMLInputElement).value).toBe('o');
+    fireEvent.click(screen.getByRole('tab', { name: 'OntologySQL' }));
+    const restored = await screen.findByRole('textbox', { name: 'OntologySQL 编辑器' });
+    expect((restored as HTMLTextAreaElement).value).toContain('JOIN LINK "o" VIA "业务"."订单客户" DIRECTION OUT AS "c"');
+  });
+  it('首次分析的自动刷新不取消正在读取关联定义的模式转换', async () => {
+    fixture({ getCurrent: vi.fn().mockImplementation((_id: string, signal?: AbortSignal) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve({ status: 'active', etag: 'link', definition: { id: 'order-customer', kind: 'link', categoryId: 'business', name: '订单客户', link: { sourceSchemaId: 'orders', targetSchemaId: 'customers' } } }), 25);
+      signal?.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); }, { once: true });
+    })) });
+    await inputSQL(joined); fireEvent.click(screen.getByRole('tab', { name: '可视化查询' }));
+    const selected = await screen.findByRole('checkbox', { name: 'c.名称' });
+    expect((selected as HTMLInputElement).checked).toBe(true);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
   it('Link 授权诊断清除先前关联结果和字段目录', async () => {
     const api = fixture(); const input = await inputSQL(joined);

@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownWideNarrow, ArrowRight, Braces, Check, ChevronRight, Columns3, Database, Filter, Layers, LoaderCircle, Play, Plus, Rows3, Square, Trash2, X } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowRight, Check, ChevronRight, Columns3, Database, Filter, Layers, LoaderCircle, Play, Plus, Rows3, Square } from 'lucide-react';
 import { ApiClient, ApiError } from '../../lib/api';
-import type { DefinitionRecord, Organization, Property, QueryResult, QuerySpec } from '../../lib/types';
-import { InstanceDialog, ValueInput } from './InstanceDialog';
+import type { DefinitionRecord, Organization, QueryResult, QuerySpec } from '../../lib/types';
+import { InstanceDialog } from './InstanceDialog';
 import { RelatedInstances } from './RelatedInstances';
-import { availableOperators, compileQuery, errorMessage, newCondition, newGroup, valueText } from './query';
-import type { FilterCondition, FilterGroup, FilterNode, QueryEditor } from './query';
+import { compileQuery, errorMessage, newGroup, valueText } from './query';
+import type { QueryEditor } from './query';
+import { GroupEditor } from './QueryFilterEditor';
+import { VisualRelations } from './VisualRelations';
+import { RowResults } from './RowResults';
+import { compileRowQuery, rowQueryModel } from './ontologySql';
+import type { VisualRowsDraft } from './visualRows';
+import { loadRowContext } from './visualRows';
+import type { FilterNode } from './query';
 import './query.css';
 
 const clients = new WeakMap<ApiClient, number>();
@@ -15,11 +22,14 @@ function clientKey(api: ApiClient) {
   return clients.get(api);
 }
 
-export type VisualDraft = { schema: DefinitionRecord; editor: QueryEditor };
-type Props = { api: ApiClient; categoryId: string; schemas: DefinitionRecord[]; categories?: Organization[]; initialSchemaId?: string; selectionRequest?: number; onModel: () => void; initialEditor?: QueryEditor; onDraftChange?: (draft: VisualDraft) => void };
+export type VisualDraft = { schema: DefinitionRecord; editor: QueryEditor; association?: VisualRowsDraft };
+type Props = { api: ApiClient; categoryId: string; schemas: DefinitionRecord[]; categories?: Organization[]; initialSchemaId?: string; selectionRequest?: number; onModel: () => void; initialEditor?: QueryEditor; initialRows?: VisualRowsDraft; authorizationFailure?: { sequence: number; message: string }; onDraftChange?: (draft: VisualDraft) => void };
 
-export function VisualQueryPage({ api, categoryId, schemas, categories = [], initialSchemaId, selectionRequest, onModel, initialEditor, onDraftChange }: Props) {
+export function VisualQueryPage({ api, categoryId, schemas, categories = [], initialSchemaId, selectionRequest, onModel, initialEditor, initialRows, authorizationFailure, onDraftChange }: Props) {
   const [selectedId, setSelectedId] = useState(initialSchemaId ?? '');
+  const [pendingSchema, setPendingSchema] = useState<string>();
+  const currentDraft = useRef<VisualDraft | undefined>(undefined);
+  const rememberDraft = (draft: VisualDraft) => { currentDraft.current = draft; onDraftChange?.(draft); };
   const intentSession = useRef({ api, schemas: new Map<string, Map<string, string>>() });
   if (intentSession.current.api !== api) {
     intentSession.current = { api, schemas: new Map() };
@@ -27,6 +37,7 @@ export function VisualQueryPage({ api, categoryId, schemas, categories = [], ini
   const availableSchemas = categoryId ? schemas.filter((item) => item.definition.kind === 'schema' && item.definition.categoryId === categoryId) : [];
   useEffect(() => {
     setSelectedId('');
+    setPendingSchema(undefined);
   }, [categoryId, initialSchemaId, selectionRequest]);
   const selected = availableSchemas.find((item) => item.definition.id === selectedId)
     ?? availableSchemas.find((item) => item.definition.id === initialSchemaId)
@@ -47,7 +58,10 @@ export function VisualQueryPage({ api, categoryId, schemas, categories = [], ini
     {!availableSchemas.length ? <div className="card empty-state query-first-empty"><Database size={38} /><h2>{categoryId ? '当前分类暂无生效模型' : '请先选择当前分类'}</h2><p className="muted">{categoryId ? '在当前分类发布 Schema 后，可在这里选择字段、筛选数据和新建实例。' : '从顶部选择业务分类，再探索该分类中的数据。'}</p><button type="button" className="button primary" onClick={onModel}>前往模型管理<ArrowRight size={16} /></button></div>
       : <>
         <div className="card query-source"><div className="query-source-icon"><Layers size={22} /></div><div className="field query-schema-select"><label htmlFor="query-schema">查询模型</label>
-          <select id="query-schema" value={selected?.definition.id ?? ''} onChange={(event) => setSelectedId(event.target.value)}>
+          <select id="query-schema" value={selected?.definition.id ?? ''} onChange={(event) => {
+            if (currentDraft.current?.association && event.target.value !== selected?.definition.id) setPendingSchema(event.target.value);
+            else setSelectedId(event.target.value);
+          }}>
             {availableSchemas.map((item) => {
               const category = categories.find((entry) => entry.id === item.definition.categoryId);
               return <option key={item.definition.id} value={item.definition.id}>{category ? `${category.name} / ` : ''}{item.definition.name}</option>;
@@ -55,69 +69,29 @@ export function VisualQueryPage({ api, categoryId, schemas, categories = [], ini
           </select></div><div className="query-source-description"><span className="badge">当前生效</span><p className="muted">{selected?.definition.description || '单模型查询 · 字段与条件使用稳定标识绑定'}</p></div>
           <button type="button" className="button subtle" onClick={onModel}>查看模型<ChevronRight size={16} /></button>
         </div>
-        {selected && supported ? <QueryWorkspace key={`${categoryId}:${clientKey(api)}:${selected.definition.id}:${selected.etag}`} api={api} schema={selected} createIntents={createIntents!} initialEditor={selected.definition.id === initialSchemaId ? initialEditor : undefined} onDraftChange={onDraftChange} />
+        {pendingSchema && <div className="notice" role="status"><p>更换查询起点将清空当前关联路径、返回字段、条件和结果。</p><button type="button" className="button" onClick={() => { setSelectedId(pendingSchema); setPendingSchema(undefined); }}>确认更换起点</button><button type="button" className="button subtle" onClick={() => setPendingSchema(undefined)}>保留当前查询</button></div>}
+        {selected && supported ? <QueryWorkspace key={`${categoryId}:${clientKey(api)}:${selected.definition.id}:${selected.etag}`} api={api} schema={selected} categories={categories} createIntents={createIntents!} initialEditor={selected.definition.id === initialSchemaId ? initialEditor : undefined} initialRows={selected.definition.id === initialSchemaId ? initialRows : undefined} authorizationFailure={authorizationFailure} onDraftChange={rememberDraft} />
           : <div className="card empty-state"><Database size={30} /><h2>此模型暂不支持数据操作</h2><p className="muted">当前数据服务支持 schema_2_db 与 single 布局。请在模型管理中查看定义。</p><button type="button" className="button" onClick={onModel}>查看模型</button></div>}
       </>}
   </div>;
 }
 
-function ConditionEditor({ condition, properties, onChange, onRemove }: {
-  condition: FilterCondition; properties: Property[]; onChange: (value: FilterCondition) => void; onRemove: () => void;
-}) {
-  const property = properties.find((item) => item.id === condition.field);
-  const noValue = condition.op === 'isNull' || condition.op === 'isNotNull';
-  const isSet = condition.op === 'in' || condition.op === 'notIn';
-  return <div className={`query-condition ${isSet ? 'query-condition-set' : ''}`}>
-    <select aria-label="筛选字段" value={condition.field} onChange={(event) => {
-      const next = properties.find((item) => item.id === event.target.value);
-      const validOp = availableOperators(next).some((item) => item.value === condition.op) ? condition.op : 'eq';
-      onChange({ ...condition, field: event.target.value, op: validOp, raw: next?.dataType === 'boolean' ? 'true' : '' });
-    }}>{properties.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>
-    <select aria-label="筛选运算符" value={condition.op} onChange={(event) => onChange({ ...condition, op: event.target.value })}>
-      {availableOperators(property).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}
-    </select>
-    <div className="query-condition-input">{noValue ? <span className="muted query-no-value">无需填写比较值</span>
-      : isSet ? <><textarea aria-label="集合值，每行一个" rows={3} value={condition.raw} onChange={(event) => onChange({ ...condition, raw: event.target.value })} placeholder="每行一个值，最多 100 个" />
-        <small className="muted">每行一个值；字符串保留空格，空行表示空字符串。</small></>
-        : property && <><label className="query-sr-only" htmlFor={`condition-${condition.id}`}>比较值</label><ValueInput property={property} id={`condition-${condition.id}`} value={condition.raw} onChange={(raw) => onChange({ ...condition, raw })} /></>}
-    </div>
-    <button type="button" className="button subtle query-icon-button" aria-label="移除此条件" title="移除此条件" onClick={onRemove}><X size={16} /></button>
-  </div>;
-}
-
-function GroupEditor({ group, properties, onChange, onRemove, depth = 0 }: {
-  group: FilterGroup; properties: Property[]; onChange: (value: FilterGroup) => void; onRemove?: () => void; depth?: number;
-}) {
-  function replace(value: FilterNode) { onChange({ ...group, children: group.children.map((child) => child.id === value.id ? value : child) }); }
-  function remove(id: string) { onChange({ ...group, children: group.children.filter((child) => child.id !== id) }); }
-  return <div className={`query-filter-group ${depth ? 'query-filter-group-nested' : ''}`}>
-    <div className="query-group-heading"><span className="muted">满足</span><select aria-label={depth ? '子条件组逻辑' : '条件组逻辑'} value={group.join} onChange={(event) => onChange({ ...group, join: event.target.value as 'and' | 'or' })}>
-      <option value="and">全部条件 AND</option><option value="or">任意条件 OR</option>
-    </select><label className="query-check"><input type="checkbox" checked={group.negated} onChange={(event) => onChange({ ...group, negated: event.target.checked })} />取反 NOT</label>
-      {onRemove && <button type="button" className="button subtle query-icon-button" aria-label="移除此条件组" onClick={onRemove}><Trash2 size={15} /></button>}
-    </div>
-    {!group.children.length && <div className="query-no-filters muted">{depth ? '请为此分组添加条件。' : '尚未添加筛选，将查询当前有权读取的数据。'}</div>}
-    <div className="query-filter-children">{group.children.map((child) => child.kind === 'condition'
-      ? <ConditionEditor key={child.id} condition={child} properties={properties} onChange={replace} onRemove={() => remove(child.id)} />
-      : <GroupEditor key={child.id} group={child} properties={properties} onChange={replace} onRemove={() => remove(child.id)} depth={depth + 1} />)}</div>
-    <div className="query-group-actions"><button className="button subtle" type="button" disabled={group.children.length >= 30} onClick={() => onChange({ ...group, children: [...group.children, newCondition(properties)] })}><Plus size={14} />添加条件</button>
-      {depth < 3 && <button className="button subtle" type="button" disabled={group.children.length >= 30} onClick={() => onChange({ ...group, children: [...group.children, newGroup()] })}><Braces size={14} />添加分组</button>}</div>
-  </div>;
-}
-
 type Executed = { result: QueryResult; spec: QuerySpec; page: number };
-function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChange }: { api: ApiClient; schema: DefinitionRecord; createIntents: Map<string, string>; initialEditor?: QueryEditor; onDraftChange?: (draft: VisualDraft) => void }) {
-  const properties = schema.definition.schema!.properties;
+function QueryWorkspace({ api, schema, categories, createIntents, initialEditor, initialRows, authorizationFailure, onDraftChange }: { api: ApiClient; schema: DefinitionRecord; categories: Organization[]; createIntents: Map<string, string>; initialEditor?: QueryEditor; initialRows?: VisualRowsDraft; authorizationFailure?: { sequence: number; message: string }; onDraftChange?: (draft: VisualDraft) => void }) {
+  const [association, setAssociation] = useState(initialRows);
+  const [blocked, setBlocked] = useState(false);
+  const [removePending, setRemovePending] = useState(false);
+  const properties = association ? rowQueryModel(association.rows, association.context, true).fields : schema.definition.schema!.properties;
   const binding = schema.definition.schema!.storageBinding;
-  const readOnly = !!binding;
-  const filterProperties = binding ? properties.filter((property) => {
+  const readOnly = !!binding || !!association;
+  const filterProperties = binding && !association ? properties.filter((property) => {
     const mapping = property.mapping;
     return mapping?.dataSourceId === binding.dataSourceId && (!mapping.table || mapping.table === binding.table) && (!mapping.namespace || mapping.namespace === binding.namespace);
   }) : properties;
-  const [editor, setEditor] = useState<QueryEditor>(() => initialEditor ?? ({ filter: newGroup(), select: [], sort: '', direction: 'asc', limit: '25' }));
+  const [editor, setEditor] = useState<QueryEditor>(() => initialRows?.editor ?? initialEditor ?? ({ filter: newGroup(), select: [], sort: '', direction: 'asc', limit: '25' }));
   const draftCallback = useRef(onDraftChange);
   draftCallback.current = onDraftChange;
-  useEffect(() => { draftCallback.current?.({ schema, editor }); }, [schema, editor]);
+  useEffect(() => { draftCallback.current?.({ schema, editor, association: association ? { ...association, editor } : undefined }); }, [schema, editor, association]);
   const [executed, setExecuted] = useState<Executed>();
   const [stale, setStale] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -132,6 +106,7 @@ function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChan
     sequence.current += 1;
     request.current?.controller.abort();
   }, []);
+  useEffect(() => { if (authorizationFailure) forbidden(authorizationFailure.message); }, [authorizationFailure]);
 
   function cancel(message = '本次查询已取消，可以修改条件后重新运行。') {
     sequence.current += 1;
@@ -146,6 +121,37 @@ function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChan
     setEditor((previous) => ({ ...previous, ...patch }));
     if (executed) setStale(true);
     setError('');
+    setRemovePending(false);
+  }
+
+  function applyAssociation(value: VisualRowsDraft) {
+    change(value.editor); setAssociation(value); setDialog(undefined); setRelatedId(undefined);
+    setNotice('已添加关联，原字段与条件保留。请按模型角色选择关联字段，再运行查询。');
+  }
+
+  function renameRole(id: string, alias: string) {
+    if (!association) return;
+    // Keep incomplete role input editable; validation happens before execution.
+    change({}); setAssociation({ ...association, rows: { ...association.rows, nodes: association.rows.nodes.map((node) => node.id === id ? { ...node, alias } : node) } });
+  }
+
+  function removeAssociation(confirmed = false) {
+    if (!association) return;
+    const last = association.rows.nodes.at(-1)!;
+    const used = (node: FilterNode): boolean => node.kind === 'condition' ? node.field.startsWith(`${last.id}.`) : node.children.some(used);
+    if (editor.select.some((id) => id.startsWith(`${last.id}.`)) || editor.sort.startsWith(`${last.id}.`) || used(editor.filter)) {
+      setError(`请先移除“${last.alias}”角色的返回字段、筛选条件及排序，再移除关联。`); return;
+    }
+    if (!confirmed) { setRemovePending(true); return; }
+    if (association.rows.joins.length > 1) {
+      change({}); setAssociation({ ...association, rows: { nodes: association.rows.nodes.slice(0, -1), joins: association.rows.joins.slice(0, -1) } });
+    } else {
+      const reference = (id: string) => id.startsWith('n0.') ? id.slice(3) : id;
+      const visit = (node: FilterNode): FilterNode => node.kind === 'condition' ? { ...node, field: reference(node.field) } : { ...node, children: node.children.map(visit) };
+      change({ select: editor.select.map(reference), sort: reference(editor.sort), filter: { ...editor.filter, children: editor.filter.children.map(visit) } });
+      setAssociation(undefined);
+    }
+    setRemovePending(false); setNotice('已移除关联，请重新运行查询。');
   }
 
   async function execute(spec: QuerySpec, page: number) {
@@ -160,6 +166,7 @@ function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChan
     try {
       const result = await api.query(spec, controller.signal);
       if (controller.signal.aborted || sequence.current !== current) return;
+      if (!!spec.rows !== !!result.rowMode) throw new Error('查询结果形态与请求不一致，请检查服务后重试');
       // Preserve exactly the submitted query; subsequent pages only replace its cursor.
       const base: QuerySpec = { ...spec, page: { limit: spec.page.limit } };
       setExecuted({ result, spec: base, page });
@@ -170,6 +177,7 @@ function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChan
         if (reason instanceof ApiError && (reason.status === 401 || reason.status === 403)) {
           setExecuted(undefined);
           setStale(false);
+          if (association) setBlocked(true);
         }
         if (reason instanceof ApiError && reason.code === 'invalid_cursor') {
           setStale(true);
@@ -185,7 +193,7 @@ function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChan
   }
 
   function run() {
-    try { void execute(compileQuery(schema.definition.id, properties, editor), 1); }
+    try { void execute(association ? compileRowQuery(association.rows, association.context, editor) : compileQuery(schema.definition.id, properties, editor), 1); }
     catch (reason) { setError(errorMessage(reason)); }
   }
 
@@ -208,17 +216,35 @@ function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChan
     setRelatedId(undefined);
     setError(message);
     setNotice('操作被授权拒绝，已清除先前读取的结果。');
+    if (association) setBlocked(true);
+  }
+
+  async function reloadAuthorization() {
+    if (!association) return;
+    request.current?.controller.abort();
+    const controller = new AbortController(), current = ++sequence.current;
+    request.current = { controller, sequence: current };
+    try {
+      const context = await loadRowContext(api, association.rows, categories, controller.signal);
+      if (controller.signal.aborted || current !== sequence.current) return;
+      setAssociation({ ...association, context }); setBlocked(false); setError('');
+    } catch (cause) { if (!controller.signal.aborted && current === sequence.current) setError(errorMessage(cause)); }
+    finally { if (current === sequence.current) request.current = undefined; }
   }
 
   const selectedCount = editor.select.length;
   const result = executed?.result;
+  const rowCount = result?.rowMode ? result.rows?.length ?? 0 : result?.data.length ?? 0;
+  if (blocked) return <div className="notice notice-error" role="alert">{error || '查询权限已改变，已清除结果及关联字段候选。'}<button className="button" type="button" onClick={() => void reloadAuthorization()}>重新读取查询权限</button></div>;
   return <>
     <div className="card query-builder">
       <div className="query-section-heading"><div><Filter size={18} /><h2>构建查询</h2></div><span className="muted">更改配置后，点击运行应用</span></div>
       <div className="query-builder-content">
+        <VisualRelations api={api} schema={schema} categories={categories} editor={editor} rows={association?.rows} context={association?.context} onApply={applyAssociation} onRename={renameRole} onRemove={() => removeAssociation()} onForbidden={forbidden} />
+        {removePending && <div className="notice" role="status"><p>{association?.rows.joins.length === 1 ? '移除后返回单模型对象列表，同一对象只出现一次。现有字段和条件将保留。' : '移除最后一个关联后，仅返回剩余路径的匹配行。现有字段和条件将保留。'}</p><button type="button" className="button" onClick={() => removeAssociation(true)}>确认移除关联</button><button type="button" className="button subtle" onClick={() => setRemovePending(false)}>保留关联</button></div>}
         <section className="query-filter-section"><div className="query-step-title"><span>01</span><h3>筛选条件</h3></div>
           {filterProperties.length > 0 ? <GroupEditor group={editor.filter} properties={filterProperties} onChange={(filter) => change({ filter })} /> : <p className="muted">主表尚未映射可筛选属性。</p>}
-          {readOnly && <p className="muted">筛选和排序使用主表属性；其他来源的属性可选择返回。</p>}
+          {readOnly && <p className="muted">{association ? '筛选作用于全部匹配关系行；字段名称包含模型角色。' : '筛选和排序使用主表属性；其他来源的属性可选择返回。'}</p>}
         </section>
         <div className="query-settings-grid"><section><div className="query-step-title"><span>02</span><h3>返回字段</h3><small className="muted">已选 {selectedCount} 项</small></div>
           <div className="query-column-actions"><button type="button" className="button subtle" onClick={() => change({ select: properties.map((property) => property.id) })}>全选</button><button type="button" className="button subtle" onClick={() => change({ select: [] })}>清空</button></div>
@@ -228,7 +254,7 @@ function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChan
           </label>)}</div>
         </section><section><div className="query-step-title"><span>03</span><h3>排序与分页</h3></div>
           <div className="query-sort-settings"><div className="field"><label htmlFor="query-sort">排序字段</label><select id="query-sort" value={editor.sort} onChange={(event) => change({ sort: event.target.value })}>
-            <option value="">实例 ID（默认）</option>{filterProperties.filter((property) => property.dataType !== 'text' && property.dataType !== 'longtext').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
+            <option value="">{association ? '全部模型的实例 ID（默认）' : '实例 ID（默认）'}</option>{filterProperties.filter((property) => property.dataType !== 'text' && property.dataType !== 'longtext').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
           </select></div><div className="form-grid"><div className="field"><label htmlFor="query-direction">排序方向</label><select id="query-direction" value={editor.direction} disabled={!editor.sort} onChange={(event) => change({ direction: event.target.value as 'asc' | 'desc' })}><option value="asc">升序</option><option value="desc">降序</option></select></div>
             <div className="field"><label htmlFor="query-limit">每页条数</label><input id="query-limit" type="number" min="1" max="100" step="1" value={editor.limit} onChange={(event) => change({ limit: event.target.value })} /></div></div>
             <p className="muted query-sort-hint"><ArrowDownWideNarrow size={14} />结果由服务端排序和分页，每页最多 100 条。</p>
@@ -243,12 +269,13 @@ function QueryWorkspace({ api, schema, createIntents, initialEditor, onDraftChan
     {error && <div className="notice notice-error query-status" role="alert">{error}<span>请检查输入或权限后重试。</span></div>}
     {notice && <div className="notice query-status" role="status">{notice}</div>}
     <section className="card query-results" aria-label="查询结果" aria-busy={busy}>
-      <div className="query-section-heading"><div><Rows3 size={18} /><h2>查询结果</h2>{result && <span className="badge">本页 {result.data.length} 条</span>}</div>
-        {readOnly ? <span className="muted">来源映射 · 只读实例</span> : <button className="button" type="button" onClick={() => setDialog({})}><Plus size={16} />新建实例</button>}
+      <div className="query-section-heading"><div><Rows3 size={18} /><h2>查询结果</h2>{result && <span className="badge">本页 {rowCount} 条</span>}</div>
+        {readOnly ? <span className="muted">{association ? '关联明细 · 只读结果' : '来源映射 · 只读实例'}</span> : <button className="button" type="button" onClick={() => setDialog({})}><Plus size={16} />新建实例</button>}
       </div>
       {stale && result && <div className="query-stale" role="status"><span className="query-stale-dot" />结果已过期：配置或数据已改变，请重新运行查询。<span>续页已停用</span></div>}
       {!result ? <div className="empty-state query-result-empty"><div className="query-empty-icon"><Database size={27} /></div><h3>{busy ? '正在读取数据' : '准备好后，运行第一次查询'}</h3><p className="muted">{busy ? '你可以取消本次请求并继续调整条件。' : '勾选返回字段，按需添加条件。这里将展示服务端返回的真实结果。'}</p></div>
-        : !result.data.length ? <div className="empty-state query-result-empty"><Check size={30} /><h3>没有匹配的数据</h3><p className="muted">可以调整筛选条件后重新运行，或新建一个实例。</p></div>
+        : !rowCount ? <div className="empty-state query-result-empty"><Check size={30} /><h3>没有匹配的数据</h3><p className="muted">{association ? '可以调整关联路径或筛选条件后重新运行。' : '可以调整筛选条件后重新运行，或新建一个实例。'}</p></div>
+          : result.rowMode ? <><p className="ontology-row-grain muted">每行对应一组匹配对象，同一对象可能出现多次。结果只读。</p><RowResults result={result} query={executed!.spec} /></>
           : <div className="table-wrap query-result-table"><table><thead><tr><th className="query-row-number">#</th><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}<small>{field.dataType}</small></th>)}<th className="query-row-action">操作</th></tr></thead>
             <tbody>{result.data.map((instance, index) => <tr key={instance.id}><td className="query-row-number">{index + 1}</td><td><button type="button" className="query-id-link" title={instance.id} onClick={() => setDialog({ id: instance.id })}>{instance.id}</button></td>
               {result.fields.map((field) => { const value = instance.values[field.id]; return <td key={field.id}><span className={value === undefined || value === null || value === '' ? 'query-cell-special' : 'query-cell-value'}>{valueText(value)}</span></td>; })}

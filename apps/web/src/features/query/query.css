@@ -77,6 +77,21 @@
 .ontology-role-select { display: flex; flex-direction: column; gap: 6px; font-size: 10px; padding: 0 13px 12px; color: #718267; }
 .ontology-role-select select { width: 100%; min-width: 0; font-size: 11px; }
 .ontology-row-grain { font-size: 11px; padding: 0 20px; line-height: 1.8; }
+.visual-relations { min-width: 0; padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid #e6ebde; }
+.visual-relations .query-section-heading { padding: 0; gap: 10px; flex-wrap: wrap; }
+.visual-relations h3, .visual-relations h4 { margin: 0; font-size: 13px; }
+.visual-relations > p { font-size: 12px; line-height: 1.8; }
+.visual-role-list { list-style: none; padding: 0; display: grid; gap: 8px; }
+.visual-role-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px; border: 1px solid #e0e8d7; border-radius: 7px; background: #fafcf7; font-size: 12px; min-width: 0; }
+.visual-role-list li > span { flex: 1 1 220px; overflow-wrap: anywhere; }
+.visual-role-list label { display: flex; gap: 8px; align-items: center; flex: 0 1 260px; min-width: 0; }
+.visual-role-list input { width: 150px; min-width: 0; flex: 1; }
+.visual-path-builder { margin-top: 14px; display: grid; gap: 12px; padding: 14px; border: 1px solid #dce6d0; border-radius: 8px; min-width: 0; }
+.visual-path-builder .field, .visual-path-builder input, .visual-path-builder select { min-width: 0; width: 100%; }
+.visual-path-builder .query-actions { flex-wrap: wrap; }
+.visual-path-candidates { display: grid; gap: 10px; min-width: 0; font-size: 12px; }
+.visual-path-candidates article { padding: 12px; border: 1px solid #dce6d0; border-radius: 7px; background: #fbfdf8; min-width: 0; }
+.visual-path-candidates ol { padding-left: 20px; line-height: 1.9; overflow-wrap: anywhere; }
 .ontology-row-origin { max-width: 220px; font-size: 10px; }
 .ontology-row-origin summary { cursor: pointer; white-space: nowrap; }
 .ontology-row-origin dl { margin-bottom: 0; }
