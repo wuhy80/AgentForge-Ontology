@@ -75,7 +75,7 @@ Schema 的 `storageBinding` 声明主数据源、命名空间、表、稳定标�
 
 Action 正文支持可选 `targetSchemaIds` 数组，为动作详情和 Schema 详情的关联发现保存最多32个同租户已生效 Schema 稳定 ID；空数组或省略表示未关联，不表示对所有 Schema 生效。保存草稿及发布均校验目标类型与状态，发布将目标写入当前依赖；已有 Action 可经草稿/发布修改这一关联，签名、实现和副作用仍保持原有变更限制。Function 不接受该字段。关联仅是定义元数据，不授予执行或实例权限，详细规则以 [Action](../../docs/模块/Action.md#当前对象关联协议2026-11-07) 为主要说明。
 
-Function增加可选`runtime`内联Python实现，字段及参数规则以[Function](../../docs/模块/Function.md#首批python运行协议2026-11-07已实现)为主要说明。保存校验语言、源码预算、入口、超时与无副作用声明；runtime与artifactRef或其他Function引用不能并存。Action绑定同租户已生效Function，发布校验双方中文参数签名及副作用；Function重发布还检查当前引用它的Action。已生效Function可经草稿/发布更新runtime，签名、副作用和实现引用继续受结构限制。Metadata仍不执行用户代码，能力中的`invocation:false`只描述本服务，真实运行可用性通过[Execution](../execution/README.md)查询。
+Function与直接源码Action支持可选`runtime`内联Python、JavaScript、Go实现，字段及参数规则以[Function](../../docs/模块/Function.md)为主要说明。保存校验语言、源码预算、入口、超时与无副作用声明，不在Metadata执行、编译或解析源码；runtime与artifactRef或其他Function引用不能并存。Action也可绑定同租户已生效Function，发布校验双方中文参数签名及副作用；Function重发布还检查当前引用它的Action。已生效Function/直接源码Action可经草稿发布修改源码语言、入口及超时，签名、副作用和实现模式继续受结构限制。Metadata仍不执行用户代码，能力中的`invocation:false`只描述本服务，真实运行及Go源码工具可用性通过[Execution](../execution/README.md)查询。
 
 Function与Action的`testCases`随定义草稿保存，最多10项、总JSON最多64KiB；名称最多80个Unicode字符且不重复，输入仅使用声明参数稳定ID与相应标量传输格式。样例可部分填写，运行时由Execution检查必填和默认值。已有定义可经草稿/发布修改样例；该编辑不改变可执行签名或调用授权，发布后样例按定义读取权限可见。草稿试运行使用已保存ETag，不写当前态；源码诊断与运行记录由Execution负责。
 

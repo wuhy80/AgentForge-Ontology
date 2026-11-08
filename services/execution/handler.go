@@ -68,6 +68,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", h.ready)
 	mux.HandleFunc("GET /execution/capabilities", h.wrap(h.capabilities))
+	mux.HandleFunc("POST /execution/source-tools", h.wrap(h.sourceTools))
 	mux.HandleFunc("POST /execution/invocations", h.wrap(h.invoke))
 	mux.HandleFunc("GET /execution/invocations/{id}", h.wrap(h.get))
 	return mux
@@ -226,14 +227,14 @@ func (h *handler) resolvePlan(ctx context.Context, p c.Principal, out plan) (pla
 	}
 	if out.root.Kind == c.KindAction {
 		if out.root.Action == nil || out.root.Action.SideEffects != "none" || out.root.Action.ArtifactRef != "" {
-			return out, problem(422, "unsupported_action", "仅执行内联Python或绑定无副作用Function的Action")
+			return out, problem(422, "unsupported_action", "仅执行内联源码或绑定无副作用Function的Action")
 		}
 		if out.root.Action.Runtime != nil {
 			out.implementation = out.root
 			return out, executable(out.implementation)
 		}
 		if out.root.Action.FunctionID == "" {
-			return out, problem(422, "runtime_missing", "此Action尚未配置Python源码或绑定Function")
+			return out, problem(422, "runtime_missing", "此Action尚未配置源码或绑定Function")
 		}
 		fn, err := h.cfg.Metadata.Current(ctx, p.TenantID, out.root.Action.FunctionID)
 		if err != nil {
@@ -261,14 +262,14 @@ func (h *handler) resolvePlan(ctx context.Context, p c.Principal, out plan) (pla
 func executable(definition c.Definition) error {
 	callable := definitionCallable(definition)
 	if callable == nil || callable.Runtime == nil {
-		return problem(422, "runtime_missing", "此定义尚未配置Python实现")
+		return problem(422, "runtime_missing", "此定义尚未配置源码实现")
 	}
 	runtime := callable.Runtime
 	if callable.SideEffects != "none" || callable.FunctionID != "" || callable.ArtifactRef != "" || definition.Kind == c.KindFunction && len(callable.TargetSchemaIDs) > 0 {
-		return problem(422, "unsupported_runtime", "首批仅支持无副作用的内联Python计算")
+		return problem(422, "unsupported_runtime", "仅支持无副作用的内联源码计算")
 	}
 	if c.ValidateScriptRuntime(runtime) != nil {
-		return problem(422, "unsupported_runtime", "Python源码、入口或运行时限无效")
+		return problem(422, "unsupported_runtime", "源码语言、内容、入口或运行时限无效")
 	}
 	if err := validateParameters(callable.Input); err != nil {
 		return err
@@ -283,8 +284,8 @@ func (h *handler) ready(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, problem(503, "not_ready", "执行存储或运行器尚未就绪"))
 		return
 	}
-	if _, err := h.cfg.Runner.Ready(ctx); err != nil {
-		writeProblem(w, problem(503, "runtime_unavailable", "Python运行器尚未就绪"))
+	if len(availableRuntimes(ctx, h.cfg.Runner)) == 0 {
+		writeProblem(w, problem(503, "runtime_unavailable", "运行器尚未就绪"))
 		return
 	}
 	writeJSON(w, 200, map[string]string{"status": "ready"})
@@ -293,14 +294,22 @@ func (h *handler) ready(w http.ResponseWriter, r *http.Request) {
 func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p c.Principal) error {
 	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 	defer cancel()
-	available := false
+	runtimes := []string{}
 	if h.cfg.Runner != nil && h.cfg.Store != nil && h.cfg.Store.Ping(ctx) == nil {
-		_, err := h.cfg.Runner.Ready(ctx)
-		available = err == nil
+		runtimes = availableRuntimes(ctx, h.cfg.Runner)
 	}
-	out := map[string]any{"invocation": available, "draftInvocation": available, "sourceDiagnostics": true, "testCases": true, "runtimes": []string{"python"}, "synchronous": true, "async": false, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionInlineSource": true, "actionRequiresFunctionInvoke": true}
+	available := len(runtimes) > 0
+	sourceTools := []string{}
+	if _, ok := h.cfg.Runner.(sourceToolRunner); ok {
+		for _, language := range runtimes {
+			if language == "go" {
+				sourceTools = append(sourceTools, language)
+			}
+		}
+	}
+	out := map[string]any{"invocation": available, "draftInvocation": available, "sourceDiagnostics": true, "testCases": true, "runtimes": runtimes, "supportedRuntimes": supportedRuntimes, "sourceTools": sourceTools, "synchronous": true, "async": false, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionInlineSource": true, "actionRequiresFunctionInvoke": true}
 	if !available {
-		out["reason"] = "Python运行器或执行存储尚未就绪"
+		out["reason"] = "运行器或执行存储尚未就绪"
 	}
 	writeJSON(w, 200, out)
 	return nil
@@ -370,10 +379,10 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		return err
 	}
 	readyCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	imageID, err := h.cfg.Runner.Ready(readyCtx)
+	imageID, err := readyRuntime(readyCtx, h.cfg.Runner, runtime.Language)
 	cancel()
 	if err != nil {
-		return problem(503, "runtime_unavailable", "Python运行器尚未就绪")
+		return problem(503, "runtime_unavailable", runtimeLabel(runtime.Language)+"运行器尚未就绪")
 	}
 	now := time.Now().UTC()
 	record := Record{TenantID: p.TenantID, SubjectID: p.Subject, RequestKey: key, RequestHash: hash, Root: initial.root, Implementation: initial.implementation, Input: namedInput, ImageID: imageID, DeadlineAt: now.Add(time.Duration(runtime.TimeoutSeconds)*time.Second + 90*time.Second), Invocation: c.Invocation{ID: c.NewID(), DefinitionID: initial.root.ID, DefinitionName: initial.root.Name, Kind: initial.root.Kind, Status: "running", CreatedAt: now.Format(time.RFC3339Nano), CodeDigest: sourceDigest(runtime.Source), Mode: mode, DraftETag: request.DraftETag}}
@@ -415,7 +424,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 			}
 		} else {
 			record.Invocation.Status = "failed"
-			record.Invocation.Error = &c.Error{Code: "runtime_failed", Message: "Python执行失败"}
+			record.Invocation.Error = &c.Error{Code: "runtime_failed", Message: runtimeLabel(runtime.Language) + "执行失败"}
 		}
 	} else {
 		values, e := buildOutput(rootCallable.Output, output)

@@ -47,7 +47,7 @@ if (-not (Test-Path -LiteralPath $adminFile)) {
 }
 $initialAdmin = Get-Content -LiteralPath $adminFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
-$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD','ONTOLOGY_PYTHON_IMAGE')
+$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD','ONTOLOGY_PYTHON_IMAGE','ONTOLOGY_JAVASCRIPT_IMAGE','ONTOLOGY_GO_IMAGE')
 $savedEnvironment = @{}
 foreach ($name in $envNames) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -62,17 +62,30 @@ try {
     $env:ONTOLOGY_DATA_URL = 'http://127.0.0.1:18081'
     $env:ONTOLOGY_PUBLIC_ORIGIN = 'http://127.0.0.1:5173'
     if (-not $env:ONTOLOGY_PYTHON_IMAGE) { $env:ONTOLOGY_PYTHON_IMAGE = 'python:3.12-alpine' }
-    $imageProbePreference = $ErrorActionPreference
-    try {
-        # A missing image is expected on first startup. Windows PowerShell 5
-        # must not turn native stderr into a terminating error before the pull.
-        $ErrorActionPreference = 'Continue'
-        & docker image inspect $env:ONTOLOGY_PYTHON_IMAGE --format '{{.Id}}' 2>$null | Out-Null
-        $imageProbeExitCode = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $imageProbePreference }
-    if ($imageProbeExitCode -ne 0) {
-        & docker pull $env:ONTOLOGY_PYTHON_IMAGE
-        if ($LASTEXITCODE -ne 0) { throw 'Python runtime image is unavailable; inspect the image setting and Docker access.' }
+    if (-not $env:ONTOLOGY_JAVASCRIPT_IMAGE) { $env:ONTOLOGY_JAVASCRIPT_IMAGE = 'node:22-alpine' }
+    if (-not $env:ONTOLOGY_GO_IMAGE) { $env:ONTOLOGY_GO_IMAGE = 'agentforge-go:1.25' }
+    foreach ($runtimeImage in @($env:ONTOLOGY_PYTHON_IMAGE, $env:ONTOLOGY_JAVASCRIPT_IMAGE)) {
+        $imageProbePreference = $ErrorActionPreference
+        try {
+            # A missing image is expected on first startup. Windows PowerShell 5
+            # must not turn native stderr into a terminating error before pull.
+            $ErrorActionPreference = 'Continue'
+            & docker image inspect $runtimeImage --format '{{.Id}}' 2>$null | Out-Null
+            $imageProbeExitCode = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $imageProbePreference }
+        if ($imageProbeExitCode -ne 0) {
+            & docker pull $runtimeImage
+            if ($LASTEXITCODE -ne 0) { throw "Runtime image $runtimeImage is unavailable; inspect the image setting and Docker access." }
+        }
+    }
+    if ($env:ONTOLOGY_GO_IMAGE -eq 'agentforge-go:1.25') {
+        # Explicit development setup rebuilds the trusted launcher when its
+        # source changes; ordinary service startup and requests never build.
+        & docker build -t $env:ONTOLOGY_GO_IMAGE -f (Join-Path $repoRoot 'deploy/execution/go/Dockerfile') (Join-Path $repoRoot 'deploy/execution/go')
+        if ($LASTEXITCODE -ne 0) { throw 'Go runtime image build failed.' }
+    } else {
+        & docker image inspect $env:ONTOLOGY_GO_IMAGE --format '{{.Id}}' | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Prepare the administrator-selected Go runtime image before startup.' }
     }
     $binRoot = Join-Path $devRoot 'bin'
     New-Item -ItemType Directory -Force -Path $binRoot | Out-Null

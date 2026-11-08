@@ -187,7 +187,9 @@ export interface Callable {
 }
 export interface CallableTestCase { id: string; name: string; input: Values }
 export interface SourceDiagnostic { code: string; message: string; line: number; column?: number; endLine?: number; endColumn?: number }
-export interface ScriptRuntime { language: 'python'; source: string; entrypoint: string; timeoutSeconds: number }
+export type ScriptLanguage = 'python' | 'javascript' | 'go'
+export interface ScriptRuntime { language: ScriptLanguage; source: string; entrypoint: string; timeoutSeconds: number }
+export interface SourceToolResult { source: string; diagnostics: SourceDiagnostic[] }
 export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; actionInlineSource?: boolean; draftInvocation?: boolean; reason?: string }
 export interface Invocation {
   id: string

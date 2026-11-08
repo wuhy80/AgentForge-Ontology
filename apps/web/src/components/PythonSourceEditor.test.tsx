@@ -5,12 +5,18 @@ import { CompletionContext, acceptCompletion, currentCompletions } from '@codemi
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { python } from '@codemirror/lang-python'
+import { javascript } from '@codemirror/lang-javascript'
+import { go } from '@codemirror/lang-go'
 import { undo } from '@codemirror/commands'
-import { PythonSourceEditor, pythonParameterCompletions } from './PythonSourceEditor'
+import type { ScriptLanguage, SourceToolResult } from '../lib/types'
+import { initialRuntime } from '../lib/runtime-language'
+import { PythonSourceEditor, pythonParameterCompletions, scriptParameterCompletions } from './PythonSourceEditor'
 
 const tools = vi.hoisted(() => ({ checkPythonSource: vi.fn(), formatPythonSource: vi.fn() }))
+const javascriptTools = vi.hoisted(() => ({ checkJavascriptSource: vi.fn(), formatJavascriptSource: vi.fn() }))
 vi.mock('../lib/python-source-tools', () => tools)
-beforeEach(() => { tools.checkPythonSource.mockReset().mockResolvedValue([]); tools.formatPythonSource.mockReset() })
+vi.mock('../lib/javascript-source-tools', () => javascriptTools)
+beforeEach(() => { tools.checkPythonSource.mockReset().mockResolvedValue([]); tools.formatPythonSource.mockReset(); javascriptTools.checkJavascriptSource.mockReset().mockResolvedValue([]); javascriptTools.formatJavascriptSource.mockReset() })
 
 const rect = { x: 0, y: 0, width: 100, height: 20, top: 0, right: 100, bottom: 20, left: 0, toJSON: () => ({}) }
 const originalRects = Object.getOwnPropertyDescriptor(Range.prototype, 'getClientRects')
@@ -19,6 +25,97 @@ const originalRect = Object.getOwnPropertyDescriptor(Range.prototype, 'getBoundi
 beforeAll(() => {
   Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [rect] })
   Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => rect })
+})
+
+describe('JavaScript 与 Go 源码编辑器', () => {
+  function completeScript(language: ScriptLanguage, text: string) {
+    const state = EditorState.create({ doc: text, extensions: [language === 'go' ? go() : javascript()] })
+    return scriptParameterCompletions(new CompletionContext(state, text.length, true), language, ['正文', '含"引号'], ['结果'])
+  }
+
+  it.each(['javascript', 'go'] as const)('%s 提供独立语言高亮、标签和缩进', (language) => {
+    render(<PythonSourceEditor language={language} value={initialRuntime(language).source} onChange={vi.fn()} />)
+    const view = editor(language === 'go' ? 'Go 源码' : 'JavaScript 源码')
+    expect(view.contentDOM.querySelector('.cm-line span')).toBeTruthy()
+    act(() => { view.focus(); view.dispatch({ selection: { anchor: 0 } }) })
+    fireEvent.keyDown(view.contentDOM, { key: 'Tab', code: 'Tab' })
+    expect(view.state.doc.toString()).toBe((language === 'go' ? '\t' : '  ') + initialRuntime(language).source)
+  })
+
+  it.each(['javascript', 'go'] as const)('%s 按语法树补全参数键，不在文本、注释或嵌套对象误提示', (language) => {
+    const prefix = language === 'go' ? 'package main\nfunc Main(inputs map[string]any) (map[string]any, error) { return map[string]any' : 'function main(inputs) { return '
+    expect(completeScript(language, 'inputs["正')?.options.map((item) => item.label)).toEqual(['正文', '含"引号'])
+    expect(completeScript(language, 'inputs["')?.options[1].apply).toBe('含\\"引号')
+    expect(completeScript(language, prefix + '{"')?.options.map((item) => item.label)).toEqual(['结果'])
+    expect(completeScript(language, prefix + '{')?.options[0].apply).toBe('"结果": ')
+    expect(completeScript(language, prefix + '{"a": 1, "')?.options[0].label).toBe('结果')
+    expect(completeScript(language, prefix + '{"a": "')).toBeNull()
+    expect(completeScript(language, '// inputs["')).toBeNull()
+    expect(completeScript(language, 'text = "inputs[\'')).toBeNull()
+    expect(completeScript(language, prefix + '{"a": {"')).toBeNull()
+    expect(completeScript(language, 'settings = {"')).toBeNull()
+  })
+
+  it.each(['javascript', 'go'] as const)('%s 补全按钮包含真实局部变量', async (language) => {
+    const source = language === 'go' ? 'package main\nfunc Main(inputs map[string]any) (map[string]any, error) {\n localCount := 1\n lo' : 'function main(inputs) {\n const localCount = 1;\n lo'
+    render(<PythonSourceEditor language={language} value={source} onChange={vi.fn()} />)
+    const view = editor(language === 'go' ? 'Go 源码' : 'JavaScript 源码')
+    act(() => view.dispatch({ selection: { anchor: view.state.doc.length } }))
+    fireEvent.click(screen.getByRole('button', { name: '自动补全' }))
+    await waitFor(() => expect(currentCompletions(view.state).some((item) => item.label === 'localCount')).toBe(true))
+  })
+
+  it('JavaScript 检查与格式化仅使用对应的 Worker 工具', async () => {
+    javascriptTools.formatJavascriptSource.mockResolvedValue('function main(inputs) {\n  return {};\n}\n')
+    render(<PythonSourceEditor language="javascript" value="function main(inputs){return {}}" onChange={vi.fn()} />)
+    await waitFor(() => expect(javascriptTools.checkJavascriptSource).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: '格式化代码' }))
+    await waitFor(() => expect(editor('JavaScript 源码').state.doc.toString()).toContain('  return {};'))
+    expect(tools.formatPythonSource).not.toHaveBeenCalled()
+    expect(tools.checkPythonSource).not.toHaveBeenCalled()
+  })
+
+  it('Go 新定义未保存时禁用容器工具并说明原因', () => {
+    render(<PythonSourceEditor language="go" value={initialRuntime('go').source} onChange={vi.fn()} />)
+    expect((screen.getByRole('button', { name: '检查语法' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '格式化代码' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText('请先保存草稿，再使用 Go 检查与格式化。')).toBeTruthy()
+  })
+
+  it('Go 容器错误优先于迟到的本地语法提示，格式化错误保留源码', async () => {
+    const source = initialRuntime('go').source
+    const result = { source, diagnostics: [{ code: 'syntax_error', message: '容器发现语法错误', line: 3, column: 1 }] }
+    const sourceTools = { check: vi.fn().mockResolvedValue(result), format: vi.fn().mockResolvedValue(result) }
+    const changed = vi.fn()
+    render(<PythonSourceEditor language="go" value={source} onChange={changed} sourceTools={sourceTools} />)
+    fireEvent.click(screen.getByRole('button', { name: '检查语法' }))
+    await screen.findByRole('button', { name: /容器发现语法错误/ })
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)) })
+    expect(screen.getByRole('button', { name: /容器发现语法错误/ })).toBeTruthy()
+    expect(screen.queryByText(/Go 容器语法检查通过/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '格式化代码' }))
+    await screen.findByText(/源码存在语法错误/)
+    expect(editor('Go 源码').state.doc.toString()).toBe(source)
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('Go 组词和禁用期间不调用容器，修改源码后忽略迟到诊断', async () => {
+    let resolve!: (value: SourceToolResult) => void
+    const source = initialRuntime('go').source
+    const sourceTools = { check: vi.fn().mockImplementation(() => new Promise<SourceToolResult>((done) => { resolve = done })), format: vi.fn() }
+    render(<PythonSourceEditor language="go" value={source} onChange={vi.fn()} sourceTools={sourceTools} />)
+    const view = editor('Go 源码')
+    fireEvent.compositionStart(view.contentDOM)
+    fireEvent.click(screen.getByRole('button', { name: '检查语法' }))
+    expect(sourceTools.check).not.toHaveBeenCalled()
+    fireEvent.compositionEnd(view.contentDOM)
+    await act(async () => { await Promise.resolve() })
+    fireEvent.click(screen.getByRole('button', { name: '检查语法' }))
+    act(() => view.dispatch({ changes: { from: view.state.doc.length, insert: '// 新源码' } }))
+    await act(async () => resolve({ source, diagnostics: [{ code: 'syntax_error', message: '迟到的旧错误', line: 1 }] }))
+    expect(screen.queryByText(/迟到的旧错误/)).toBeNull()
+    expect(view.state.doc.toString()).toContain('// 新源码')
+  })
 })
 afterAll(() => {
   if (originalRects) Object.defineProperty(Range.prototype, 'getClientRects', originalRects)

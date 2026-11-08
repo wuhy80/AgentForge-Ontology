@@ -42,4 +42,6 @@ try {
             if($LASTEXITCODE -ne 0){throw "$module vet failed"}
         } finally {Pop-Location}
     }
+    & go vet (Join-Path $repoRoot 'deploy/execution/go/runner.go')
+    if($LASTEXITCODE -ne 0){throw 'Go runtime launcher vet failed'}
 } finally {foreach($name in $names){[Environment]::SetEnvironmentVariable($name,$prior[$name],'Process')}}

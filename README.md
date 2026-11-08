@@ -2,7 +2,7 @@
 
 通用本体（Ontology）管理与运行框架，使用 Go 开发。面向不同领域统一管理业务对象、属性、关系、动作与函数，为业务应用、知识管理和智能体提供语义基础。项目定位与范围见[项目总览](docs/项目总览.md)。
 
-当前已提供首批Go Metadata、Data、Execution服务及React中文工作台，包含公共协议、认证授权、MySQL存储与Python纯计算运行器。已实现范围及验证结果见[项目总览](docs/项目总览.md#当前实现与验证2026-11-06)。
+当前已提供首批Go Metadata、Data、Execution服务及React中文工作台，包含公共协议、认证授权、MySQL存储与Python、JavaScript、Go纯计算运行器；Function和Action各自提供源码编辑、高亮、补全与草稿试运行。已实现范围及验证结果见[项目总览](docs/项目总览.md#当前实现与验证2026-11-06)。
 
 本地开发需要 Go 1.22+、PowerShell 和运行中的 Docker Desktop。在仓库根目录执行：
 
@@ -11,7 +11,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-dev.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\check.ps1 -Integration
 ```
 
-服务分别监听`127.0.0.1:18080`、`127.0.0.1:18081`、`127.0.0.1:18082`。启动脚本创建独立的开发数据库，显式迁移并初始化首个账号后启动服务，并准备Python运行镜像；密钥与本地初始管理员信息仅保存在忽略的`.cache/dev/`。完整使用方式见[开发指南](docs/开发指南.md)。
+服务分别监听`127.0.0.1:18080`、`127.0.0.1:18081`、`127.0.0.1:18082`。启动脚本创建独立的开发数据库，显式迁移并初始化首个账号后启动服务，并准备Python/Node镜像、构建默认Go专用镜像；自定义Go镜像须管理员预先准备，`-DependenciesOnly`不准备运行镜像。密钥与本地初始管理员信息仅保存在忽略的`.cache/dev/`。完整使用方式见[开发指南](docs/开发指南.md)。
 
 前端需要 Node.js 22.12+ 或 24。另开终端运行：
 

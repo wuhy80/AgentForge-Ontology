@@ -129,6 +129,34 @@ func TestPureFunctionRuntimeUpdatePreservesSignatureAndSnapshot(t *testing.T) {
 	}
 }
 
+func TestCallableLanguagesCanChangeWithoutChangingActiveSignature(t *testing.T) {
+	for _, create := range []func() c.Definition{executableFunction, executableAction} {
+		old := create()
+		for _, language := range []string{"javascript", "go"} {
+			raw, _ := json.Marshal(old)
+			var next c.Definition
+			_ = json.Unmarshal(raw, &next)
+			callable := next.Function
+			if next.Kind == c.KindAction {
+				callable = next.Action
+			}
+			callable.Runtime.Language = language
+			callable.Runtime.Entrypoint = "Main"
+			callable.Runtime.Source = "saved source is parsed only by the selected runtime"
+			if err := canonicalDefinition(&next, false); err != nil {
+				t.Fatalf("%s %s source rejected: %v", next.Kind, language, err)
+			}
+			if err := compatibleUpdate(old, next); err != nil {
+				t.Fatalf("%s language update rejected: %v", next.Kind, err)
+			}
+			callable.Output[0].DataType = "text"
+			if compatibleUpdate(old, next) == nil {
+				t.Fatal("language change bypassed active signature lock")
+			}
+		}
+	}
+}
+
 func TestActionBindingChecksFullContractAndTenant(t *testing.T) {
 	function := executableFunction()
 	action := function

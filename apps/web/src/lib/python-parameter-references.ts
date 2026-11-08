@@ -1,11 +1,14 @@
 import { pythonLanguage } from '@codemirror/lang-python'
+import { javascriptLanguage } from '@codemirror/lang-javascript'
+import { goLanguage } from '@codemirror/lang-go'
+import type { ScriptLanguage } from './types'
 
 // This is a reminder for literal keys, not a Python data flow analysis. Strings
 // are read from the parser, so a comment or a quoted code example is not matched.
-export function parameterReferenceLines(source: string, name: string): number[] {
+export function parameterReferenceLines(source: string, name: string, language: ScriptLanguage = 'python'): number[] {
   if (source.length > 65536 || !name) return []
   const lines = new Set<number>()
-  const tree = pythonLanguage.parser.parse(source)
+  const tree = (language === 'go' ? goLanguage : language === 'javascript' ? javascriptLanguage : pythonLanguage).parser.parse(source)
   tree.iterate({ enter(node) {
     if (node.name !== 'String') return
     const parent = node.node.parent
@@ -22,9 +25,11 @@ export function parameterReferenceLines(source: string, name: string): number[] 
     if (value !== name) return
     const context = parent ? source.slice(parent.from, parent.to) : ''
     // Inputs can use indexing or get(); output keys can be in any dictionary.
-    const isInput = parent?.name === 'MemberExpression' && /^inputs\s*\[/.test(context)
+    const isInput = (parent?.name === 'MemberExpression' || parent?.name === 'IndexExpr') && /^inputs\s*\[/.test(context)
       || parent?.name === 'ArgList' && /\binputs\.get\s*$/.test(source.slice(Math.max(0, parent.from - 40), parent.from))
     const isKey = parent?.name === 'DictionaryExpression' && /^\s*:/.test(source.slice(node.to, parent.to))
+      || parent?.name === 'Property' && /^\s*:/.test(source.slice(node.to, parent.to))
+      || parent?.name === 'Key' && /^\s*:/.test(source.slice(node.to, node.to + 20))
     if (isInput || isKey) lines.add(source.slice(0, node.from).split('\n').length)
   } })
   return [...lines]

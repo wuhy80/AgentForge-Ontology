@@ -82,14 +82,14 @@ func executionInternal(service string, action func(http.ResponseWriter, *http.Re
 }
 
 // Uses the real account store, current OPA policy, public cookie/CSRF routes,
-// three independent MySQL databases and the actual restricted Python container.
-func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
+// three independent MySQL databases and actual restricted language containers.
+func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	mdsn, ddsn, edsn := os.Getenv("ONTOLOGY_TEST_METADATA_DSN"), os.Getenv("ONTOLOGY_TEST_DATA_DSN"), os.Getenv("ONTOLOGY_TEST_EXECUTION_DSN")
 	opaURL := os.Getenv("ONTOLOGY_TEST_OPA_URL")
 	if mdsn == "" || ddsn == "" || edsn == "" || opaURL == "" || os.Getenv("EXECUTION_TEST_DOCKER") != "1" {
-		t.Skip("set three ONTOLOGY_TEST_*_DSN values, ONTOLOGY_TEST_OPA_URL and EXECUTION_TEST_DOCKER=1 for real Python/session/OPA integration")
+		t.Skip("set three ONTOLOGY_TEST_*_DSN values, ONTOLOGY_TEST_OPA_URL and EXECUTION_TEST_DOCKER=1 for real callable/session/OPA integration")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	open := func(dsn string) *storage.Engine {
 		e, err := storage.Open(ctx, storage.Config{Driver: "mysql", DSN: dsn, MaxOpen: 6, MaxIdle: 2})
@@ -183,7 +183,7 @@ func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if image == "" {
 		image = "python:3.12-alpine"
 	}
-	runner := &execution.DockerRunner{Image: image}
+	runner := &execution.DockerRunner{Image: image, JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE"), Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY")}
 	if _, err := runner.Ready(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -373,6 +373,7 @@ func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if strings.Contains(string(encoded), "while True") || strings.Contains(string(encoded), "Traceback") {
 		t.Fatal("execution disclosed code or traceback")
 	}
+	verifyMultiLanguageHTTP(t, admin, other, peerClient, execServer.URL, metaServer.URL, publish, savePolicy, policy.Current.Rules, roleID)
 	// Authoritative OPA failure closes access even for a persisted success.
 	originalURL := opa.URL
 	opa.URL = "http://127.0.0.1:1"
@@ -381,3 +382,124 @@ func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	admin.request("POST", metaServer.URL+"/metadata/auth/logout", nil, nil, 204, nil)
 	admin.request("GET", resultURL, nil, nil, 401, nil)
 }
+
+func verifyMultiLanguageHTTP(t *testing.T, admin, other, peer *executionHTTP, execURL, metaURL string, publish func(c.Definition) c.CurrentDefinition, savePolicy func([]c.PermissionRule), baseRules []c.PermissionRule, roleID string) {
+	t.Helper()
+	var capabilities struct {
+		Runtimes, SourceTools       []string
+		Invocation, DraftInvocation bool
+	}
+	admin.request("GET", execURL+"/execution/capabilities", nil, nil, 200, &capabilities)
+	if !capabilities.Invocation || !capabilities.DraftInvocation || strings.Join(capabilities.Runtimes, ",") != "python,javascript,go" || strings.Join(capabilities.SourceTools, ",") != "go" {
+		t.Fatalf("real capabilities not available: %+v", capabilities)
+	}
+	for _, language := range []string{"javascript", "go"} {
+		entrypoint, sourceTemplate, badSource := "main", "function main(inputs) { console.log('private'); return {结果: '__VALUE__'}; }", "function main(inputs) {\n const 中文 = ;\n}"
+		if language == "go" {
+			entrypoint = "Main"
+			sourceTemplate = "package main\nimport \"fmt\"\nfunc Main(inputs map[string]any)(map[string]any,error){fmt.Println(\"private\");return map[string]any{\"结果\":\"__VALUE__\"},nil}"
+			badSource = "package main\nfunc Main(inputs map[string]any)(map[string]any,error){\n中文 := ;return nil,nil\n}"
+		}
+		source := func(value string) string { return strings.ReplaceAll(sourceTemplate, "__VALUE__", value) }
+		createCallable := func() *c.Callable {
+			return &c.Callable{Input: []c.Property{{Name: "金额", DataType: "decimal", Precision: 25, Scale: 2, Required: true}}, Output: []c.Property{{Name: "结果", DataType: "decimal", Precision: 25, Scale: 2, Required: true}}, SideEffects: "none", Runtime: &c.ScriptRuntime{Language: language, Entrypoint: entrypoint, Source: source("9007199254740993.10"), TimeoutSeconds: 30}}
+		}
+		function := publish(c.Definition{Kind: c.KindFunction, Name: language + "精确计算", Function: createCallable()})
+		inline := publish(c.Definition{Kind: c.KindAction, Name: language + "原生动作", Action: createCallable()})
+		boundCallable := createCallable()
+		boundCallable.Runtime = nil
+		boundCallable.FunctionID = function.Definition.ID
+		bound := publish(c.Definition{Kind: c.KindAction, Name: language + "绑定动作", Action: boundCallable})
+		callable := func(d c.Definition) *c.Callable {
+			if d.Kind == c.KindAction {
+				return d.Action
+			}
+			return d.Function
+		}
+		intent := func(d c.Definition) c.InvocationRequest {
+			return c.InvocationRequest{DefinitionID: d.ID, Input: map[string]json.RawMessage{callable(d).Input[0].ID: raw("9007199254740993.10")}}
+		}
+		invoke := func(request c.InvocationRequest, key string, status int) c.Invocation {
+			var result c.Invocation
+			admin.request("POST", execURL+"/execution/invocations", request, map[string]string{"Idempotency-Key": key}, status, &result)
+			return result
+		}
+		assertValue := func(result c.Invocation, d c.Definition, value string) {
+			t.Helper()
+			if result.Status != "succeeded" || string(result.Output[callable(d).Output[0].ID]) != `"`+value+`"` {
+				t.Fatalf("%s %s wrong value: %+v", language, d.Kind, result)
+			}
+		}
+		for _, current := range []c.CurrentDefinition{function, inline} {
+			request, key := intent(current.Definition), c.NewID()
+			result := invoke(request, key, 201)
+			assertValue(result, current.Definition, "9007199254740993.10")
+			if replay := invoke(request, key, 200); replay.ID != result.ID {
+				t.Fatal("multilanguage idempotency executed twice")
+			}
+			resultURL := execURL + "/execution/invocations/" + result.ID
+			other.request("GET", resultURL, nil, nil, 404, nil)
+			peer.request("GET", resultURL, nil, nil, 404, nil)
+			callable(current.Definition).Runtime.Source = source("9007199254740993.20")
+			var draft c.CurrentDefinition
+			headers := admin.request("PUT", metaURL+"/metadata/definitions/"+current.Definition.ID+"/draft", current.Definition, map[string]string{"If-Match": `"` + current.ETag + `"`}, 200, &draft)
+			assertValue(invoke(request, c.NewID(), 201), current.Definition, "9007199254740993.10")
+			draftRequest := request
+			draftRequest.DraftETag = draft.ETag
+			draftResult := invoke(draftRequest, c.NewID(), 201)
+			assertValue(draftResult, draft.Definition, "9007199254740993.20")
+			if draftResult.Mode != "draft" || draftResult.DraftETag != draft.ETag {
+				t.Fatal("multilanguage draft evidence missing")
+			}
+			wrong := draftRequest
+			wrong.DraftETag = strings.Repeat("0", 64)
+			invoke(wrong, c.NewID(), 409)
+			callable(draft.Definition).Runtime.Source = badSource
+			headers = admin.request("PUT", metaURL+"/metadata/definitions/"+draft.Definition.ID+"/draft", draft.Definition, map[string]string{"If-Match": headers.Get("ETag")}, 200, &draft)
+			admin.request("GET", execURL+"/execution/invocations/"+draftResult.ID, nil, nil, 409, nil)
+			draftRequest.DraftETag = draft.ETag
+			failed := invoke(draftRequest, c.NewID(), 201)
+			wantLine := 2
+			if language == "go" {
+				wantLine = 3
+			}
+			if failed.Status != "failed" || len(failed.Diagnostics) != 1 || failed.Diagnostics[0].Code != "syntax_error" || failed.Diagnostics[0].Line != wantLine || strings.Contains(string(mustMarshal(failed)), "private") {
+				t.Fatalf("%s unsafe syntax diagnostic: %+v", language, failed)
+			}
+			callable(draft.Definition).Runtime.Source = source("9007199254740993.20")
+			headers = admin.request("PUT", metaURL+"/metadata/definitions/"+draft.Definition.ID+"/draft", draft.Definition, map[string]string{"If-Match": headers.Get("ETag")}, 200, &draft)
+			admin.request("POST", metaURL+"/metadata/definitions/"+draft.Definition.ID+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
+			admin.request("GET", resultURL, nil, nil, 409, nil)
+			admin.request("GET", execURL+"/execution/invocations/"+draftResult.ID, nil, nil, 404, nil)
+			assertValue(invoke(request, c.NewID(), 201), current.Definition, "9007199254740993.20")
+		}
+		assertValue(invoke(intent(bound.Definition), c.NewID(), 201), bound.Definition, "9007199254740993.20")
+		denyInvoke := append(append([]c.PermissionRule{}, baseRules...), c.PermissionRule{ID: c.NewID(), RoleID: roleID, Effect: "deny", Operation: "function.invoke", ResourceID: function.Definition.ID})
+		savePolicy(denyInvoke)
+		admin.request("POST", execURL+"/execution/invocations", intent(function.Definition), map[string]string{"Idempotency-Key": c.NewID()}, 403, nil)
+		admin.request("POST", execURL+"/execution/invocations", intent(bound.Definition), map[string]string{"Idempotency-Key": c.NewID()}, 403, nil)
+		assertValue(invoke(intent(inline.Definition), c.NewID(), 201), inline.Definition, "9007199254740993.20")
+		if language == "go" {
+			request := c.SourceToolRequest{DefinitionID: function.Definition.ID, Operation: "format", Runtime: createCallable().Runtime}
+			var formatted c.SourceToolResult
+			admin.request("POST", execURL+"/execution/source-tools", request, nil, 200, &formatted)
+			if len(formatted.Diagnostics) != 0 || !strings.Contains(formatted.Source, "func Main(inputs map[string]any) (map[string]any, error)") {
+				t.Fatalf("real Go format: %+v", formatted)
+			}
+			other.request("POST", execURL+"/execution/source-tools", request, nil, 404, nil)
+			request.Runtime.Source = badSource
+			request.Operation = "check"
+			admin.request("POST", execURL+"/execution/source-tools", request, nil, 200, &formatted)
+			if len(formatted.Diagnostics) == 0 || formatted.Diagnostics[0].Line != 3 {
+				t.Fatalf("real Go check: %+v", formatted)
+			}
+			request.Runtime.Source = source("9007199254740993.10")
+			savePolicy(append(append([]c.PermissionRule{}, baseRules...), c.PermissionRule{ID: c.NewID(), RoleID: roleID, Effect: "deny", Operation: "definition.edit", ResourceID: function.Definition.ID}))
+			admin.request("POST", execURL+"/execution/source-tools", request, nil, 403, nil)
+			assertValue(invoke(intent(function.Definition), c.NewID(), 201), function.Definition, "9007199254740993.20")
+		}
+		savePolicy(baseRules)
+	}
+}
+
+func mustMarshal(value any) []byte { encoded, _ := json.Marshal(value); return encoded }

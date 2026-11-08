@@ -206,18 +206,18 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		}
 		if c.Runtime != nil {
 			if c.SideEffects != "none" || c.ArtifactRef != "" || c.FunctionID != "" {
-				return problem(422, "unsupported_runtime", "Python脚本仅支持无副作用计算，不能同时绑定产物或其他函数")
+				return problem(422, "unsupported_runtime", "源码仅支持无副作用计算，不能同时绑定产物或其他函数")
 			}
 			if err := contracts.ValidateScriptRuntime(c.Runtime); err != nil {
 				return problem(422, "invalid_runtime", err.Error())
 			}
 			for _, ps := range [][]contracts.Property{c.Input, c.Output} {
 				if len(ps) > 256 {
-					return problem(422, "parameter_budget", "Python输入与输出分别最多256个参数")
+					return problem(422, "parameter_budget", "源码输入与输出分别最多256个参数")
 				}
 				for _, property := range ps {
 					if property.EnumID != "" {
-						return problem(422, "unsupported_parameters", "首批Python运行参数尚不支持Enum引用")
+						return problem(422, "unsupported_parameters", "源码运行参数尚不支持Enum引用")
 					}
 				}
 			}

@@ -1,5 +1,5 @@
 import type {
-  DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation,
+  DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation, ScriptRuntime, SourceToolResult,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
   DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SourceQueryResult, SchemaStorageMapping, SourceVersionOption,
@@ -110,6 +110,9 @@ export class ApiClient {
     return this.request('/api/execution/invocations', { method: 'POST', body: { definitionId, input, draftEtag }, idempotencyKey, signal })
   }
   getInvocation(id: string, signal?: AbortSignal): Promise<Invocation> { return this.request(`/api/execution/invocations/${encodeURIComponent(id)}`, { signal }) }
+  sourceTools(definitionId: string, runtime: ScriptRuntime, operation: 'check' | 'format', signal?: AbortSignal): Promise<SourceToolResult> {
+    return this.request('/api/execution/source-tools', { method: 'POST', body: { definitionId, runtime, operation }, signal })
+  }
   private async readSession(path: string, options: RequestOptions = {}): Promise<Session> {
     const session = await this.request<Session>(path, options)
     this.setCSRFToken(session.csrfToken)

@@ -12,7 +12,7 @@ func TestPythonRuntimeAcceptsOnlyBoundedDeclaredImplementation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutate := range map[string]func(*ScriptRuntime){
-		"javascript":            func(r *ScriptRuntime) { r.Language = "javascript" },
+		"unknown language":      func(r *ScriptRuntime) { r.Language = "ruby" },
 		"empty source":          func(r *ScriptRuntime) { r.Source = "  \n" },
 		"oversize source":       func(r *ScriptRuntime) { r.Source = strings.Repeat("x", MaxScriptSourceBytes+1) },
 		"invalid utf8":          func(r *ScriptRuntime) { r.Source = string([]byte{0xff}) },
@@ -33,6 +33,21 @@ func TestPythonRuntimeAcceptsOnlyBoundedDeclaredImplementation(t *testing.T) {
 	}
 	if ValidateScriptRuntime(nil) == nil {
 		t.Fatal("missing implementation accepted")
+	}
+}
+
+func TestScriptRuntimeLanguagesAndReservedEntrypoints(t *testing.T) {
+	for language, entrypoint := range map[string]string{"python": "main", "javascript": "main", "go": "Main"} {
+		if err := ValidateScriptRuntime(&ScriptRuntime{Language: language, Source: "source validated at execution", Entrypoint: entrypoint, TimeoutSeconds: 30}); err != nil {
+			t.Fatalf("%s: %v", language, err)
+		}
+	}
+	for language, words := range map[string][]string{"python": {"class", "return"}, "javascript": {"import", "await", "eval"}, "go": {"main", "init", "_", "func", "__ontologyMain"}} {
+		for _, entrypoint := range words {
+			if ValidateScriptRuntime(&ScriptRuntime{Language: language, Source: "source", Entrypoint: entrypoint, TimeoutSeconds: 1}) == nil {
+				t.Fatalf("%s accepted reserved %s", language, entrypoint)
+			}
+		}
 	}
 }
 

@@ -33,14 +33,14 @@ type DiagnosticRunError struct {
 
 func (e *DiagnosticRunError) Unwrap() error { return e.RunError }
 
-// DockerRunner never invokes a host Python, mounts host paths, forwards host
+// DockerRunner never invokes host language runtimes, mounts host paths, forwards host
 // environment variables or pulls a user-selected image. The configured image
 // is resolved to its actual local image ID before each admitted invocation.
 type DockerRunner struct {
-	Binary, Image string
-	mu            sync.Mutex
-	pending       map[string]bool
-	command       func(context.Context, string, ...string) *exec.Cmd
+	Binary, Image, JavaScriptImage, GoImage string
+	mu                                      sync.Mutex
+	pending                                 map[string]bool
+	command                                 func(context.Context, string, ...string) *exec.Cmd
 }
 
 func (d *DockerRunner) exec(ctx context.Context, args ...string) *exec.Cmd {
@@ -60,29 +60,51 @@ func (d *DockerRunner) binary() string {
 	}
 	return "docker"
 }
-func (d *DockerRunner) image() string {
-	if d.Image != "" {
-		return d.Image
+func (d *DockerRunner) imageFor(language string) string {
+	switch language {
+	case "python":
+		if d.Image != "" {
+			return d.Image
+		}
+		return "python:3.12-alpine"
+	case "javascript":
+		if d.JavaScriptImage != "" {
+			return d.JavaScriptImage
+		}
+		return "node:22-alpine"
+	case "go":
+		if d.GoImage != "" {
+			return d.GoImage
+		}
+		return "agentforge-go:1.25"
 	}
-	return "python:3.12-alpine"
+	return ""
 }
 
 var imageIDPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 
 func (d *DockerRunner) Ready(ctx context.Context) (string, error) {
+	return d.ReadyRuntime(ctx, "python")
+}
+
+func (d *DockerRunner) ReadyRuntime(ctx context.Context, language string) (string, error) {
+	image := d.imageFor(language)
+	if image == "" {
+		return "", errors.New("unsupported runtime")
+	}
 	if err := d.recoverContainers(ctx); err != nil {
 		return "", err
 	}
-	cmd := d.exec(ctx, "image", "inspect", "--format", "{{.Id}} {{.Os}}", d.image())
+	cmd := d.exec(ctx, "image", "inspect", "--format", "{{.Id}} {{.Os}}", image)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
 	if cmd.Run() != nil {
-		return "", errors.New("configured Python image is unavailable")
+		return "", errors.New("configured runtime image is unavailable")
 	}
 	parts := strings.Fields(out.String())
 	if len(parts) != 2 || !imageIDPattern.MatchString(parts[0]) || parts[1] != "linux" {
-		return "", errors.New("configured Python image must be a Linux image")
+		return "", errors.New("configured runtime image must be a Linux image")
 	}
 	return parts[0], nil
 }
@@ -90,7 +112,7 @@ func (d *DockerRunner) Ready(ctx context.Context) (string, error) {
 // Only expired containers carrying our fixed marker are recovered across
 // process restarts. Live containers belonging to other replicas are untouched.
 func (d *DockerRunner) recoverContainers(ctx context.Context) error {
-	cmd := d.exec(ctx, "ps", "--all", "--filter", "label=ontology.execution.runtime=python", "--format", `{{.Names}} {{.Label "ontology.execution.deadline"}}`)
+	cmd := d.exec(ctx, "ps", "--all", "--filter", "label=ontology.execution.runtime", "--format", `{{.Names}} {{.Label "ontology.execution.deadline"}}`)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
@@ -107,7 +129,7 @@ func (d *DockerRunner) recoverContainers(ctx context.Context) error {
 	}
 	for _, line := range lines {
 		parts := strings.Fields(line)
-		if len(parts) != 2 || !strings.HasPrefix(parts[0], "ontology-python-") {
+		if len(parts) != 2 || !(strings.HasPrefix(parts[0], "ontology-python-") || strings.HasPrefix(parts[0], "ontology-javascript-") || strings.HasPrefix(parts[0], "ontology-go-")) {
 			continue
 		}
 		deadline, err := strconv.ParseInt(parts[1], 10, 64)
@@ -218,7 +240,13 @@ except BaseException as failure:
 // Treat subprocess diagnostics as untrusted data. Messages are selected here,
 // never copied from Python exceptions; coordinates must fit this exact source.
 func sourceFailure(source string, raw []byte) error {
-	fallback := &RunError{"failed", "python_error", "Python执行失败，请核对代码、入口与参数"}
+	return runtimeSourceFailure("python", source, raw)
+}
+
+func runtimeSourceFailure(language, source string, raw []byte) error {
+	label := runtimeLabel(language)
+	fallback := &RunError{"failed", "runtime_error", label + "执行失败，请核对代码、入口与参数"}
+	fallback.Code = map[string]string{"python": "python_error", "javascript": "javascript_error", "go": "go_error"}[language]
 	var diagnostic c.SourceDiagnostic
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -227,9 +255,32 @@ func sourceFailure(source string, raw []byte) error {
 	}
 	switch diagnostic.Code {
 	case "syntax_error":
-		diagnostic.Message = "Python语法错误，请检查此处的缩进、括号与语句"
+		diagnostic.Message = label + "语法错误，请检查此处的语句与符号"
 	case "python_error":
+		if language != "python" {
+			return fallback
+		}
 		diagnostic.Message = "Python在此处执行失败，请核对参数、类型与计算逻辑"
+	case "javascript_error":
+		if language != "javascript" {
+			return fallback
+		}
+		diagnostic.Message = "JavaScript在此处执行失败，请核对参数、类型与计算逻辑"
+	case "go_compile_error":
+		if language != "go" {
+			return fallback
+		}
+		diagnostic.Message = "Go编译失败，请核对此处的类型、引用与声明"
+	case "go_error":
+		if language != "go" {
+			return fallback
+		}
+		diagnostic.Message = "Go在此处执行失败，请核对参数、类型与计算逻辑"
+	case "go_source_rejected":
+		if language != "go" {
+			return fallback
+		}
+		diagnostic.Message = "Go源码仅支持package main、标准库导入及普通入口，不能声明main、init或平台保留标识"
 	default:
 		return fallback
 	}
@@ -270,8 +321,12 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 }
 
 func (d *DockerRunner) Run(ctx context.Context, runtime *c.ScriptRuntime, input map[string]json.RawMessage, imageID string) (map[string]json.RawMessage, error) {
-	if runtime == nil || runtime.Language != "python" || !imageIDPattern.MatchString(imageID) {
-		return nil, &RunError{"failed", "unsupported_runtime", "未配置可运行的Python实现"}
+	return d.run(ctx, runtime, input, imageID, "run")
+}
+
+func (d *DockerRunner) run(ctx context.Context, runtime *c.ScriptRuntime, input map[string]json.RawMessage, imageID, operation string) (map[string]json.RawMessage, error) {
+	if c.ValidateScriptRuntime(runtime) != nil || d.imageFor(runtime.Language) == "" || !imageIDPattern.MatchString(imageID) {
+		return nil, &RunError{"failed", "unsupported_runtime", "未配置可运行的源码实现"}
 	}
 	d.mu.Lock()
 	pending := len(d.pending) > 0
@@ -281,21 +336,21 @@ func (d *DockerRunner) Run(ctx context.Context, runtime *c.ScriptRuntime, input 
 	}
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, &RunError{"timed_out", "execution_timeout", "Python计算超过执行时限"}
+			return nil, &RunError{"timed_out", "execution_timeout", runtimeLabel(runtime.Language) + "计算超过执行时限"}
 		}
 		return nil, &RunError{"canceled", "execution_canceled", "请求已取消，计算未启动"}
 	}
-	payload, err := json.Marshal(map[string]any{"source": runtime.Source, "entrypoint": runtime.Entrypoint, "input": input})
+	payload, err := json.Marshal(map[string]any{"source": runtime.Source, "entrypoint": runtime.Entrypoint, "input": input, "operation": operation})
 	if err != nil || len(payload) > (MaxPayloadBytes+(128<<10)) {
 		return nil, &RunError{"failed", "input_budget", "运行输入超过预算"}
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	name := "ontology-python-" + c.NewID()
+	name := "ontology-" + runtime.Language + "-" + c.NewID()
 	// No command string or shell is involved. All container security options
 	// are fixed by the service, never by a callable definition or HTTP input.
 	deadline := time.Now().Add(time.Duration(runtime.TimeoutSeconds)*time.Second + 90*time.Second).Unix()
-	args := []string{"create", "--interactive", "--rm", "--pull=never", "--name", name, "--label", "ontology.execution.runtime=python", "--label", "ontology.execution.deadline=" + strconv.FormatInt(deadline, 10), "--network", "none", "--read-only", "--user", "65534:65534", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--pids-limit", "64", "--memory", "128m", "--memory-swap", "128m", "--cpus", "1", "--tmpfs", "/tmp:rw,size=8m,noexec,nosuid,nodev", "--log-driver", "none", imageID, "python", "-I", "-S", "-u", "-c", pythonWrapper}
+	args := runtimeContainerArgs(runtime.Language, imageID, name, deadline)
 	// Complete creation separately before starting user code. Browser
 	// cancellation cannot race a successful create response and its cleanup.
 	createCtx, stopCreate := context.WithTimeout(context.Background(), 5*time.Second)
@@ -308,7 +363,7 @@ func (d *DockerRunner) Run(ctx context.Context, runtime *c.ScriptRuntime, input 
 		if d.cleanup(name) != nil {
 			return nil, &RunError{"failed", "cleanup_unconfirmed", "计算容器清理尚未确认，运行器已停止接收新计算"}
 		}
-		return nil, &RunError{"failed", "runtime_unavailable", "无法创建Python计算容器"}
+		return nil, &RunError{"failed", "runtime_unavailable", "无法创建计算容器"}
 	}
 	cmd := d.exec(runCtx, "start", "--attach", "--interactive", name)
 	cmd.Stdin = bytes.NewReader(payload)
@@ -324,21 +379,21 @@ func (d *DockerRunner) Run(ctx context.Context, runtime *c.ScriptRuntime, input 
 		return nil, &RunError{"failed", "cleanup_unconfirmed", "计算容器清理尚未确认，运行器已停止接收新计算"}
 	}
 	if stdout.overflow || stderr.overflow {
-		return nil, &RunError{"failed", "output_budget", "Python输出超过运行预算"}
+		return nil, &RunError{"failed", "output_budget", runtimeLabel(runtime.Language) + "输出超过运行预算"}
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, &RunError{"timed_out", "execution_timeout", "Python计算超过执行时限"}
+		return nil, &RunError{"timed_out", "execution_timeout", runtimeLabel(runtime.Language) + "计算超过执行时限"}
 	}
 	if ctx.Err() != nil {
 		return nil, &RunError{"canceled", "execution_canceled", "请求已取消，计算已停止"}
 	}
 	if err != nil {
-		return nil, sourceFailure(runtime.Source, stderr.Bytes())
+		return nil, runtimeSourceFailure(runtime.Language, runtime.Source, stderr.Bytes())
 	}
 	var out map[string]json.RawMessage
 	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
 	if decoder.Decode(&out) != nil || out == nil || decoder.Decode(new(any)) != io.EOF {
-		return nil, &RunError{"failed", "invalid_output", "Python须返回单个JSON对象"}
+		return nil, &RunError{"failed", "invalid_output", "入口须返回单个JSON对象"}
 	}
 	return out, nil
 }

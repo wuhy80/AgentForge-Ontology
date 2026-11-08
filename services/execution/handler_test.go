@@ -174,7 +174,7 @@ func TestUnavailableRuntimeAdvertisesNoInvocationAndNeverFallsBack(t *testing.T)
 		Invocation bool     `json:"invocation"`
 		Runtimes   []string `json:"runtimes"`
 	}
-	if json.Unmarshal(w.Body.Bytes(), &capabilities) != nil || capabilities.Invocation || len(capabilities.Runtimes) != 1 || capabilities.Runtimes[0] != "python" {
+	if json.Unmarshal(w.Body.Bytes(), &capabilities) != nil || capabilities.Invocation || len(capabilities.Runtimes) != 0 {
 		t.Fatalf("misleading capabilities %s", w.Body)
 	}
 	if w := request(f.h, "POST", "/execution/invocations", "unavailable", validBody); w.Code != 503 || f.runner.calls.Load() != 0 {
@@ -371,7 +371,7 @@ func TestInlineActionRejectsAmbiguousOrUnsupportedImplementations(t *testing.T) 
 		"bound and source":       func(callable *c.Callable) { callable.FunctionID = "function" },
 		"artifact and source":    func(callable *c.Callable) { callable.ArtifactRef = "artifact" },
 		"side effects":           func(callable *c.Callable) { callable.SideEffects = "dataWrite" },
-		"unsupported language":   func(callable *c.Callable) { callable.Runtime.Language = "javascript" },
+		"unsupported language":   func(callable *c.Callable) { callable.Runtime.Language = "ruby" },
 		"missing implementation": func(callable *c.Callable) { callable.Runtime = nil },
 		"unsupported parameter":  func(callable *c.Callable) { callable.Input[0].EnumID = "enum" },
 	} {
@@ -436,7 +436,7 @@ func TestCallValidationRejectsUnimplementedCapabilities(t *testing.T) {
 		{"unknown field", `{"definitionId":"function","input":{"secret":"x"}}`, nil, 422},
 		{"missing input", `{"definitionId":"function","input":{}}`, nil, 422},
 		{"caller identity", `{"definitionId":"function","input":{},"viaAction":"action"}`, nil, 400},
-		{"javascript", validBody, func(f *fixture) { f.fn.Function.Runtime.Language = "javascript"; f.meta.set(f.fn) }, 422},
+		{"unsupported language", validBody, func(f *fixture) { f.fn.Function.Runtime.Language = "ruby"; f.meta.set(f.fn) }, 422},
 		{"side effect", validBody, func(f *fixture) { f.fn.Function.SideEffects = "externalWrite"; f.meta.set(f.fn) }, 422},
 		{"legacy", validBody, func(f *fixture) { f.fn.Function.Runtime = nil; f.meta.set(f.fn) }, 422},
 		{"enum", validBody, func(f *fixture) { f.fn.Function.Input[0].EnumID = "enum"; f.meta.set(f.fn) }, 422},

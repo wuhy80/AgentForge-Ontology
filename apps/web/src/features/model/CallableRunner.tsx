@@ -4,6 +4,7 @@ import { ApiError, type ApiClient } from '../../lib/api'
 import type { DefinitionRecord, Invocation, SourceDiagnostic, Values } from '../../lib/types'
 import { buildWriteValues, errorMessage, initialDrafts, valueText, writeIntentSignature, type FieldDrafts } from '../query/query'
 import { CallableInputs, testCaseDrafts } from './CallableInputs'
+import { languageLabels } from '../../lib/runtime-language'
 
 const statuses: Record<Invocation['status'], string> = { running: '正在运行', succeeded: '运行成功', failed: '运行失败', timed_out: '执行超时', canceled: '执行已取消', interrupted: '执行中断' }
 
@@ -47,8 +48,10 @@ export function CallableRunner({ api, definitionId, tenantId, active = true, mod
       if (controller.signal.aborted) return
       if (record.definition.id !== definitionId || record.definition.tenantId !== tenantId || record.status !== (isDraft ? 'draft' : 'active') || isDraft && record.etag !== draftEtag || !['action', 'function'].includes(record.definition.kind)) throw new Error(isDraft ? '已保存草稿已改变，请载入服务器最新内容。' : '当前生效定义已改变，请刷新模型目录。')
       const target = record.definition.action ?? record.definition.function!
-      if (target.sideEffects !== 'none' || record.definition.function && !target.runtime || record.definition.action && !target.runtime && !target.functionId || target.runtime && (target.runtime.language !== 'python' || !!target.functionId || !!target.artifactRef)) throw new Error('此定义尚未配置可运行的无副作用 Python 实现。')
-      if (!capabilities.invocation || !capabilities.runtimes.includes('python')) throw new Error('Python 执行服务尚未就绪，请检查本地执行服务。')
+      if (target.sideEffects !== 'none' || record.definition.function && !target.runtime || record.definition.action && !target.runtime && !target.functionId || target.runtime && (!['python', 'javascript', 'go'].includes(target.runtime.language) || !!target.functionId || !!target.artifactRef)) throw new Error('此定义尚未配置可运行的无副作用源码实现。')
+      // A bound Action does not require definition.read on its Function. Its
+      // implementation and runtime availability are checked by Execution.
+      if (!capabilities.invocation || target.runtime && !capabilities.runtimes.includes(target.runtime.language)) throw new Error(`${target.runtime ? languageLabels[target.runtime.language] + ' ' : ''}执行服务尚未就绪，请检查本地执行服务。`)
       if (isDraft && !capabilities.draftInvocation) throw new Error('执行服务尚未开放草稿试运行，请更新本地执行服务。')
       if (record.definition.action && target.runtime && !capabilities.actionInlineSource) throw new Error('执行服务尚未开放动作独立源码，请更新本地执行服务。')
       setCurrent(record); setDrafts(initialDrafts(target.input ?? []))

@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { EditorView } from '@codemirror/view'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { Callable } from '../../lib/types'
+import type { ApiClient } from '../../lib/api'
+import { initialRuntime } from '../../lib/runtime-language'
 import { PythonRuntimeEditor } from './PythonRuntimeEditor'
 import { newDefinition, validateDefinition } from './model-helpers'
 
@@ -100,5 +102,63 @@ describe('Python 实现编辑', () => {
     const rendered = render(<PythonRuntimeEditor callable={{ sideEffects: 'none', input: [{ id: 'first', name: '原文', dataType: 'string' }], runtime }} locked={false} onChange={vi.fn()} />)
     rendered.rerender(<PythonRuntimeEditor callable={{ sideEffects: 'none', input: [{ id: 'second', name: '正文', dataType: 'string' }], runtime }} locked={false} onChange={vi.fn()} />)
     expect(screen.queryByRole('list', { name: '参数改名引用提醒' })).toBeNull()
+  })
+
+  it('可选择 JavaScript 和 Go 启用，使用各语言模板、入口及超时', async () => {
+    const changed = vi.fn()
+    function Editor() {
+      const [callable, setCallable] = useState<Callable>({ sideEffects: 'none' })
+      return <PythonRuntimeEditor callable={callable} locked={false} onChange={(value) => { setCallable(value); changed(value) }} />
+    }
+    render(<Editor />)
+    await userEvent.selectOptions(screen.getByLabelText('执行语言'), 'javascript')
+    await userEvent.click(screen.getByLabelText('启用 JavaScript 实现'))
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ runtime: initialRuntime('javascript') }))
+    expect(screen.getByRole('textbox', { name: 'JavaScript 源码' })).toBeTruthy()
+    await userEvent.selectOptions(screen.getByLabelText('执行语言'), 'go')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ runtime: initialRuntime('go') }))
+    expect(screen.getByRole('textbox', { name: 'Go 源码' })).toBeTruthy()
+    expect((screen.getByLabelText('执行超时（秒）') as HTMLInputElement).value).toBe('30')
+  })
+
+  it('切换已有业务源码需确认，取消保留原文，确认后替换源码与入口', async () => {
+    const changed = vi.fn()
+    function Editor() {
+      const [callable, setCallable] = useState<Callable>({ sideEffects: 'none', runtime: { ...initialRuntime('python'), source: 'def custom(inputs):\n    return {"结果": "现有代码"}\n', entrypoint: 'custom' } })
+      return <PythonRuntimeEditor callable={callable} locked onChange={(value) => { setCallable(value); changed(value) }} />
+    }
+    render(<Editor />)
+    await userEvent.selectOptions(screen.getByLabelText('执行语言'), 'go')
+    expect(screen.getByRole('alert').textContent).toContain('Go 模板替换当前源码')
+    expect(changed).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '保留当前源码' }))
+    expect(EditorView.findFromDOM(screen.getByRole('textbox', { name: 'Python 源码' }))!.state.doc.toString()).toContain('现有代码')
+    await userEvent.selectOptions(screen.getByLabelText('执行语言'), 'go')
+    await userEvent.click(screen.getByRole('button', { name: '确认切换语言' }))
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ runtime: initialRuntime('go') }))
+  })
+
+  it('Go 工具通过已保存定义调用，切换定义后取消旧请求', async () => {
+    const sourceTools = vi.fn().mockImplementation(() => new Promise(() => undefined))
+    const api = { sourceTools } as unknown as ApiClient
+    const callable: Callable = { sideEffects: 'none', runtime: initialRuntime('go') }
+    const rendered = render(<PythonRuntimeEditor callable={callable} locked={false} api={api} definitionId="saved-first" onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '检查语法' }))
+    expect(sourceTools).toHaveBeenCalledWith('saved-first', initialRuntime('go'), 'check', expect.any(AbortSignal))
+    const signal = sourceTools.mock.calls[0][3] as AbortSignal
+    rendered.rerender(<PythonRuntimeEditor callable={callable} locked={false} api={api} definitionId="saved-second" onChange={vi.fn()} />)
+    await waitFor(() => expect(signal.aborted).toBe(true))
+  })
+
+  it.each(['javascript', 'go'] as const)('%s 根据稳定参数 ID 提醒改名后的输入与输出引用', (language) => {
+    const source = language === 'go' ? 'package main\nfunc Main(inputs map[string]any) (map[string]any, error) {\n return map[string]any{"旧结果": inputs["原文"]}, nil\n}' : 'function main(inputs) {\n return {"旧结果": inputs["原文"]};\n}'
+    const callable: Callable = { sideEffects: 'none', input: [{ id: 'input', name: '原文', dataType: 'string' }], output: [{ id: 'output', name: '旧结果', dataType: 'string' }], runtime: { ...initialRuntime(language), source } }
+    const changed = vi.fn()
+    const rendered = render(<PythonRuntimeEditor callable={callable} locked={false} onChange={changed} />)
+    rendered.rerender(<PythonRuntimeEditor callable={{ ...callable, input: [{ ...callable.input![0], name: '正文' }], output: [{ ...callable.output![0], name: '结果' }] }} locked={false} onChange={changed} />)
+    expect(screen.getByText(/输入参数「原文」已改为「正文」/)).toBeTruthy()
+    expect(screen.getByText(/输出参数「旧结果」已改为「结果」/)).toBeTruthy()
+    expect(changed).not.toHaveBeenCalled()
   })
 })

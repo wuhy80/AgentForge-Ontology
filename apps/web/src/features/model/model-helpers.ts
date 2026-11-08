@@ -1,5 +1,6 @@
 import type { Definition, DefinitionRecord, Kind, Property } from '../../lib/types'
 import { newProperty } from './PropertyEditor'
+import { languageLabels, validEntrypoint } from '../../lib/runtime-language'
 
 export const MAX_SCHEMA_PROPERTIES = 100
 export const MAX_SCHEMA_INDEXES = 32
@@ -12,8 +13,8 @@ export const kindDescriptions: Record<Kind, string> = {
   schema: '用业务属性描述对象，管理数据结构与索引。',
   enum: '维护稳定的业务编码与用户可见标签。',
   link: '通过正反方向连接已经生效的对象模型。',
-  action: '编写动作的独立 Python 源码，或绑定已发布的函数。',
-  function: '维护函数签名，编写和运行无副作用的 Python 计算。',
+  action: '编写动作的独立 Python、JavaScript 或 Go 源码，或绑定已发布的函数。',
+  function: '维护函数签名，编写和运行无副作用的 Python、JavaScript 或 Go 计算。',
 }
 
 export function newDefinition(kind: Kind, categoryId = '', groupId = ''): Definition {
@@ -95,12 +96,12 @@ export function validateDefinition(definition: Definition): string | undefined {
     if (error) return error
     if (callable.functionId && callable.artifactRef) return '实现函数与产物引用不能同时配置。'
     if (callable.runtime) {
-      if (callable.sideEffects !== 'none') return 'Python 实现仅支持无副作用计算。'
-      if (callable.artifactRef) return 'Python 源码与产物引用不能同时配置。'
-      if (callable.functionId) return '独立 Python 源码与绑定函数不能同时配置。'
-      if (callable.runtime.language !== 'python') return '当前仅支持 Python 运行器。'
-      if (!callable.runtime.source.trim() || new TextEncoder().encode(callable.runtime.source).length > 65536) return '请填写 Python 源码，最多 64 KiB。'
-      if (!/^(?!__)[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(callable.runtime.entrypoint) || ['False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield'].includes(callable.runtime.entrypoint)) return 'Python 入口须为普通函数名，最多 64 个字母、数字或下划线，不使用关键字或双下划线前缀。'
+      if (callable.sideEffects !== 'none') return '源码实现仅支持无副作用计算。'
+      if (callable.artifactRef) return '源码与产物引用不能同时配置。'
+      if (callable.functionId) return '独立源码与绑定函数不能同时配置。'
+      if (!['python', 'javascript', 'go'].includes(callable.runtime.language)) return '当前仅支持 Python、JavaScript、Go 运行器。'
+      if (!callable.runtime.source.trim() || callable.runtime.source.includes('\0') || new TextEncoder().encode(callable.runtime.source).length > 65536) return '请填写源码，最多 64 KiB，不能包含空字符。'
+      if (!validEntrypoint(callable.runtime.language, callable.runtime.entrypoint)) return `${languageLabels[callable.runtime.language]} 入口须为普通函数名，最多 64 个字母、数字或下划线，不使用关键字、保留入口或双下划线前缀。`
       if (!Number.isInteger(callable.runtime.timeoutSeconds) || callable.runtime.timeoutSeconds < 1 || callable.runtime.timeoutSeconds > 30) return '执行超时须为 1–30 秒的整数。'
     }
   }

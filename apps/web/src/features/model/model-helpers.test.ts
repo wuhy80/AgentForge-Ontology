@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { newDefinition, validateDefinition } from './model-helpers'
+import { initialRuntime } from '../../lib/runtime-language'
+import type { ScriptLanguage } from '../../lib/types'
 
 function schema(properties = 1, indexes = 0) {
   const definition = newDefinition('schema', 'category', 'group')
@@ -35,5 +37,20 @@ describe('可发布的对象模型范围', () => {
     fn.name = '校验设备'
     fn.function!.input = definition.schema!.properties
     expect(validateDefinition(fn)).toBeUndefined()
+  })
+
+  it.each(['function', 'action'] as const)('%s 接受 JS/Go 定义，拒绝未知语言及各语言保留入口', (kind) => {
+    const definition = newDefinition(kind, 'category', 'group')
+    definition.name = '纯计算'
+    const callable = definition.function ?? definition.action!
+    callable.sideEffects = 'none'
+    for (const language of ['javascript', 'go'] as const) {
+      callable.runtime = initialRuntime(language)
+      expect(validateDefinition(definition)).toBeUndefined()
+      callable.runtime.entrypoint = language === 'go' ? 'main' : 'eval'
+      expect(validateDefinition(definition)).toContain('入口')
+    }
+    callable.runtime = { ...initialRuntime('python'), language: 'ruby' as ScriptLanguage }
+    expect(validateDefinition(definition)).toContain('当前仅支持')
   })
 })
