@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -74,13 +75,16 @@ func NewHandler(cfg Config) (http.Handler, error) {
 	for mask := range g.servers {
 		g.servers[mask] = g.newServer(mask)
 	}
+	// The gateway checks Host against the configured public resource before
+	// reaching the SDK. Its localhost-only default rejects a public Host when
+	// a reverse proxy connects to our loopback listener.
 	stream := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		identity, ok := r.Context().Value(identityKey{}).(requestIdentity)
 		if !ok {
 			return nil
 		}
 		return g.servers[scopeMask(identity.session.AccessScopes)]
-	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: MaxRequestBytes})
+	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: MaxRequestBytes, DisableLocalhostProtection: true})
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", g.ready)
@@ -160,6 +164,10 @@ func validAccessToken(token string) bool {
 
 func (g *gateway) protect(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !g.allowedHost(r.Host) {
+			writeJSON(w, 403, c.Error{Code: "invalid_host", Message: "请求主机不允许连接 MCP"})
+			return
+		}
 		if raw := r.Header.Get("Origin"); raw != "" && !g.allowedOrigin(raw) {
 			writeJSON(w, 403, c.Error{Code: "invalid_origin", Message: "请求来源不允许连接 MCP"})
 			return
@@ -182,6 +190,24 @@ func (g *gateway) protect(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), identityKey{}, requestIdentity{token: token, session: s})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (g *gateway) allowedHost(host string) bool {
+	resource, _ := url.Parse(g.cfg.ResourceURL)
+	if host == resource.Host {
+		return true
+	}
+	// Local development may use another loopback port or localhost spelling.
+	// Public resources accept only their configured authority, including port.
+	return loopbackHost(resource.Host) && loopbackHost(host)
+}
+
+func loopbackHost(authority string) bool {
+	host, _, err := net.SplitHostPort(authority)
+	if err != nil {
+		host = authority
+	}
+	return host == "localhost" || net.ParseIP(host).IsLoopback()
 }
 
 func (g *gateway) allowedOrigin(origin string) bool {

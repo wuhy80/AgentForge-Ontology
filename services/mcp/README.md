@@ -6,6 +6,7 @@
 
 - `/mcp` 使用官方 `github.com/modelcontextprotocol/go-sdk` v1.8.0，模块要求 Go 1.25+；优先协商 MCP `2026-07-28`，保留 SDK 支持的旧版握手兼容。
 - 每次请求只接受 `Authorization: Bearer mcp_<64位小写十六进制>`，拒绝 Cookie 和不允许的跨站请求；调用者自报的用户/租户头不能选择身份。令牌由 Metadata 身份服务签发、撤销并绑定用户、租户及范围，工具结果返回前再次核验。
+- 公网resource经本机代理回源时允许配置地址的精确Host；错误主机、端口及不允许的Origin仍拒绝，不信任转发Host。入口规则统一见[权限设计](../../docs/权限/权限设计.md#mcp-与外部客户端认证2026-11-08已接入)。
 - `ontology:discover` 提供模型、分类、调用签名发现；`ontology:query` 提供对象及 OntologySQL 查询；`ontology:invoke` 提供当前授权的纯计算 Action/Function 调用。查询和调用令牌仍需包含 `ontology:discover`。
 - 结果同时包含结构化 JSON 和文本块，预算为请求/结果各 1 MiB；`int64`、`decimal` 遵循平台字符串协议；不返回源码、凭据、物理映射、原始异常或未授权结果。
 - `/.well-known/oauth-protected-resource[/mcp]` 提供资源元数据；OAuth 授权服务器公开端点由 Metadata 提供，网关只做受限代理，不跟随重定向。

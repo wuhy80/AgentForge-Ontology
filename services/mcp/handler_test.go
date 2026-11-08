@@ -2,8 +2,11 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,5 +119,64 @@ func TestConfigRejectsUnsafeURLs(t *testing.T) {
 	_, err := NewHandler(Config{MetadataURL: "http://user:x@example/", DataURL: "http://127.0.0.1:1", ExecutionURL: "http://127.0.0.1:2", ResourceURL: "http://127.0.0.1:18084/mcp", AuthIssuer: "http://127.0.0.1:18084", SessionChecker: checker})
 	if err == nil {
 		t.Fatal("expected URL validation failure")
+	}
+}
+
+func TestPublicResourceHostThroughLoopbackProxy(t *testing.T) {
+	checker := &fakeChecker{session: c.Session{User: c.User{ID: "u1", TenantID: "t1", Enabled: true}, ExpiresAt: time.Now().Add(time.Hour).Unix(), AccessScopes: []string{platform.ScopeDiscover}, AccessTokenID: "a1"}}
+	h, err := NewHandler(Config{MetadataURL: "http://127.0.0.1:1", DataURL: "http://127.0.0.1:2", ExecutionURL: "http://127.0.0.1:3", ResourceURL: "https://ontology.example:30011/mcp", AuthIssuer: "https://ontology.example:30011", SessionChecker: checker})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A real loopback listener supplies LocalAddrContextKey, which the SDK's
+	// default localhost protection consults (a Recorder alone does not).
+	server := httptest.NewServer(h)
+	defer server.Close()
+	for _, tc := range []struct {
+		name, host, origin, forwardedHost string
+		status                            int
+	}{
+		{"public proxy", "ontology.example:30011", "https://ontology.example:30011", "", 200},
+		{"native client", "ontology.example:30011", "", "", 200},
+		{"other host", "attacker.example:30011", "https://ontology.example:30011", "ontology.example:30011", 403},
+		{"wrong port", "ontology.example:443", "https://ontology.example:30011", "", 403},
+		{"loopback host for public resource", "127.0.0.1:18084", "", "", 403},
+		{"other origin", "ontology.example:30011", "https://attacker.example", "", 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"proxy-test","version":"1"}}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = tc.host
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			req.Header.Set("Authorization", "Bearer mcp_0000000000000000000000000000000000000000000000000000000000000000")
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.forwardedHost != "" {
+				req.Header.Set("X-Forwarded-Host", tc.forwardedHost)
+			}
+			response, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, _ := io.ReadAll(response.Body)
+			if response.StatusCode != tc.status {
+				t.Fatalf("status=%d body=%s", response.StatusCode, body)
+			}
+			if tc.status == 200 {
+				var result struct {
+					Result struct {
+						ProtocolVersion string `json:"protocolVersion"`
+					} `json:"result"`
+				}
+				if err := json.Unmarshal(body, &result); err != nil || result.Result.ProtocolVersion == "" {
+					t.Fatalf("initialize failed: %s", body)
+				}
+			}
+		})
 	}
 }
