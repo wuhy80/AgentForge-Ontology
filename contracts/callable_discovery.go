@@ -17,14 +17,17 @@ type CallableSummary struct {
 }
 
 type CallableParameter struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	DataType  string          `json:"dataType"`
-	Required  bool            `json:"required,omitempty"`
-	Nullable  bool            `json:"nullable,omitempty"`
-	Precision int             `json:"precision,omitempty"`
-	Scale     int             `json:"scale,omitempty"`
-	Default   json.RawMessage `json:"default,omitempty"`
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	DataType   string          `json:"dataType"`
+	Required   bool            `json:"required,omitempty"`
+	Nullable   bool            `json:"nullable,omitempty"`
+	Precision  int             `json:"precision,omitempty"`
+	Scale      int             `json:"scale,omitempty"`
+	EnumID     string          `json:"enumId,omitempty"`
+	EnumValues []EnumValue     `json:"enumValues,omitempty"`
+	EnumETag   string          `json:"enumEtag,omitempty"`
+	Default    json.RawMessage `json:"default,omitempty"`
 }
 
 type CallableDirectory struct {

@@ -134,6 +134,11 @@ export function valueText(value: JsonValue | undefined): string {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
+export function propertyValueText(property: Property, value: JsonValue | undefined): string {
+  const choice = typeof value === 'string' ? property.enumValues?.find((item) => item.code === value) : undefined;
+  return choice ? `${choice.label}（${choice.code}）${choice.deprecated ? ' · 已停用' : ''}` : valueText(value);
+}
+
 export function draftText(value: JsonValue | undefined): string {
   return value === null || value === undefined ? '' : typeof value === 'string' ? value : String(value);
 }
@@ -157,6 +162,11 @@ export function buildWriteValues(properties: Property[], drafts: FieldDrafts, or
     }
     if (draft.mode === 'null' && !property.nullable) throw new Error(`${property.name}：不允许空值`);
     const value = draft.mode === 'null' ? null : parseFieldValue(property, draft.text);
+    if (property.enumId && value !== null) {
+      const choice = property.enumValues?.find((item) => item.code === value);
+      const unchanged = !!original && original[property.id] === value;
+      if (!choice || choice.deprecated && !unchanged) throw new Error(`${property.name}：请选择有效的枚举值`);
+    }
     if (!original || !Object.hasOwn(original, property.id) || JSON.stringify(original[property.id]) !== JSON.stringify(value)) values[property.id] = value;
   }
   return values;

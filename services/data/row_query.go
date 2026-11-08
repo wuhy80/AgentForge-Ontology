@@ -151,7 +151,7 @@ func (h *handler) planRowQuery(ctx context.Context, p c.Principal, q c.QuerySpec
 		if origin.Definition.ID != plan.nodes[fromIndex].node.SchemaID || target.Definition.ID != plan.nodes[i+1].node.SchemaID {
 			return fail(problem(422, "invalid_link_endpoint", "关联方向或关系端点与对象节点不一致"))
 		}
-		if origin.ETag != plan.nodes[fromIndex].current.ETag || target.ETag != plan.nodes[i+1].current.ETag {
+		if origin.ETag != plan.nodes[fromIndex].current.ETag || target.ETag != plan.nodes[i+1].current.ETag || c.EnumContextDigest(origin.Definition) != c.EnumContextDigest(plan.nodes[fromIndex].current.Definition) || c.EnumContextDigest(target.Definition) != c.EnumContextDigest(plan.nodes[i+1].current.Definition) {
 			return fail(problem(409, "definition_changed", "关联对象定义已经改变，请重新查询"))
 		}
 		if current.Definition.Link.StorageBinding.Mode == "managed" {
@@ -183,7 +183,7 @@ func (h *handler) planRowQuery(ctx context.Context, p c.Principal, q c.QuerySpec
 	}
 	definitions, authorization, physical := []any{}, []any{}, []string{}
 	for _, node := range plan.nodes {
-		definitions = append(definitions, node.current.Definition.ID+node.current.ETag)
+		definitions = append(definitions, node.current.Definition.ID+node.current.ETag+c.EnumContextDigest(node.current.Definition))
 		authorization = append(authorization, node.definitionDecision, node.decision)
 	}
 	for _, edge := range plan.edges {
@@ -585,7 +585,7 @@ func (h *handler) recheckRowQuery(ctx context.Context, p c.Principal, plan *rowQ
 		if err != nil {
 			return err
 		}
-		if current.ETag != node.current.ETag {
+		if current.ETag != node.current.ETag || c.EnumContextDigest(current.Definition) != c.EnumContextDigest(node.current.Definition) {
 			return problem(409, "definition_changed", "关联对象定义已改变，请重新查询")
 		}
 		if err := h.recheck(ctx, p, "definition.read", node.node.SchemaID, node.definitionDecision); err != nil {
@@ -611,6 +611,11 @@ func (h *handler) recheckRowQuery(ctx context.Context, p c.Principal, plan *rowQ
 			return problem(409, "authorization_changed", "关联定义发现授权已改变")
 		}
 		if err := h.recheckLink(ctx, p, "link.query", edge.current.Definition.ID, edge.decision); err != nil {
+			return err
+		}
+	}
+	for _, node := range plan.nodes {
+		if err := h.recheckEnums(ctx, node.current); err != nil {
 			return err
 		}
 	}

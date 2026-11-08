@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiClient, ApiError } from './api'
-import type { PermissionPolicy, Publication, QuerySpec, Session, UserGroup, UserGroupInput, UserInput } from './types'
+import type { DefinitionInput, PermissionPolicy, Publication, QuerySpec, Session, UserGroup, UserGroupInput, UserInput } from './types'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const page = (data: unknown[], hasMore = false, nextCursor = '') => json({ data, hasMore, nextCursor })
@@ -67,6 +67,23 @@ describe('ApiClient transport and complete directories', () => {
 })
 
 describe('ApiClient writes and errors', () => {
+  it('保存定义只提交枚举稳定引用，剔除服务端派生选项和摘要且不修改本地对象', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => json({ status: 'draft', etag: 'saved', definition: {} }))
+    vi.stubGlobal('fetch', fetcher)
+    const field = { id: 'state', name: '状态', dataType: 'string' as const, enumId: 'enum', enumValues: [{ code: 'READY', label: '就绪' }], enumEtag: 'private-enum-etag' }
+    const definition: DefinitionInput = { kind: 'schema', name: '设备', categoryId: 'category', groupId: 'group', schema: { mode: 'schema_2_db', storageLayout: 'single', properties: [field] } }
+    const api = new ApiClient('test')
+    await api.createDefinition(definition)
+    await api.saveDraft('model', { ...definition, kind: 'function', schema: undefined, function: { sideEffects: 'none', input: [field], output: [field] } }, 'current')
+    expect(JSON.parse(fetcher.mock.calls[0][1].body).schema.properties[0]).toEqual({ id: 'state', name: '状态', dataType: 'string', enumId: 'enum' })
+    expect(JSON.parse(fetcher.mock.calls[1][1].body).function).toMatchObject({ input: [{ id: 'state', enumId: 'enum' }], output: [{ id: 'state', enumId: 'enum' }] })
+    for (const call of fetcher.mock.calls) {
+      expect(call[1].body).not.toContain('enumValues')
+      expect(call[1].body).not.toContain('enumEtag')
+    }
+    expect(field.enumValues[0].label).toBe('就绪')
+    expect(field.enumEtag).toBe('private-enum-etag')
+  })
   it('manages personal connections and OAuth consent without persisting bearer credentials', async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(json({ data: [], resource: 'http://127.0.0.1:18084/mcp', issuer: 'http://127.0.0.1:18080' }))

@@ -82,7 +82,7 @@ func linkBoundDecision(target, origin, link c.Decision, plan *linkPlan, current 
 		Target, Origin, Link                   c.Decision
 		LinkDigest, SourceDigest, TargetDigest string
 		Physical                               []string
-	}{target, origin, link, current.ETag, plan.source.ETag, plan.target.ETag, physical})
+	}{target, origin, link, current.ETag, enumQueryFingerprint(plan.source.ETag, plan.source.Definition), enumQueryFingerprint(plan.target.ETag, plan.target.Definition), physical})
 	return bound
 }
 
@@ -280,7 +280,13 @@ func (h *handler) queryLink(ctx context.Context, p c.Principal, target c.Current
 		if err := h.recheck(ctx, p, "instance.read", origin.Definition.ID, originDecision); err != nil {
 			return err
 		}
-		return h.recheck(ctx, p, "instance.query", target.Definition.ID, targetDecision)
+		if err := h.recheck(ctx, p, "instance.query", target.Definition.ID, targetDecision); err != nil {
+			return err
+		}
+		if err := h.recheckEnums(ctx, origin); err != nil {
+			return err
+		}
+		return h.recheckEnums(ctx, target)
 	})
 	if err != nil {
 		return result, err

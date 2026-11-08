@@ -8,7 +8,7 @@
 
 - 同步执行已生效、`sideEffects: none`或显式声明`dataWrite`范围、配置`runtime`的Python、JavaScript、Go Function及直接源码Action。Action也可使用`functionId`绑定签名相同的已生效Function；绑定双方的中文参数名、类型、空值、默认值和必填语义须一致，参数ID可以各自独立。Action的内联源码、函数引用和制品引用互斥。
 - 入口由作者声明：Python默认`main(inputs)`，JavaScript默认同步`main(inputs)`，Go默认`Main(inputs map[string]any) (map[string]any, error)`；Go源码为含标准库导入的完整`package main`文件。三种语言均接受并返回以声明中文参数名为键的对象，HTTP输入、输出使用稳定参数ID。int64、decimal始终以字符串传递，精确计算及输出转换由作者显式完成。
-- 输入输出支持 string、text、longtext、uuid、int64、decimal、boolean、timestamp；单次输入/输出仍受 256 KiB 总预算。枚举引用、存储映射与复杂参数类型明确拒绝。可选输入缺省时不注入键，有默认值则使用默认值；null 仅在 nullable 时接受。
+- 输入输出支持 string、text、longtext、uuid、int64、decimal、boolean、timestamp；字符串参数可通过enumId引用同租户当前Enum，新输入、默认值及输出按当前未废弃code校验。只读选项与依赖预算、废弃及当前态变化规则唯一见[Enum](../../docs/模块/Enum.md#当前实现协议2026-11-08)。单次输入/输出仍受256KiB总预算；存储映射与复杂参数类型明确拒绝。可选输入缺省时不注入键，有默认值则使用默认值；null仅在nullable时接受。
 - 执行记录按租户与发起用户隔离；记录真实调用目标、实际源码、定义上下文、输入、源码SHA-256与实际容器image ID。直接源码Action保存自己的实现快照，绑定Action另外保存Function上下文。HTTP仅返回状态、输出、摘要及安全错误，不返回源码、原始输入、stdout、stderr或traceback。
 - 已保存的Function/Action草稿可独立试运行；请求显式携带草稿`draftEtag`，不替换当前态，也不能运行任意客户端定义。未发布的纯计算草稿同样可用。草稿与当前态共用隔离容器、并发、参数校验和持久化协议，记录以`mode: draft/current`区分。
 - `Callable.testCases`随定义草稿保存，发布后随当前定义可见；最多10项，总JSON最多64KiB，名称最多80个Unicode字符且不重复。样例输入使用参数稳定ID，可部分填写，已填写值须满足标量传输声明；运行时仍检查必填与默认值，不将样例当作执行授权。

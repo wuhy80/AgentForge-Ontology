@@ -189,7 +189,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p contrac
 	if err := h.authorize(r.Context(), p, "definition.read", "", ""); err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-mapped-additions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python"}, "invocation": false, "delete": false, "disable": false, "schemaInheritance": false, "dbToSchema": true})
+	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "schemaInheritance": false, "dbToSchema": true})
 	return nil
 }
 
@@ -386,6 +386,9 @@ func (h *handler) createDefinition(w http.ResponseWriter, r *http.Request, p con
 		if err := validateLinkReferences(r.Context(), tx, d); err != nil {
 			return err
 		}
+		if err := validateEnumReferences(r.Context(), tx, d); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(r.Context(), "INSERT INTO af_meta_definitions (id,tenant_id,category_id,group_id,kind,name,name_key,draft_json,draft_digest,status) VALUES (?,?,?,?,?,?,?,?,?,'draft')", d.ID, d.TenantID, d.CategoryID, d.GroupID, d.Kind, d.Name, []byte(key), string(raw), digest)
 		return err
 	})
@@ -424,6 +427,10 @@ func (h *handler) getDefinition(w http.ResponseWriter, r *http.Request, p contra
 		raw, digest, status = row.draft, row.draftDigest, "draft"
 	}
 	d, err := parseDefinition(raw)
+	if err != nil {
+		return err
+	}
+	d, err = h.definitionEnumMetadata(r.Context(), d)
 	if err != nil {
 		return err
 	}
@@ -476,6 +483,9 @@ func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, p contracts.
 			return err
 		}
 		if err := validateLinkReferences(r.Context(), tx, d); err != nil {
+			return err
+		}
+		if err := validateEnumReferences(r.Context(), tx, d); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(r.Context(), "UPDATE af_meta_definitions SET draft_json=?,draft_digest=? WHERE tenant_id=? AND id=?", string(raw), digest, p.TenantID, id)

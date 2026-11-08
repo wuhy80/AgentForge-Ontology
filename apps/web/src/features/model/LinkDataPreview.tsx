@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, LoaderCircle, RefreshCw } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { DefinitionRecord, Property, QueryResult, QuerySpec } from '../../lib/types'
-import { valueText } from '../query/query'
+import { propertyValueText } from '../query/query'
 
 export function linkPreviewFields(properties: Property[]) {
   const ordinary = properties.filter((property) => property.dataType !== 'longtext')
@@ -109,7 +109,7 @@ function LinkDirectionPreview({ api, current, direction, origin, destination }: 
         {starts && <><span className="muted">起点第 {originPage} 页 · 本页 {starts.data.length} 条</span><button type="button" className="button subtle" disabled={!!busy || !starts.hasMore || !starts.nextCursor} onClick={() => void loadStarts(starts.nextCursor)}>起点下一页<ArrowRight size={14} /></button></>}
       </div>
       {!originFields.length && <p className="muted">起点没有可用于预览的普通字段。</p>}
-      {starts && <label>起点记录<select className="field" value={selectedId} disabled={!!busy} onChange={(event) => selectStart(event.target.value)}><option value="">选择一条起点记录</option>{starts.data.map((item) => <option key={item.id} value={item.id}>{starts.fields.map((field) => valueText(item.values[field.id])).filter(Boolean).join(' · ') || '未命名记录'} · {item.id}</option>)}</select></label>}
+      {starts && <label>起点记录<select className="field" value={selectedId} disabled={!!busy} onChange={(event) => selectStart(event.target.value)}><option value="">选择一条起点记录</option>{starts.data.map((item) => <option key={item.id} value={item.id}>{starts.fields.map((field) => propertyValueText(field, item.values[field.id])).filter(Boolean).join(' · ') || '未命名记录'} · {item.id}</option>)}</select></label>}
       {starts && !starts.data.length && <p className="muted">没有可见的起点记录。</p>}
     </div>
     <div className="link-preview-stage"><strong>2. 查询关联的{destination.definition.name}</strong>
@@ -117,7 +117,7 @@ function LinkDirectionPreview({ api, current, direction, origin, destination }: 
       <div className="model-preview-toolbar"><button type="button" className="button primary" disabled={!!busy || !selectedId || !fields.length} onClick={() => void run()}>查询关联记录</button>{busy && <><span role="status"><LoaderCircle size={14} className="model-spin" />正在读取{busy === 'origin' ? '起点' : '关联'}记录…</span><button type="button" className="button subtle" onClick={cancel}>取消读取</button></>}</div>
       {stale && <p className="muted">请重新查询关联记录，旧游标已失效。</p>}
       {result && <>
-        <div className="table-wrap model-preview-result-table"><table aria-label="关系数据预览"><thead><tr><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}</th>)}</tr></thead><tbody>{result.data.map((item) => <tr key={item.id}><td><code>{item.id}</code></td>{result.fields.map((field) => <td key={field.id}><span className="model-preview-cell">{valueText(item.values[field.id])}</span></td>)}</tr>)}</tbody></table></div>
+        <div className="table-wrap model-preview-result-table"><table aria-label="关系数据预览"><thead><tr><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}</th>)}</tr></thead><tbody>{result.data.map((item) => <tr key={item.id}><td><code>{item.id}</code></td>{result.fields.map((field) => <td key={field.id}><span className="model-preview-cell">{propertyValueText(field, item.values[field.id])}</span></td>)}</tr>)}</tbody></table></div>
         {!result.data.length && <p className="muted">此起点没有可见的关联记录。</p>}
         <div className="model-preview-toolbar"><span className="muted">关联第 {resultPage} 页 · 本页 {result.data.length} 条</span><button type="button" className="button subtle" disabled={!!busy || stale || !result.hasMore || !result.nextCursor} onClick={() => void run(result.nextCursor)}>关联下一页<ArrowRight size={14} /></button></div>
       </>}

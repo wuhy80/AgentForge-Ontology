@@ -45,6 +45,8 @@ export interface Property {
   precision?: number
   scale?: number
   enumId?: string
+  enumValues?: EnumValue[]
+  enumEtag?: string
   default?: JsonValue
   mapping?: PropertyMapping
 }
@@ -345,6 +347,8 @@ export interface MetadataCapabilities {
   disable: boolean
   schemaInheritance: boolean
   dbToSchema: boolean
+  schemaMigrations?: { addFields: boolean; addIndexes: boolean; destructive: boolean }
+  enumReferences?: boolean
 }
 export interface DataCapabilities {
   backend: string

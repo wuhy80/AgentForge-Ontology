@@ -236,6 +236,9 @@ func (h *handler) metadata(ctx context.Context, tenant, path string) (c.CurrentD
 	if out.Status != "active" {
 		return out, problem(409, "definition_unavailable", "定义尚未生效或已停用")
 	}
+	if err := h.hydrateEnums(ctx, &out); err != nil {
+		return out, err
+	}
 	return out, nil
 }
 func (h *handler) resolve(ctx context.Context, p c.Principal, source c.Source) (c.CurrentDefinition, error) {

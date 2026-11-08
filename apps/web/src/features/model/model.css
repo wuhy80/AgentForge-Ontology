@@ -306,3 +306,6 @@
 .model-write-row .query-instance-fields { margin-top: 16px; }
 @media (max-width: 1050px) { .model-write-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .model-write-grid { grid-template-columns: minmax(0, 1fr); } .model-write-row { padding: 12px; } }
+.model-property-default { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; max-width: 100%; }
+.model-property-default > label { display: flex; flex: 1 1 180px; min-width: 0; flex-direction: column; gap: 5px; }
+.model-property-default input, .model-property-default select, .model-property-default textarea { min-width: 0; max-width: 100%; }

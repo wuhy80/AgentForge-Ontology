@@ -1,8 +1,10 @@
 package metadata
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -32,7 +34,7 @@ func callableParameters(properties []c.Property) []c.CallableParameter {
 	for _, p := range properties {
 		result = append(result, c.CallableParameter{ID: p.ID, Name: p.Name, DataType: p.DataType,
 			Required: p.Required, Nullable: p.Nullable, Precision: p.Precision, Scale: p.Scale,
-			Default: append([]byte(nil), p.Default...)})
+			Default: append([]byte(nil), p.Default...), EnumID: p.EnumID, EnumValues: p.EnumValues, EnumETag: p.EnumETag})
 	}
 	return result
 }
@@ -95,7 +97,7 @@ func inlineCallableAvailable(body *c.Callable) bool {
 			return false
 		}
 		for _, p := range properties {
-			if p.EnumID != "" || p.Mapping != nil {
+			if p.Mapping != nil {
 				return false
 			}
 		}
@@ -132,6 +134,10 @@ func (h *handler) inspectCallable(ctx context.Context, p c.Principal, d c.Defini
 	} else if !inlineCallableAvailable(body) {
 		return c.CallableSummary{}, "", sql.ErrNoRows
 	}
+	d, err = h.definitionEnumMetadata(ctx, d)
+	if err != nil {
+		return c.CallableSummary{}, "", err
+	}
 	return projectCallable(d), state, nil
 }
 
@@ -145,11 +151,13 @@ func (h *handler) verifyCallableDiscovery(ctx context.Context, p c.Principal, it
 	if err != nil {
 		return err
 	}
-	_, state, err := h.inspectCallable(ctx, p, d)
+	summary, state, err := h.inspectCallable(ctx, p, d)
 	if err != nil {
 		return err
 	}
-	if digest != item.digest || state != item.state {
+	oldSummary, _ := json.Marshal(item.summary)
+	newSummary, _ := json.Marshal(summary)
+	if digest != item.digest || state != item.state || !bytes.Equal(oldSummary, newSummary) {
 		return problem(409, "catalog_changed", "当前定义或授权已改变，请重新读取调用目录")
 	}
 	return nil

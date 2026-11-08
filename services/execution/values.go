@@ -27,8 +27,8 @@ func validateParameters(props []c.Property) error {
 			return problem(422, "invalid_parameters", "参数标识或名称不合法")
 		}
 		ids[p.ID], names[p.Name] = true, true
-		if p.EnumID != "" || p.Mapping != nil {
-			return problem(422, "unsupported_parameters", "首批计算参数不支持枚举引用和存储映射")
+		if p.Mapping != nil || p.EnumID != "" && (p.DataType != "string" || p.EnumETag == "" || len(p.EnumValues) == 0) {
+			return problem(422, "unsupported_parameters", "参数存储映射不支持，枚举须绑定有效当前string业务code")
 		}
 		switch p.DataType {
 		case "string", "text", "longtext", "uuid", "int64", "boolean", "timestamp":
@@ -67,6 +67,9 @@ func validateValue(p c.Property, raw json.RawMessage) error {
 	}
 	var value string
 	if json.Unmarshal(raw, &value) != nil || !utf8.ValidString(value) {
+		return bad()
+	}
+	if c.ValidateEnumValue(p, raw, false) != nil {
 		return bad()
 	}
 	switch p.DataType {

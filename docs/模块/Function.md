@@ -12,6 +12,12 @@ Metadata 的 function 模块保存一份当前定义、输入输出及实现引�
 
 ## 2. 定义与运行清单
 
+### Enum参数（2026-11-08）
+
+用户确认的Enum使用闭环覆盖Function及直接源码/绑定Action的字符串输入输出。定义仅保存稳定 `enumId`，中文编辑、默认值和运行输入选择服务端当前选项；源码仍接收和返回业务 `code`，无需在源码内使用标签。运行器开始前校验输入，正常结束后校验输出，旧/新调用和历史结果复核纳入当前Enum依赖；Enum变化不能借原幂等键读取过期上下文结果。参数稳定ID和三语言入口保持原协议。
+
+绑定Action与Function须引用相同Enum并保持原签名一致；各自参数ID仍独立，不用派生标签或摘要替代稳定绑定。草稿依旧要求已保存及匹配ETag，Enum选项属于服务端只读元数据，保存前剔除。编码、新写废弃值、默认值依赖保护和选项预算唯一见[Enum实际协议](Enum.md#当前实现协议2026-11-08)，不重复定义第二套规则。
+
 ### 声明范围的事务写入（2026-11-08）
 
 Function及直接源码Action可以使用`sideEffects=dataWrite`，并在正文声明`dataWrite:[{schemaId,operations}]`。每份声明须包含1～32个不同的Schema，每个Schema至少一种操作且仅允许`create/update/delete/upsert`；不接受bulk操作名称，SDK批量方法展开后沿用对应基本操作声明。Schema及操作是集合，保存时排序，引用必须是同租户已经生效的Schema；保存草稿与发布分别校验，写入对象也登记为定义依赖。`none`及`externalWrite`不得附带该声明，`externalWrite`仍不执行。实际合约见[事务契约](../../contracts/transactions.go)和[定义契约](../../contracts/model.go)。

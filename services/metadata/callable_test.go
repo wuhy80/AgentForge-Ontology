@@ -40,7 +40,7 @@ func TestInlinePythonRequiresPureCallableAndUnambiguousImplementation(t *testing
 			"function and artifact": func(c *c.Callable) { c.Runtime, c.FunctionID, c.ArtifactRef = nil, "function-id", "some-image" },
 			"nested function":       func(c *c.Callable) { c.FunctionID = "another-function" },
 			"unsupported language":  func(c *c.Callable) { c.Runtime.Language = "js" },
-			"enum parameter":        func(c *c.Callable) { c.Input[0].EnumID = "enum-id" },
+			"non-string enum":       func(c *c.Callable) { c.Input[0].EnumID, c.Input[0].DataType = "enum-id", "int64" },
 		} {
 			t.Run(string(d.Kind)+"/"+name, func(t *testing.T) {
 				candidate := create()

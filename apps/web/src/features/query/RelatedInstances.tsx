@@ -3,7 +3,7 @@ import { ArrowRight, Check, Link2, LoaderCircle, Plus, RefreshCw, Trash2 } from 
 import { Dialog } from '../../components/Dialog'
 import { ApiClient, ApiError } from '../../lib/api'
 import type { DefinitionRecord, Instance, LinkInstance, Page, QueryResult, QuerySpec, SchemaLink } from '../../lib/types'
-import { availableOperators, compileQuery, errorMessage, newCondition, newGroup, valueText } from './query'
+import { availableOperators, compileQuery, errorMessage, newCondition, newGroup, propertyValueText } from './query'
 import type { QueryEditor } from './query'
 import { ValueInput } from './InstanceDialog'
 
@@ -152,7 +152,7 @@ function RelationshipQuery({ api, model, navigation, instanceId, onForbidden, on
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {stale && result && <div className="notice" role="status">关联查询配置或数据已改变，请重新查询；续页已停用。</div>}
-    {result && <section aria-label="关联查询结果" className="query-related-results"><div className="table-wrap"><table><thead><tr><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}</th>)}</tr></thead><tbody>{result.data.map((instance) => <tr key={instance.id}><td><code>{instance.id}</code></td>{result.fields.map((field) => <td key={field.id}>{valueText(instance.values[field.id])}</td>)}</tr>)}</tbody></table></div>{!result.data.length && <p className="muted">没有匹配的关联对象。</p>}<div className="query-related-toolbar"><span className="muted">第 {executed!.page} 页 · 本页 {result.data.length} 条</span><button type="button" className="button" disabled={busy || stale || !result.hasMore || !result.nextCursor} onClick={() => void run(result.nextCursor)}>关联下一页<ArrowRight size={14} /></button></div></section>}
+    {result && <section aria-label="关联查询结果" className="query-related-results"><div className="table-wrap"><table><thead><tr><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}</th>)}</tr></thead><tbody>{result.data.map((instance) => <tr key={instance.id}><td><code>{instance.id}</code></td>{result.fields.map((field) => <td key={field.id}>{propertyValueText(field, instance.values[field.id])}</td>)}</tr>)}</tbody></table></div>{!result.data.length && <p className="muted">没有匹配的关联对象。</p>}<div className="query-related-toolbar"><span className="muted">第 {executed!.page} 页 · 本页 {result.data.length} 条</span><button type="button" className="button" disabled={busy || stale || !result.hasMore || !result.nextCursor} onClick={() => void run(result.nextCursor)}>关联下一页<ArrowRight size={14} /></button></div></section>}
     {managed && managing && <ManagedRelations api={api} navigation={navigation} instanceId={instanceId} target={model.target} fields={select} onChanged={changed} onForbidden={onForbidden} onWriting={writingChanged} />}
   </>
 }
@@ -217,7 +217,7 @@ function ManagedRelations({ api, navigation, instanceId, target, fields, onChang
     } finally { if (alive.current) setWriting(false); onWriting(false) }
   }
   function candidateLabel(instance: Instance) {
-    const values = (candidates?.fields ?? []).slice(0, 3).map((field) => valueText(instance.values[field.id])).filter(Boolean).join(' · ')
+    const values = (candidates?.fields ?? []).slice(0, 3).map((field) => propertyValueText(field, instance.values[field.id])).filter(Boolean).join(' · ')
     return `${values || target.definition.name}（${instance.id}）`
   }
   return <section className="query-related-manage" aria-label="维护对象关系">

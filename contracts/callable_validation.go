@@ -57,6 +57,7 @@ func CallableSignaturesEqual(left, right *Callable) bool {
 		result := append([]Property{}, properties...)
 		for i := range result {
 			result[i].ID = ""
+			result[i].EnumValues, result[i].EnumETag = nil, ""
 		}
 		sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 		return result

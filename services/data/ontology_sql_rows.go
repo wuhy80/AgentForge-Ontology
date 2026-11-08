@@ -63,6 +63,9 @@ func (h *handler) rowSQLScope(r *http.Request, p c.Principal, stmt *ontologySQLS
 	}
 	scope := &ontologySQLRowScope{Nodes: []ontologySQLScopeNode{{ID: "n0", Alias: stmt.Alias, Current: current, Decision: decision}}, Plan: c.RowQuery{Nodes: []c.RowQueryNode{{ID: "n0", Alias: stmt.Alias, SchemaID: current.Definition.ID}}, Joins: []c.RowQueryJoin{}}}
 	if len(stmt.Joins) == 0 {
+		if err := h.recheckEnums(r.Context(), current); err != nil {
+			return nil, err
+		}
 		return scope, nil
 	}
 	links, err := h.sqlAuthorizedLinks(r, p)
@@ -149,6 +152,11 @@ func (h *handler) rowSQLScope(r *http.Request, p c.Principal, stmt *ontologySQLS
 		scope.Plan.Nodes = append(scope.Plan.Nodes, c.RowQueryNode{ID: id, Alias: join.Alias, SchemaID: target.Definition.ID})
 		scope.Plan.Joins = append(scope.Plan.Joins, c.RowQueryJoin{From: origin.ID, To: id, LinkID: selected.link.Current.Definition.ID, Direction: selected.direction})
 		scope.Nodes = append(scope.Nodes, ontologySQLScopeNode{ID: id, Alias: join.Alias, Current: target, Decision: targetDecision})
+	}
+	for _, node := range scope.Nodes {
+		if err := h.recheckEnums(r.Context(), node.Current); err != nil {
+			return nil, err
+		}
 	}
 	return scope, nil
 }

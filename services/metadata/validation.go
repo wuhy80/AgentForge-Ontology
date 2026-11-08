@@ -218,11 +218,6 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 				if len(ps) > 256 {
 					return problem(422, "parameter_budget", "源码输入与输出分别最多256个参数")
 				}
-				for _, property := range ps {
-					if property.EnumID != "" {
-						return problem(422, "unsupported_parameters", "源码运行参数尚不支持Enum引用")
-					}
-				}
 			}
 		}
 	default:
@@ -239,6 +234,9 @@ func validateProperties(ps []contracts.Property, assignIDs bool) error {
 	idKeys := map[string]bool{}
 	for i := range ps {
 		p := &ps[i]
+		if p.EnumValues != nil || p.EnumETag != "" {
+			return problem(400, "derived_enum_metadata", "枚举选项和摘要由服务端解析，定义只可保存enumId")
+		}
 		if p.ID == "" && assignIDs {
 			p.ID = contracts.NewID()
 		}
@@ -341,6 +339,9 @@ func compatibleUpdate(old, next contracts.Definition) error {
 		return problem(422, "unsupported_change", "首批不支持改变类型或组织归属")
 	}
 	a, b := withoutDisplayMetadata(old), withoutDisplayMetadata(next)
+	if a.Kind == contracts.KindEnum && compatibleEnumUpdate(a, b) {
+		return nil
+	}
 	// Action targets are discoverable metadata. They may be updated through the
 	// same draft/publication flow, which rechecks every live dependency. Callable
 	// signatures, implementation modes and side effects remain locked.
@@ -360,6 +361,9 @@ func compatibleUpdate(old, next contracts.Definition) error {
 		a.Function.Runtime, b.Function.Runtime = nil, nil
 	}
 	if !reflect.DeepEqual(a, b) {
+		if _, err := contracts.ValidateSchemaAddition(a, b); err == nil {
+			return nil
+		}
 		if compatibleLinkBindingAddition(a, b) {
 			return nil
 		}

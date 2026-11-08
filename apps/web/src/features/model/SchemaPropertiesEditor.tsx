@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { LoaderCircle, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { Dialog } from '../../components/Dialog'
 import type { ApiClient } from '../../lib/api'
-import type { DataSource, DataType, Property, Schema, StoragePropertyMapping } from '../../lib/types'
+import type { DataSource, DataType, DefinitionRecord, Property, Schema, StoragePropertyMapping } from '../../lib/types'
 import { newProperty, typeLabels } from './PropertyEditor'
+import { PropertyDefaultEditor } from './PropertyDefaultEditor'
 import { createCatalog, PropertyMappingEditor } from './SchemaStorageEditor'
 
 type Editing = { index: number; property: Property; adding: boolean }
 
-export function SchemaPropertiesEditor({ api, schema, onChange, locked, allowAppend, disabled, active, currentId, currentETag, draft, maxProperties }: {
+export function SchemaPropertiesEditor({ api, schema, onChange, locked, allowAppend, disabled, active, currentId, currentETag, currentPropertyIds, enums = [], draft, maxProperties }: {
   api: ApiClient
   schema: Schema
   onChange: (schema: Schema) => void
@@ -18,6 +19,8 @@ export function SchemaPropertiesEditor({ api, schema, onChange, locked, allowApp
   active: boolean
   currentId?: string
   currentETag?: string
+  currentPropertyIds?: string[]
+  enums?: DefinitionRecord[]
   draft: boolean
   maxProperties: number
 }) {
@@ -26,7 +29,9 @@ export function SchemaPropertiesEditor({ api, schema, onChange, locked, allowApp
   const [sourceError, setSourceError] = useState('')
   const catalog = useMemo(() => createCatalog(api), [api, active])
   const binding = schema.storageBinding
-  const propertyLocked = !!editing && locked && (!allowAppend || !!editing.property.id)
+  const isCurrent = (property: Property) => currentPropertyIds ? currentPropertyIds.includes(property.id) : !!property.id
+  const propertyLocked = !!editing && locked && (!allowAppend || !editing.adding && isCurrent(schema.properties[editing.index]))
+  const nullableAppendOnly = allowAppend && !!binding
 
   useEffect(() => {
     if (!active) { setEditing(undefined); return }
@@ -62,7 +67,7 @@ export function SchemaPropertiesEditor({ api, schema, onChange, locked, allowApp
     setEditing(undefined)
   }
   function remove(index: number) {
-    if (disabled || locked && (!allowAppend || !!schema.properties[index].id)) return
+    if (disabled || locked && (!allowAppend || isCurrent(schema.properties[index]))) return
     const properties = schema.properties.filter((_, position) => position !== index)
     onChange({ ...schema, properties, indexes: (schema.indexes ?? []).filter((item) => item.fieldIds.every((id) => properties.some((property) => property.id === id))) })
   }
@@ -72,7 +77,7 @@ export function SchemaPropertiesEditor({ api, schema, onChange, locked, allowApp
       <div><h3>对象属性</h3><p className="muted">点击每行的编辑按钮，配置属性及其数据源、表和字段映射。</p></div>
       {(!locked || allowAppend) && <button type="button" className="button subtle" disabled={disabled || schema.properties.length >= maxProperties} onClick={add}><Plus size={15} />添加属性</button>}
     </div>
-    <p className="muted model-field-boundary">当前 {schema.properties.length} / {maxProperties} 个属性。对象属性暂不支持绑定枚举。</p>
+    <p className="muted model-field-boundary">当前 {schema.properties.length} / {maxProperties} 个属性。短文本可绑定已生效枚举，业务值使用稳定编码。</p>
     {sourceError && <div className="notice notice-error" role="alert">{sourceError}</div>}
     {schema.properties.length === 0 ? <div className="model-inline-empty">暂未设置对象属性。</div> : <div className="table-wrap model-property-summary"><table aria-label="对象属性列表">
       <thead><tr><th>业务名称</th><th>数据类型</th><th>约束</th><th>数据源</th><th>表</th><th>字段</th><th>操作</th></tr></thead>
@@ -85,7 +90,7 @@ export function SchemaPropertiesEditor({ api, schema, onChange, locked, allowApp
         const table = mapping?.table || (sameSource ? binding?.table : '')
         const location = binding ? [namespace, table].filter(Boolean).join('.') : '自动映射'
         const constraints = [property.required && '必须提供', property.nullable ? '允许空值' : '非空', property.readOnly && '只读'].filter(Boolean).join(' · ')
-        const canRemove = !locked || allowAppend && !property.id
+        const canRemove = !locked || allowAppend && !isCurrent(property)
         return <tr key={property.id || `new-${index}`}>
           <td title={property.name}><strong>{property.name || `未命名属性 ${index + 1}`}</strong></td>
           <td>{typeLabels[property.dataType] ?? property.dataType}{property.dataType === 'decimal' && <span className="muted"> ({property.precision ?? 18}, {property.scale ?? 0})</span>}</td>
@@ -112,14 +117,19 @@ export function SchemaPropertiesEditor({ api, schema, onChange, locked, allowApp
             </>}
           </div>
           <div className="model-property-options model-property-dialog-options">
-            <label className="model-checkbox"><input type="checkbox" disabled={propertyLocked || allowAppend} checked={!!editing.property.required} onChange={(event) => update({ required: event.target.checked })} />必须提供</label>
-            <label className="model-checkbox"><input type="checkbox" disabled={propertyLocked || allowAppend} checked={!!editing.property.nullable} onChange={(event) => update({ nullable: event.target.checked })} />允许空值</label>
+            <label className="model-checkbox"><input type="checkbox" disabled={propertyLocked || nullableAppendOnly} checked={!!editing.property.required} onChange={(event) => update({ required: event.target.checked })} />必须提供</label>
+            <label className="model-checkbox"><input type="checkbox" disabled={propertyLocked || nullableAppendOnly} checked={!!editing.property.nullable} onChange={(event) => update({ nullable: event.target.checked })} />允许空值</label>
             {editing.property.readOnly && <span className="badge">只读</span>}
-            {editing.property.enumId && <span className="model-inline-actions"><span className="muted">当前枚举绑定尚未支持</span>{!propertyLocked && <button type="button" className="button subtle" aria-label={`解除对象属性第${editing.index + 1}项枚举绑定`} onClick={() => update({ enumId: undefined })}>解除绑定</button>}</span>}
+            {editing.property.dataType === 'string' && <label>枚举<select className="field" aria-label={`对象属性第${editing.index + 1}项枚举`} disabled={propertyLocked} value={editing.property.enumId ?? ''} onChange={(event) => update({ enumId: event.target.value || undefined, enumValues: undefined, enumEtag: undefined, default: undefined })}>
+              <option value="">不绑定枚举</option>
+              {editing.property.enumId && !enums.some((entry) => entry.definition.id === editing.property.enumId) && <option value={editing.property.enumId}>当前已绑定枚举（无目录权限）</option>}
+              {enums.map(({ definition }) => <option key={definition.id} value={definition.id}>{definition.name}</option>)}
+            </select></label>}
           </div>
+          <PropertyDefaultEditor property={editing.property} label={`对象属性第${editing.index + 1}项默认值`} disabled={propertyLocked} enumValues={enums.find((entry) => entry.definition.id === editing.property.enumId)?.definition.enum?.values} onChange={update} />
           {editing.property.dataType === 'longtext' && <p className="muted">最多 4 MiB（UTF-8 字节），不支持索引或排序。</p>}
           {propertyLocked && <p className="muted">属性已生效，可修改业务名称；数据类型、约束和映射的变更需通过迁移处理。</p>}
-          {allowAppend && !propertyLocked && <p className="muted">为已生效模型新增属性时，必须允许空值。</p>}
+          {allowAppend && !propertyLocked && <p className="muted">{nullableAppendOnly ? '为已生效映射模型新增属性时，必须允许空值。' : '新增属性须允许空值，或设置合法的非空默认值。发布后为已有记录补齐默认值或 NULL，保留实例 ID；发布前打开的记录需刷新后再修改。'}</p>}
           </section>
           <section><h3>数据源与列映射</h3>{binding ? <PropertyMappingEditor catalog={catalog} active={active} forward={schema.mode === 'schema_2_db'} index={editing.index} property={editing.property} binding={binding} sources={sources} locked={propertyLocked} onChange={(mapping) => update({ mapping })} /> : <p className="muted">当前使用平台自动映射。如需指定数据源、表和字段，请先在基础信息中选择主数据源和主表。</p>}
             {currentId && editing.property.id ? <PropertyStorageStatus key={`${currentId}:${currentETag}:${editing.property.id}`} api={api} schemaId={currentId} currentETag={currentETag} propertyId={editing.property.id} explicit={!!binding} draft={draft} /> : <p className="muted model-storage-explanation">此属性尚未生效，发布后可核对实际数据库字段。</p>}

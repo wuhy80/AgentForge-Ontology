@@ -1,5 +1,5 @@
 import type {
-  DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation, ScriptRuntime, SourceToolResult,
+  DataCapabilities, DefinitionInput, DefinitionRecord, PropertyInput, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation, ScriptRuntime, SourceToolResult,
   WriteCapabilities, UpsertRequest, WriteResult, BulkWriteRequest, BulkWriteResult, WriteOperation,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
@@ -35,6 +35,16 @@ function strongETag(value: string): string {
     throw new ApiError(0, 'invalid_etag', '缺少有效的并发凭证，请重新读取后再提交')
   }
   return `"${tag}"`
+}
+
+function definitionRequest(definition: DefinitionInput): DefinitionInput {
+  const property = ({ enumValues: _values, enumEtag: _etag, ...input }: PropertyInput): PropertyInput => input
+  return {
+    ...definition,
+    ...(definition.schema ? { schema: { ...definition.schema, properties: definition.schema.properties.map(property) } } : {}),
+    ...(definition.action ? { action: { ...definition.action, input: definition.action.input?.map(property), output: definition.action.output?.map(property) } } : {}),
+    ...(definition.function ? { function: { ...definition.function, input: definition.function.input?.map(property), output: definition.function.output?.map(property) } } : {}),
+  }
 }
 
 // Credentials live only in this instance. All calls stay under the same-origin
@@ -275,10 +285,10 @@ export class ApiClient {
     return this.request(`/api/data/sources/${encodeURIComponent(id)}/tables/${encodeURIComponent(table)}?${params}`, { signal })
   }
   createDefinition(definition: DefinitionInput): Promise<DefinitionRecord> {
-    return this.request('/api/metadata/definitions', { method: 'POST', body: definition })
+    return this.request('/api/metadata/definitions', { method: 'POST', body: definitionRequest(definition) })
   }
   saveDraft(id: string, definition: DefinitionInput, etag: string): Promise<DefinitionRecord> {
-    return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/draft`, { method: 'PUT', body: definition, etag })
+    return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/draft`, { method: 'PUT', body: definitionRequest(definition), etag })
   }
   preview(id: string): Promise<Preview> {
     return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/preview`, { method: 'POST' })

@@ -37,6 +37,10 @@ npm.cmd run test:e2e -- workspace.spec.ts
 
 ## 页面与代码入口
 
+2026-11-08补齐默认平台 Schema 安全追加与 Enum 使用：按当前生效字段/索引 ID 锁定旧结构，后端声明 `schemaMigrations.addFields/addIndexes` 后可追加，新增项保存草稿后仍可编辑；能力缺失或当前态读取失败时保持锁定。属性默认值区分无默认、NULL、空字符串和 false，int64/decimal 保留字符串；迁移预览及实际边界见[Schema](../../docs/模块/Schema.md)。
+
+字符串字段和调用参数可选择同租户当前 Enum；表单默认值、实例和调用输入使用当前可写编码，查询允许筛选废弃编码，结果及模型预览显示标签与编码。派生 `enumValues/enumEtag` 只用于读取，API 保存定义前自动剔除，业务请求仍提交稳定 code。完整规则见[Enum](../../docs/模块/Enum.md#当前实现协议2026-11-08)。本批55文件/497项测试、构建及 `model-additions-enum.spec.ts` 的1440/390px共4项隔离浏览器验证通过；浏览器拦截API，真实数据库与容器验证另见项目总览。
+
 | 入口 | 职责 |
 | --- | --- |
 | [App](src/App.tsx) | 会话、导航与顶栏当前分类；概览和业务页面共享分类，偏好按租户及账号在当前标签页记忆并经授权目录校验 |

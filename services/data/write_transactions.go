@@ -362,6 +362,7 @@ func applyWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, opera
 			return c.WriteTransactionResult{}, err
 		}
 		authorization := map[string]string{}
+		authorization["enumContext"] = c.EnumContextDigest(item.current.Definition)
 		for name, decision := range item.decisions {
 			authorization[name] = digest(decision)
 		}

@@ -3,7 +3,7 @@ import { AlertTriangle, Check, LoaderCircle, Pencil, RefreshCw, Save, Trash2 } f
 import { ApiClient, ApiError } from '../../lib/api';
 import type { DefinitionRecord, Instance, Property, Values } from '../../lib/types';
 import { Dialog } from '../../components/Dialog';
-import { buildWriteValues, errorMessage, initialDrafts, valueText, writeIntentSignature } from './query';
+import { buildWriteValues, errorMessage, initialDrafts, propertyValueText, writeIntentSignature } from './query';
 import type { FieldDrafts } from './query';
 import { useSchemaWrites } from './useSchemaWrites';
 
@@ -17,9 +17,17 @@ type Props = {
   onForbidden?: (message: string) => void;
 };
 
-export function ValueInput({ property, value, onChange, disabled, id }: {
-  property: Property; value: string; onChange: (value: string) => void; disabled?: boolean; id: string;
+export function ValueInput({ property, value, onChange, disabled, id, allowDeprecated = false }: {
+  property: Property; value: string; onChange: (value: string) => void; disabled?: boolean; id: string; allowDeprecated?: boolean;
 }) {
+  if (property.enumId) {
+    const choices = property.enumValues ?? [];
+    return <select id={id} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled || !property.enumValues}>
+      <option value="">{property.enumValues ? '请选择枚举值' : '枚举选项尚未读取'}</option>
+      {value && !choices.some((choice) => choice.code === value) && <option value={value} disabled>当前值：{value}（不可选）</option>}
+      {choices.map((choice) => <option key={choice.code} value={choice.code} disabled={!!choice.deprecated && !allowDeprecated}>{choice.label}（{choice.code}）{choice.deprecated ? ' · 已停用' : ''}</option>)}
+    </select>;
+  }
   if (property.dataType === 'boolean') {
     return <select id={id} value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled}>
       <option value="">请选择</option><option value="true">是（true）</option><option value="false">否（false）</option>
@@ -195,9 +203,9 @@ export function InstanceDialog({ api, schema, instanceId, createIntents, onClose
                     {property.readOnly && <span className="badge">只读</span>}{property.required && <span className="badge">必填</span>}</span>
                 </div>
                 {!editing || property.readOnly ? <div className={`query-value ${original == null || original === '' ? 'query-value-special' : ''}`}>
-                  {record ? valueText(original) : Object.hasOwn(property, 'default') ? `默认值：${valueText(property.default)}` : '由服务端填充'}
+                  {record ? propertyValueText(property, original) : Object.hasOwn(property, 'default') ? `默认值：${propertyValueText(property, property.default)}` : '由服务端填充'}
                 </div> : <div className="field">
-                  {record && <span className="muted query-original">当前值：{valueText(original)}</span>}
+                  {record && <span className="muted query-original">当前值：{propertyValueText(property, original)}</span>}
                   <select aria-label={`${property.name}的写入方式`} value={draft.mode} disabled={busy}
                     onChange={(event) => updateDraft(property.id, { mode: event.target.value as FieldDrafts[string]['mode'] })}>
                     {record ? <option value="unchanged">保留原值</option> : <option value="omit">{Object.hasOwn(property, 'default') ? '使用默认值' : '不提交此字段'}</option>}
@@ -206,7 +214,7 @@ export function InstanceDialog({ api, schema, instanceId, createIntents, onClose
                   </select>
                   {draft.mode === 'value' && <ValueInput property={property} value={draft.text} disabled={busy} id={inputId}
                     onChange={(text) => updateDraft(property.id, { text })} />}
-                  {draft.mode === 'omit' && Object.hasOwn(property, 'default') && <small className="muted">默认值：{valueText(property.default)}</small>}
+                  {draft.mode === 'omit' && Object.hasOwn(property, 'default') && <small className="muted">默认值：{propertyValueText(property, property.default)}</small>}
                   {draft.mode === 'value' && property.dataType === 'timestamp' && <small className="muted">使用带时区的 RFC 3339 原文，支持微秒；不会自动转换为本地时间。</small>}
                   {draft.mode === 'value' && ['int64', 'decimal'].includes(property.dataType) && <small className="muted">以字符串提交，保留完整精度。</small>}
                 </div>}

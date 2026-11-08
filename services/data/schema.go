@@ -78,8 +78,8 @@ func validateSchema(d c.Definition) error {
 			return problem(422, "ambiguous_field", "属性名称不能与另一属性 ID 冲突")
 		}
 		names[key] = true
-		if p.EnumID != "" {
-			return problem(422, "unsupported", "首批尚未开放 Enum 属性的跨定义协调")
+		if p.EnumID != "" && p.DataType != "string" {
+			return problem(422, "invalid_enum_reference", "Enum属性必须使用string业务code")
 		}
 		if p.ReadOnly && len(p.Default) == 0 && (p.Required || !p.Nullable) {
 			return problem(422, "invalid_schema", "只读必填或非空属性需要显式默认值")
@@ -201,14 +201,17 @@ func ddl(d c.Definition) (string, error) {
 	return "CREATE TABLE " + quote(tableName(d.ID)) + " (" + strings.Join(cols, ",") + ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin", nil
 }
 
-// Storage signature deliberately excludes presentation names. No automatic ALTER
-// is attempted in this increment: unsupported changes cannot pause a live model.
+// Storage signatures exclude names and derived Enum metadata. Publication uses
+// an explicit additive plan for supported changes and rejects all other DDL.
 func storageSignature(d c.Definition) string {
 	s := *d.Schema
 	s.Properties = append([]c.Property(nil), s.Properties...)
 	s.Indexes = append([]c.Index(nil), s.Indexes...)
 	for i := range s.Properties {
 		s.Properties[i].Name = ""
+		s.Properties[i].EnumID = ""
+		s.Properties[i].EnumValues = nil
+		s.Properties[i].EnumETag = ""
 	}
 	for i := range s.Indexes {
 		s.Indexes[i].Name = ""

@@ -68,15 +68,19 @@ type Property struct {
 	Name string `json:"name"`
 	// DataType supports string, text, longtext, uuid, int64, decimal, boolean,
 	// and timestamp. Text byte budgets are defined in limits.go.
-	DataType  string           `json:"dataType"`
-	Required  bool             `json:"required,omitempty"`
-	Nullable  bool             `json:"nullable,omitempty"`
-	ReadOnly  bool             `json:"readOnly,omitempty"`
-	Precision int              `json:"precision,omitempty"`
-	Scale     int              `json:"scale,omitempty"`
-	EnumID    string           `json:"enumId,omitempty"`
-	Default   json.RawMessage  `json:"default,omitempty"`
-	Mapping   *PropertyMapping `json:"mapping,omitempty"`
+	DataType  string `json:"dataType"`
+	Required  bool   `json:"required,omitempty"`
+	Nullable  bool   `json:"nullable,omitempty"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
+	Precision int    `json:"precision,omitempty"`
+	Scale     int    `json:"scale,omitempty"`
+	EnumID    string `json:"enumId,omitempty"`
+	// EnumValues and EnumETag are derived read metadata. Definition writes may
+	// provide only EnumID; services resolve these from the current tenant Enum.
+	EnumValues []EnumValue      `json:"enumValues,omitempty"`
+	EnumETag   string           `json:"enumEtag,omitempty"`
+	Default    json.RawMessage  `json:"default,omitempty"`
+	Mapping    *PropertyMapping `json:"mapping,omitempty"`
 }
 
 type Index struct {

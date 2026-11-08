@@ -391,6 +391,7 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	verifyMultiLanguageHTTP(t, admin, other, peerClient, execServer.URL, metaServer.URL, publish, savePolicy, policy.Current.Rules, roleID)
 	verifyDataWriteTransactionsHTTP(t, admin, other, execServer.URL, dataServer.URL, publish)
 	verifyTransactionRecoveryHTTP(t, admin, execConfig, roots, dataServer.URL, publish)
+	verifyEnumRuntimeHTTP(t, admin, other, execServer.URL, metaServer.URL, dataServer.URL, publish)
 	// Authoritative OPA failure closes access even for a persisted success.
 	originalURL := opa.URL
 	opa.URL = "http://127.0.0.1:1"

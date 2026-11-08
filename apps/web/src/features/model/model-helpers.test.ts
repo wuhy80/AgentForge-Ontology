@@ -28,15 +28,32 @@ describe('可发布的对象模型范围', () => {
     expect(validateDefinition(schema(1, 33))).toBe('对象模型最多支持 32 个索引。')
   })
 
-  it('对象存储禁止枚举绑定，调用签名保留枚举元数据', () => {
+  it('对象属性与调用参数支持短文本枚举绑定，拒绝其他类型引用', () => {
     const definition = schema()
     definition.schema!.properties[0].dataType = 'string'
     definition.schema!.properties[0].enumId = 'enum'
-    expect(validateDefinition(definition)).toBe('当前对象属性暂不支持绑定枚举，请先解除枚举绑定。')
+    expect(validateDefinition(definition)).toBeUndefined()
     const fn = newDefinition('function', 'category', 'group')
     fn.name = '校验设备'
     fn.function!.input = definition.schema!.properties
     expect(validateDefinition(fn)).toBeUndefined()
+    definition.schema!.properties[0].dataType = 'int64'
+    expect(validateDefinition(definition)).toBe('枚举绑定只支持短文本属性。')
+  })
+
+  it('默认值区分未设置、空字符串、NULL和精确标量，并拒绝非法默认值', () => {
+    const definition = schema()
+    const property = definition.schema!.properties[0]
+    property.default = '9223372036854775807'
+    expect(validateDefinition(definition)).toBeUndefined()
+    property.default = '9223372036854775808'
+    expect(validateDefinition(definition)).toContain('超出 int64')
+    property.default = null
+    expect(validateDefinition(definition)).toContain('NULL 默认值')
+    property.nullable = true
+    expect(validateDefinition(definition)).toBeUndefined()
+    property.dataType = 'string'; property.default = ''
+    expect(validateDefinition(definition)).toBeUndefined()
   })
 
   it.each(['function', 'action'] as const)('%s 接受 JS/Go 定义，拒绝未知语言及各语言保留入口', (kind) => {

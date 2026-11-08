@@ -1,6 +1,7 @@
 import type { Definition, DefinitionRecord, Kind, Property } from '../../lib/types'
 import { newProperty } from './PropertyEditor'
 import { languageLabels, validEntrypoint } from '../../lib/runtime-language'
+import { draftText, parseFieldValue } from '../query/query'
 
 export const MAX_SCHEMA_PROPERTIES = 100
 export const MAX_SCHEMA_INDEXES = 32
@@ -35,6 +36,16 @@ function validateProperties(properties: Property[], title: string): string | und
     if (names.has(name)) return `${title}中存在重复的业务名称。`
     names.add(name)
     if (property.dataType === 'decimal' && (!Number.isInteger(property.precision) || !Number.isInteger(property.scale ?? 0) || property.precision! < 1 || property.precision! > 38 || (property.scale ?? 0) < 0 || (property.scale ?? 0) > property.precision!)) return '小数总位数须为 1–38，小数位须在 0 与总位数之间。'
+    if (property.enumId && property.dataType !== 'string') return '枚举绑定只支持短文本属性。'
+    if (property.default !== undefined) {
+      if (property.default === null) {
+        if (!property.nullable) return `${property.name}：非空属性不能使用 NULL 默认值。`
+      } else {
+        if (typeof property.default !== (property.dataType === 'boolean' ? 'boolean' : 'string')) return `${property.name}：默认值类型不合法。`
+        try { parseFieldValue(property, draftText(property.default)) } catch (cause) { return cause instanceof Error ? cause.message : '默认值不合法。' }
+        if (property.enumId && property.enumValues && !property.enumValues.some((value) => value.code === property.default && !value.deprecated)) return `${property.name}：请选择有效的枚举默认值。`
+      }
+    }
   }
 }
 
@@ -65,7 +76,6 @@ export function validateDefinition(definition: Definition): string | undefined {
     if (definition.schema.properties.length === 0) return '对象模型至少需要一个属性。'
     if (definition.schema.properties.length > MAX_SCHEMA_PROPERTIES) return `对象模型最多支持 ${MAX_SCHEMA_PROPERTIES} 个属性。`
     if ((definition.schema.indexes?.length ?? 0) > MAX_SCHEMA_INDEXES) return `对象模型最多支持 ${MAX_SCHEMA_INDEXES} 个索引。`
-    if (definition.schema.properties.some((property) => property.enumId)) return '当前对象属性暂不支持绑定枚举，请先解除枚举绑定。'
     const propertyError = validateProperties(definition.schema.properties, '属性')
     if (propertyError) return propertyError
     const names = new Set<string>()

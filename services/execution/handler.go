@@ -229,6 +229,11 @@ func (h *handler) resolvePlan(ctx context.Context, p c.Principal, out plan) (pla
 	if err := h.authorize(ctx, p, out.root.Kind, out.root.ID); err != nil {
 		return out, err
 	}
+	var enumErr error
+	out.root, enumErr = h.resolveCallableEnums(ctx, p, out.root)
+	if enumErr != nil {
+		return out, enumErr
+	}
 	if out.root.Kind == c.KindAction {
 		if out.root.Action == nil || !supportedSideEffects(out.root.Action) || out.root.Action.ArtifactRef != "" {
 			return out, problem(422, "unsupported_action", "仅执行纯计算或声明数据写入范围的源码Action")
@@ -249,6 +254,10 @@ func (h *handler) resolvePlan(ctx context.Context, p c.Principal, out plan) (pla
 			return out, problem(422, "invalid_function", "动作实现必须是同租户已生效Function")
 		}
 		if err := h.authorize(ctx, p, c.KindFunction, out.implementation.ID); err != nil {
+			return out, err
+		}
+		out.implementation, err = h.resolveCallableEnums(ctx, p, out.implementation)
+		if err != nil {
 			return out, err
 		}
 		if !sameSignature(out.root.Action.Input, out.implementation.Function.Input) || !sameSignature(out.root.Action.Output, out.implementation.Function.Output) {

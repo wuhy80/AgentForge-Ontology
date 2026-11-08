@@ -239,6 +239,7 @@ func compileMappedQueryPredicate(d c.Definition, tables []*mappedTable, etag str
 		Query   c.QuerySpec
 		Sources []string
 	}{bound, sources})
+	result.Fingerprint = enumQueryFingerprint(result.Fingerprint, d)
 	if query.Page.Cursor != "" {
 		cursor, err := parseBoundCursor(secret, query.Page.Cursor, false)
 		if err != nil {
@@ -548,7 +549,10 @@ func (h *handler) queryMapped(ctx context.Context, principal c.Principal, curren
 		if err != nil {
 			return err
 		}
-		return h.recheck(ctx, principal, operation, current.Definition.ID, decision)
+		if err := h.recheck(ctx, principal, operation, current.Definition.ID, decision); err != nil {
+			return err
+		}
+		return h.recheckEnums(ctx, current)
 	})
 	if err != nil {
 		return result, err

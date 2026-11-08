@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, Eye, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { DefinitionRecord, Property, QueryResult } from '../../lib/types'
-import { errorMessage, valueText } from '../query/query'
+import { errorMessage, propertyValueText } from '../query/query'
 import { ModelLinkPreview } from './ModelLinkPreview'
 
 function initialFields(properties: Property[]): string[] {
@@ -119,10 +119,10 @@ function CurrentDataPreview({ api, schemaId, active, draft }: {
     {!current && !loading && error && <button type="button" className="button" onClick={() => setRetry((value) => value + 1)}><RefreshCw size={15} />重新读取模型</button>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {page && <>
-      <div className="table-wrap model-data-preview-table"><table aria-label="对象数据预览"><thead><tr><th>#</th>{page.result.fields.map((field) => <th key={field.id}>{field.name}</th>)}<th>记录</th></tr></thead><tbody>{page.result.data.map((instance, index) => <tr key={instance.id} aria-selected={selectedId === instance.id} onClick={() => setSelectedId(instance.id)}><td>{index + 1}</td>{page.result.fields.map((field) => { const text = valueText(instance.values[field.id]); return <td key={field.id}><span className="model-data-preview-cell">{text.length > 160 ? `${text.slice(0, 160)}…` : text}</span></td> })}<td><button type="button" className="button subtle" aria-label={`预览记录 ${instance.id}`} onClick={() => setSelectedId(instance.id)}>{selectedId === instance.id ? '已选中' : '查看记录'}</button></td></tr>)}</tbody></table></div>
+      <div className="table-wrap model-data-preview-table"><table aria-label="对象数据预览"><thead><tr><th>#</th>{page.result.fields.map((field) => <th key={field.id}>{field.name}</th>)}<th>记录</th></tr></thead><tbody>{page.result.data.map((instance, index) => <tr key={instance.id} aria-selected={selectedId === instance.id} onClick={() => setSelectedId(instance.id)}><td>{index + 1}</td>{page.result.fields.map((field) => { const text = propertyValueText(field, instance.values[field.id]); return <td key={field.id}><span className="model-data-preview-cell">{text.length > 160 ? `${text.slice(0, 160)}…` : text}</span></td> })}<td><button type="button" className="button subtle" aria-label={`预览记录 ${instance.id}`} onClick={() => setSelectedId(instance.id)}>{selectedId === instance.id ? '已选中' : '查看记录'}</button></td></tr>)}</tbody></table></div>
       {!page.result.data.length && <div className="model-inline-empty">当前对象暂无可预览的数据。</div>}
       <div className="model-data-preview-toolbar"><button type="button" className="button" disabled={!!loading || !page.index} onClick={() => { if (current) void run(current, page.fields, page.limit, page.index - 1, page.cursors.slice(0, page.index)) }}><ArrowLeft size={14} />预览上一页</button><button type="button" className="button" disabled={!!loading || !page.result.hasMore || !page.result.nextCursor} onClick={() => { if (current && page.result.nextCursor) void run(current, page.fields, page.limit, page.index + 1, [...page.cursors, page.result.nextCursor]) }}>预览下一页<ArrowRight size={14} /></button></div>
-      {selected && <section className="model-data-preview-record" aria-label="选中记录预览"><div className="model-section-heading"><div><h3>当前记录</h3><p className="muted"><code>{selected.id}</code></p></div></div><dl>{page.result.fields.map((field) => <div key={field.id}><dt>{field.name}</dt><dd><pre>{valueText(selected.values[field.id])}</pre></dd></div>)}</dl></section>}
+      {selected && <section className="model-data-preview-record" aria-label="选中记录预览"><div className="model-section-heading"><div><h3>当前记录</h3><p className="muted"><code>{selected.id}</code></p></div></div><dl>{page.result.fields.map((field) => <div key={field.id}><dt>{field.name}</dt><dd><pre>{propertyValueText(field, selected.values[field.id])}</pre></dd></div>)}</dl></section>}
     </>}
     <ModelLinkPreview api={api} schemaId={schemaId} instanceId={selected?.id} active={active} />
   </>

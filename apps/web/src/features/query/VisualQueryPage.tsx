@@ -5,7 +5,7 @@ import type { DefinitionRecord, Organization, QueryResult, QuerySpec } from '../
 import { InstanceDialog } from './InstanceDialog';
 import { useSchemaWrites } from './useSchemaWrites';
 import { RelatedInstances } from './RelatedInstances';
-import { compileQuery, errorMessage, newGroup, valueText } from './query';
+import { compileQuery, errorMessage, newGroup, propertyValueText } from './query';
 import type { QueryEditor } from './query';
 import { GroupEditor } from './QueryFilterEditor';
 import { VisualRelations } from './VisualRelations';
@@ -280,7 +280,7 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
           : result.rowMode ? <><p className="ontology-row-grain muted">每行对应一组匹配对象，同一对象可能出现多次。结果只读。</p><RowResults result={result} query={executed!.spec} /></>
           : <div className="table-wrap query-result-table"><table><thead><tr><th className="query-row-number">#</th><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}<small>{field.dataType}</small></th>)}<th className="query-row-action">操作</th></tr></thead>
             <tbody>{result.data.map((instance, index) => <tr key={instance.id}><td className="query-row-number">{index + 1}</td><td><button type="button" className="query-id-link" title={instance.id} onClick={() => setDialog({ id: instance.id })}>{instance.id}</button></td>
-              {result.fields.map((field) => { const value = instance.values[field.id]; return <td key={field.id}><span className={value === undefined || value === null || value === '' ? 'query-cell-special' : 'query-cell-value'}>{valueText(value)}</span></td>; })}
+              {result.fields.map((field) => { const value = instance.values[field.id]; return <td key={field.id}><span className={value === undefined || value === null || value === '' ? 'query-cell-special' : 'query-cell-value'}>{propertyValueText(field, value)}</span></td>; })}
               <td className="query-row-action"><div className="query-instance-actions"><button type="button" className="button subtle" onClick={() => setDialog({ id: instance.id })}>查看<ChevronRight size={14} /></button><button type="button" className="button subtle" onClick={() => setRelatedId(instance.id)}>关联数据</button></div></td></tr>)}</tbody>
           </table></div>}
       {executed && <div className="query-result-footer"><span className="muted">第 {executed.page} 页 · {executed.result.hasMore ? '后面还有数据' : '已到结果末尾'}</span>

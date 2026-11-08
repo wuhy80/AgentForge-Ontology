@@ -120,7 +120,7 @@ func (h *handler) executeOntologySQLHTTP(w http.ResponseWriter, r *http.Request)
 func safeQueryProperties(properties []c.Property) []c.Property {
 	out := make([]c.Property, 0, len(properties))
 	for _, p := range properties {
-		out = append(out, c.Property{ID: p.ID, Name: p.Name, DataType: p.DataType, Nullable: p.Nullable, Required: p.Required, ReadOnly: p.ReadOnly, Precision: p.Precision, Scale: p.Scale})
+		out = append(out, c.Property{ID: p.ID, Name: p.Name, DataType: p.DataType, Nullable: p.Nullable, Required: p.Required, ReadOnly: p.ReadOnly, Precision: p.Precision, Scale: p.Scale, EnumID: p.EnumID, EnumValues: p.EnumValues, EnumETag: p.EnumETag})
 	}
 	return out
 }
@@ -230,6 +230,9 @@ func (h *handler) analyzeOntologySQL(r *http.Request, p c.Principal, req c.Ontol
 			out.Diagnostics = append(out.Diagnostics, sqlDiagnostic(public.code, public.message, stmt.SourceRange))
 			out.Ready, out.Query = false, nil
 		}
+	}
+	if err := h.recheckEnums(r.Context(), current); err != nil {
+		return out, err
 	}
 	return out, nil
 }
@@ -440,6 +443,7 @@ func (h *handler) ontologySQLContext(r *http.Request, p c.Principal, categoryID,
 	search = nameKey(search)
 	scanned, used, state := 0, queryDirectoryCursorReserve+128, ""
 	var last c.BusinessDirectoryEntry
+	var enumDefinitions []c.CurrentDefinition
 	finish := func(more bool) (c.QueryContext, error) {
 		if len(out.Models) > 0 {
 			if e := h.recheck(r.Context(), p, "instance.query", last.Current.Definition.ID, last.Decision); e != nil {
@@ -450,6 +454,11 @@ func (h *handler) ontologySQLContext(r *http.Request, p c.Principal, categoryID,
 				if err != nil {
 					return out, err
 				}
+			}
+		}
+		for _, current := range enumDefinitions {
+			if e := h.recheckEnums(r.Context(), current); e != nil {
+				return out, e
 			}
 		}
 		encoded, e := json.Marshal(out)
@@ -501,6 +510,7 @@ func (h *handler) ontologySQLContext(r *http.Request, p c.Principal, categoryID,
 			}
 			used += len(encoded) + 1
 			out.Models = append(out.Models, model)
+			enumDefinitions = append(enumDefinitions, entry.Current)
 			last = entry
 		}
 		if !list.HasMore {
@@ -521,7 +531,7 @@ func queryContextModel(d c.Definition, decision c.Decision, category string) c.Q
 			continue
 		}
 		filterable := primarySQLProperty(d, property)
-		model.Fields = append(model.Fields, c.QueryContextField{ID: property.ID, Name: property.Name, DataType: property.DataType, Nullable: property.Nullable, Precision: property.Precision, Scale: property.Scale, Filterable: filterable, Sortable: filterable && property.DataType != "text" && property.DataType != "longtext"})
+		model.Fields = append(model.Fields, c.QueryContextField{ID: property.ID, Name: property.Name, DataType: property.DataType, Nullable: property.Nullable, Precision: property.Precision, Scale: property.Scale, Filterable: filterable, Sortable: filterable && property.DataType != "text" && property.DataType != "longtext", EnumID: property.EnumID, EnumValues: property.EnumValues, EnumETag: property.EnumETag})
 	}
 	return model
 }

@@ -205,7 +205,7 @@ func (h *handler) recheckMutations(ctx context.Context, p c.Principal, current c
 			return err
 		}
 	}
-	return nil
+	return h.recheckEnums(ctx, current)
 }
 
 func mutationCheckOld(ctx context.Context, store mutationStore, schema *c.Schema, old c.Instance, relevant []c.Decision, upsert bool) error {
@@ -293,6 +293,7 @@ func (h *handler) executeMutations(ctx context.Context, p c.Principal, current c
 				return mutationKey(req.Commands[ordered[i]].Match) < mutationKey(req.Commands[ordered[j]].Match)
 			})
 			saved := mutationSaved{Items: make([]mutationSavedItem, len(req.Commands)), Authorization: map[string]string{}}
+			saved.Authorization["enumContext"] = c.EnumContextDigest(current.Definition)
 			for name, decision := range decisions {
 				saved.Authorization[name] = digest(decision)
 			}
@@ -610,6 +611,14 @@ func (h *handler) bulkWriteHTTP(operation string) http.HandlerFunc {
 
 // replayMutation reauthorizes historical and current rows before projecting a receipt.
 func replayMutation(ctx context.Context, store mutationStore, current c.CurrentDefinition, req mutationRequest, decisions mutationDecisions, item mutationSavedItem, authorization map[string]string) (c.WriteResult, error) {
+	if authorization["enumContext"] != c.EnumContextDigest(current.Definition) {
+		return c.WriteResult{}, problem(409, "enum_changed", "枚举已改变，不能交付旧写入回执；请先核对原对象")
+	}
+	for _, property := range current.Definition.Schema.Properties {
+		if _, exists := item.Instance.Values[property.ID]; !exists {
+			return c.WriteResult{}, problem(409, "definition_changed", "模型字段已改变，不能交付缺少新字段的历史回执；请先核对原对象")
+		}
+	}
 	if item.Operation != "instance.create" && item.Operation != "instance.patch" && item.Operation != "instance.delete" {
 		return c.WriteResult{}, problem(500, "idempotency_corrupt", "无法核对原写入结果")
 	}

@@ -438,7 +438,7 @@ describe('模型工作流', () => {
     await waitFor(() => expect(api.saveDraft).toHaveBeenCalledWith('equipment', expect.objectContaining({ schema: expect.objectContaining({ indexes: [expect.objectContaining({ fieldIds: ['name'] })] }) }), 'saved-1'))
   })
 
-  it('对象属性和索引到达存储上限后停止添加，Schema 不提供枚举绑定入口', async () => {
+  it('对象属性和索引到达存储上限后停止添加，已有属性仍可选择当前枚举', async () => {
     const initial = record()
     initial.definition.schema!.properties = Array.from({ length: 100 }, (_, index) => ({ id: `field-${index}`, name: `属性${index}`, dataType: 'int64' }))
     initial.definition.schema!.properties[0].dataType = 'string'
@@ -450,8 +450,10 @@ describe('模型工作流', () => {
     const dialog = await screen.findByRole('region', { name: '模型编辑' })
     await selectTab(dialog, '属性配置')
     expect((within(dialog).getByRole('button', { name: '添加属性' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(within(dialog).queryByLabelText('对象属性第1项枚举')).toBeNull()
-    expect(within(dialog).getByText(/对象属性暂不支持绑定枚举/)).toBeTruthy()
+    const property = await editProperty(dialog)
+    expect(within(property).getByLabelText('对象属性第1项枚举')).toBeTruthy()
+    expect(within(property).getByRole('option', { name: '设备状态' })).toBeTruthy()
+    await userEvent.click(within(property).getByRole('button', { name: '取消' }))
     await selectTab(dialog, '索引信息')
     expect((within(dialog).getByRole('button', { name: '添加索引' }) as HTMLButtonElement).disabled).toBe(true)
   }, 15000)

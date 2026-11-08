@@ -31,6 +31,7 @@ func (h *handler) sqlAuthorizedLinks(r *http.Request, p c.Principal) ([]sqlAutho
 		return nil, err
 	}
 	models := map[string]*c.QueryContextModel{}
+	enumDefinitions := map[string]c.CurrentDefinition{}
 	model := func(id string) (*c.QueryContextModel, error) {
 		if cached, known := models[id]; known {
 			return cached, nil
@@ -75,6 +76,7 @@ func (h *handler) sqlAuthorizedLinks(r *http.Request, p c.Principal) ([]sqlAutho
 			return nil, nil
 		}
 		models[id] = &out
+		enumDefinitions[id] = current
 		return &out, nil
 	}
 	result, after, scanned := []sqlAuthorizedLink{}, "", 0
@@ -158,6 +160,11 @@ func (h *handler) sqlAuthorizedLinks(r *http.Request, p c.Principal) ([]sqlAutho
 			result = append(result, sqlAuthorizedLink{Current: current, Category: categories[d.CategoryID], Source: *source, Target: *target})
 		}
 		if !list.HasMore {
+			for _, current := range enumDefinitions {
+				if err := h.recheckEnums(r.Context(), current); err != nil {
+					return nil, err
+				}
+			}
 			sort.Slice(result, func(i, j int) bool { return result[i].Current.Definition.ID < result[j].Current.Definition.ID })
 			return result, nil
 		}

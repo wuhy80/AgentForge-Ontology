@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, Link2, LoaderCircle, RefreshCw } from 'lucide-react'
 import { ApiError, type ApiClient } from '../../lib/api'
 import type { DefinitionRecord, Property, QueryResult, QuerySpec, SchemaLink } from '../../lib/types'
-import { errorMessage, valueText } from '../query/query'
+import { errorMessage, propertyValueText } from '../query/query'
 
 function previewFields(properties: Property[]) {
   const ordinary = properties.filter((property) => property.dataType !== 'longtext')
@@ -130,7 +130,7 @@ function LinkPreviewQuery({ api, navigation, instanceId, target }: {
     {!selected.length && <p className="muted">请选择至少一个关联返回字段。</p>}
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     {result && <>
-      <div className="table-wrap model-preview-result-table"><table aria-label={`${navigation.name}关联数据`}><thead><tr><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}</th>)}</tr></thead><tbody>{result.data.map((instance) => <tr key={instance.id}><td><code>{instance.id}</code></td>{result.fields.map((field) => <td key={field.id}><span className="model-preview-cell">{valueText(instance.values[field.id])}</span></td>)}</tr>)}</tbody></table></div>
+      <div className="table-wrap model-preview-result-table"><table aria-label={`${navigation.name}关联数据`}><thead><tr><th>实例 ID</th>{result.fields.map((field) => <th key={field.id}>{field.name}</th>)}</tr></thead><tbody>{result.data.map((instance) => <tr key={instance.id}><td><code>{instance.id}</code></td>{result.fields.map((field) => <td key={field.id}><span className="model-preview-cell">{propertyValueText(field, instance.values[field.id])}</span></td>)}</tr>)}</tbody></table></div>
       {!result.data.length && <p className="muted">此记录没有可见的关联数据。</p>}
       <div className="model-preview-toolbar"><span className="muted">第 {page} 页 · 本页 {result.data.length} 条</span><button type="button" className="button subtle" disabled={busy || stale || !result.hasMore || !result.nextCursor} onClick={() => void run(result.nextCursor)}>关联下一页<ArrowRight size={14} /></button></div>
     </>}

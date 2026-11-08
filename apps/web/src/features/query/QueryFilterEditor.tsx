@@ -19,9 +19,12 @@ function ConditionEditor({ condition, properties, onChange, onRemove }: {
       {availableOperators(property).map((item) => <option value={item.value} key={item.value}>{item.label}</option>)}
     </select>
     <div className="query-condition-input">{noValue ? <span className="muted query-no-value">无需填写比较值</span>
+      : isSet && property?.enumId && property.enumValues ? <><label className="query-sr-only" htmlFor={`condition-${condition.id}`}>枚举集合值</label><select id={`condition-${condition.id}`} multiple value={condition.raw ? condition.raw.split('\n') : []} onChange={(event) => onChange({ ...condition, raw: Array.from(event.target.selectedOptions, (option) => option.value).join('\n') })}>
+        {property.enumValues.map((value) => <option value={value.code} key={value.code}>{value.label}（{value.code}）{value.deprecated ? ' · 已停用' : ''}</option>)}
+      </select><small className="muted">可多选；停用值仍可用于查询旧数据。</small></>
       : isSet ? <><textarea aria-label="集合值，每行一个" rows={3} value={condition.raw} onChange={(event) => onChange({ ...condition, raw: event.target.value })} placeholder="每行一个值，最多 100 个" />
         <small className="muted">每行一个值；字符串保留空格，空行表示空字符串。</small></>
-        : property && <><label className="query-sr-only" htmlFor={`condition-${condition.id}`}>比较值</label><ValueInput property={property} id={`condition-${condition.id}`} value={condition.raw} onChange={(raw) => onChange({ ...condition, raw })} /></>}
+        : property && <><label className="query-sr-only" htmlFor={`condition-${condition.id}`}>比较值</label><ValueInput property={property} allowDeprecated id={`condition-${condition.id}`} value={condition.raw} onChange={(raw) => onChange({ ...condition, raw })} /></>}
     </div>
     <button type="button" className="button subtle query-icon-button" aria-label="移除此条件" title="移除此条件" onClick={onRemove}><X size={16} /></button>
   </div>;

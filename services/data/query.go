@@ -89,6 +89,9 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 	if !fieldAllowed(b.allowed, p.ID) {
 		return "", nil, problem(403, "forbidden_field", "不允许使用该属性查询")
 	}
+	if p.EnumID != "" && e.Op != "eq" && e.Op != "ne" && e.Op != "in" && e.Op != "notIn" && e.Op != "isNull" && e.Op != "isNotNull" {
+		return "", nil, problem(422, "unsupported_enum_operator", "枚举条件仅支持业务code相等、集合及空值判断")
+	}
 	col := quote(columnName(p.ID))
 	if b.column != nil {
 		var err error
@@ -115,6 +118,9 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 		args := make([]any, 0, len(raws))
 		marks := make([]string, 0, len(raws))
 		for _, raw := range raws {
+			if c.ValidateEnumValue(p, raw, true) != nil {
+				return "", nil, problem(422, "invalid_enum_value", "查询枚举值必须使用已定义的业务code")
+			}
 			v, err := typedValue(p, raw)
 			if err != nil {
 				return "", nil, err
@@ -130,6 +136,9 @@ func (b *expressionCompiler) compile(e *c.Expression, depth int) (string, []any,
 	}
 	if len(e.Value) == 0 || string(e.Value) == "null" {
 		return bad()
+	}
+	if c.ValidateEnumValue(p, e.Value, true) != nil {
+		return "", nil, problem(422, "invalid_enum_value", "查询枚举值必须使用已定义的业务code")
 	}
 	v, err := typedValue(p, e.Value)
 	if err != nil {
@@ -309,7 +318,7 @@ func compileQueryPredicate(d c.Definition, etag string, p c.Principal, dec c.Dec
 	}
 	bound := q
 	bound.Page.Cursor = ""
-	result.Fingerprint = digest(bound)
+	result.Fingerprint = enumQueryFingerprint(digest(bound), d)
 	if q.Page.Cursor != "" {
 		cur, err := parseCursor(secret, q.Page.Cursor)
 		if err != nil {

@@ -4,6 +4,10 @@
 
 ## 构建与运行
 
+本批增加默认平台Schema安全追加准入与Enum使用闭环。能力响应 `definitionUpdates=display-and-safe-additions`、`schemaMigrations={addFields:true,addIndexes:true,destructive:false}`、`enumReferences=true`；`callableRuntimes` 声明可保存的三语言，实际执行就绪仍以Execution能力接口为准，Metadata自身 `invocation=false`。新增属性/索引的准入和Data物理编译共用[追加校验](../../contracts/schema_migration.go)；完整范围、默认值及恢复规则见所属主要说明。
+
+属性持久化只接受 `enumId`；GET当前/草稿及授权最小调用签名可附加服务端解析的 `enumValues`、`enumEtag`。这些为只读派生元数据，客户端保存前须移除，服务器拒绝伪造上下文；原定义ETag不因只读展开变为业务版本。Enum更新对当前依赖默认值执行检查，实际编码/废弃规则唯一见[Enum](../../docs/模块/Enum.md#当前实现协议2026-11-08)。
+
 本模块使用独立 `go.mod`，可以在 `GOWORK=off` 下构建。
 
 ```powershell
@@ -47,7 +51,7 @@ go run ./cmd/server
 | 方法和路径 | 用途 |
 | --- | --- |
 | `GET /healthz`、`GET /readyz` | 存活与数据库就绪探针 |
-| `GET /metadata/capabilities` | 当前开放能力与限制；Schema双向模式及 `display-and-mapped-additions` 更新边界 |
+| `GET /metadata/capabilities` | 当前开放能力与限制；Schema双向模式、安全追加迁移、Enum引用及可保存源码语言 |
 | `POST /metadata/auth/login`、`GET /metadata/auth/session`、`POST /metadata/auth/logout` | 账号登录、恢复当前会话及服务端注销 |
 | `PUT /metadata/auth/password` | 核对当前密码、修改密码并旋转会话 |
 | `GET/POST /metadata/auth/connections`、`DELETE /metadata/auth/connections/{id}` | 当前用户查看、创建和撤销个人外部连接；密钥仅在创建响应中返回一次 |

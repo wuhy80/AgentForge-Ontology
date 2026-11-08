@@ -123,6 +123,9 @@ func buildValues(s *c.Schema, input map[string]json.RawMessage, base map[string]
 		if _, err := typedValue(p, raw); err != nil {
 			return nil, err
 		}
+		if err := enumWriteValue(p, raw); err != nil {
+			return nil, err
+		}
 		out[p.ID] = raw
 	}
 	if creating {
@@ -131,6 +134,9 @@ func buildValues(s *c.Schema, input map[string]json.RawMessage, base map[string]
 				continue
 			}
 			if len(p.Default) > 0 {
+				if err := enumWriteValue(p, p.Default); err != nil {
+					return nil, err
+				}
 				out[p.ID] = p.Default
 			} else if !p.Required && p.Nullable {
 				out[p.ID] = json.RawMessage("null")
@@ -252,7 +258,10 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return e
 		}
-		return h.recheck(r.Context(), p, "instance.read", current.Definition.ID, dec)
+		if err := h.recheck(r.Context(), p, "instance.read", current.Definition.ID, dec); err != nil {
+			return err
+		}
+		return h.recheckEnums(r.Context(), current)
 	})
 	if err != nil {
 		writeError(w, err)
@@ -382,7 +391,10 @@ func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySp
 		if err = rows.Close(); err != nil {
 			return err
 		}
-		return h.recheck(ctx, p, "instance.query", current.Definition.ID, dec)
+		if err := h.recheck(ctx, p, "instance.query", current.Definition.ID, dec); err != nil {
+			return err
+		}
+		return h.recheckEnums(ctx, current)
 	})
 	if err != nil {
 		return c.QueryResult{}, err

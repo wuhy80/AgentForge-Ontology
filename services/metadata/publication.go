@@ -204,6 +204,12 @@ func completedPublication(ctx context.Context, tx *sql.Tx, tenant, id, digest st
 }
 
 func validateReferences(ctx context.Context, tx *sql.Tx, d contracts.Definition) error {
+	if err := validateEnumReferences(ctx, tx, d); err != nil {
+		return err
+	}
+	if err := validateEnumDependents(ctx, tx, d); err != nil {
+		return err
+	}
 	refs := map[string]contracts.Definition{}
 	for _, id := range dependencyIDs(d) {
 		if id == d.ID {

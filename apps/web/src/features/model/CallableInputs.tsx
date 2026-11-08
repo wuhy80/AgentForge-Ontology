@@ -1,7 +1,7 @@
 import { useId } from 'react'
 import type { Property, Values } from '../../lib/types'
 import { ValueInput } from '../query/InstanceDialog'
-import { draftText, valueText, type FieldDrafts } from '../query/query'
+import { draftText, propertyValueText, type FieldDrafts } from '../query/query'
 
 export function testCaseDrafts(properties: Property[], input: Values): FieldDrafts {
   return Object.fromEntries(properties.map((property) => [property.id, Object.hasOwn(input, property.id)
@@ -22,7 +22,7 @@ export function CallableInputs({ properties, drafts, onChange }: {
         <option value="value">填写值</option><option value="omit">不传入 / 使用默认值</option>{property.nullable && <option value="null">显式 NULL</option>}
       </select>
       <ValueInput property={property} id={inputId} disabled={draft.mode !== 'value'} value={draft.text} onChange={(text) => onChange(property.id, { text })} />
-      {draft.mode === 'omit' && Object.hasOwn(property, 'default') && <small className="muted">默认值：{valueText(property.default)}</small>}
+      {draft.mode === 'omit' && Object.hasOwn(property, 'default') && <small className="muted">默认值：{propertyValueText(property, property.default)}</small>}
     </div>
   })}{!properties.length && <p className="muted">此定义没有输入参数。</p>}</div>
 }

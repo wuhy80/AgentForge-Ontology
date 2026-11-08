@@ -183,7 +183,7 @@ func (h *handler) writeCapabilitiesHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	for _, property := range current.Definition.Schema.Properties {
 		if visible[property.ID] {
-			out.Fields = append(out.Fields, c.FormField{ID: property.ID, Name: property.Name, DataType: property.DataType, Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || (protectedFields[property.ID] && createProtected[property.ID]), Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID})
+			out.Fields = append(out.Fields, c.FormField{ID: property.ID, Name: property.Name, DataType: property.DataType, Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || (protectedFields[property.ID] && createProtected[property.ID]), Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID, EnumValues: property.EnumValues, EnumETag: property.EnumETag})
 		}
 	}
 	upsertRelevant, upsertAllowed := capabilityDecisions(decisions, "upsert")
@@ -243,7 +243,7 @@ func (h *handler) writeCapabilitiesHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	latest, err := h.current(r.Context(), p.TenantID, current.Definition.ID)
-	if err != nil || latest.ETag != current.ETag {
+	if err != nil || latest.ETag != current.ETag || c.EnumContextDigest(latest.Definition) != c.EnumContextDigest(current.Definition) {
 		writeError(w, problem(409, "definition_changed", "模型已改变，请重新读取"))
 		return
 	}

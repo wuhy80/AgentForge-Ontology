@@ -59,6 +59,11 @@ func (h *handler) businessDirectory(r *http.Request, category, schemaID, after s
 	if out.HasMore && (out.NextCursor == "" || out.NextCursor == after || len(out.Entries) == 0) {
 		return out, problem(503, "metadata_unavailable", "授权业务目录分页不合法")
 	}
+	for i := range out.Entries {
+		if err := h.hydrateEnums(r.Context(), &out.Entries[i].Current); err != nil {
+			return out, err
+		}
+	}
 	return out, nil
 }
 
@@ -67,7 +72,7 @@ func directoryFingerprint(categoryID, schemaID, search string, limit int) string
 }
 
 func (h *handler) directoryCursor(p c.Principal, current c.CurrentDefinition, decision c.Decision, fingerprint string) (string, error) {
-	return signCursor(h.cfg.CursorSecret, pageCursor{Fingerprint: fingerprint, TenantID: p.TenantID, Subject: p.Subject, SchemaID: "query-context", Digest: current.ETag, Authorization: decision.State, LastID: current.Definition.ID, Expires: time.Now().Add(15 * time.Minute).Unix()})
+	return signCursor(h.cfg.CursorSecret, pageCursor{Fingerprint: fingerprint, TenantID: p.TenantID, Subject: p.Subject, SchemaID: "query-context", Digest: enumQueryFingerprint(current.ETag, current.Definition), Authorization: decision.State, LastID: current.Definition.ID, Expires: time.Now().Add(15 * time.Minute).Unix()})
 }
 
 func (h *handler) directoryAfter(r *http.Request, p c.Principal, cursor, fingerprint string) (string, error) {
@@ -98,7 +103,7 @@ func (h *handler) directoryAfter(r *http.Request, p c.Principal, cursor, fingerp
 		}
 		return "", err
 	}
-	if decision.State != parsed.Authorization || current.ETag != parsed.Digest {
+	if decision.State != parsed.Authorization || enumQueryFingerprint(current.ETag, current.Definition) != parsed.Digest {
 		return bad()
 	}
 	return parsed.LastID, nil
@@ -192,7 +197,7 @@ func (h *handler) formDefinitionHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out.Definition.Schema.Properties = append(out.Definition.Schema.Properties, c.FormField{ID: property.ID, Name: property.Name, DataType: property.DataType,
-			Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || protectedFields[property.ID] || !operationAllowed || !fieldAllowed(write.WriteFields, property.ID), Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID})
+			Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || protectedFields[property.ID] || !operationAllowed || !fieldAllowed(write.WriteFields, property.ID), Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID, EnumValues: property.EnumValues, EnumETag: property.EnumETag})
 	}
 	for name, previous := range decisions {
 		now, e := h.cfg.Authorizer.Authorize(r.Context(), p, c.AuthorizationRequest{Operation: name, ResourceID: id, Kind: c.KindSchema})
@@ -210,7 +215,7 @@ func (h *handler) formDefinitionHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if latest.ETag != current.ETag {
+	if latest.ETag != current.ETag || c.EnumContextDigest(latest.Definition) != c.EnumContextDigest(current.Definition) {
 		writeError(w, problem(409, "definition_changed", "模型已改变，请重新读取表单"))
 		return
 	}

@@ -44,13 +44,15 @@ type FormSchema struct {
 
 // FormField intentionally omits physical mappings, defaults and policy filters.
 type FormField struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	DataType  string `json:"dataType"`
-	Required  bool   `json:"required"`
-	Nullable  bool   `json:"nullable"`
-	ReadOnly  bool   `json:"readOnly"`
-	Precision int    `json:"precision,omitempty"`
-	Scale     int    `json:"scale,omitempty"`
-	EnumID    string `json:"enumId,omitempty"`
+	ID         string      `json:"id"`
+	Name       string      `json:"name"`
+	DataType   string      `json:"dataType"`
+	Required   bool        `json:"required"`
+	Nullable   bool        `json:"nullable"`
+	ReadOnly   bool        `json:"readOnly"`
+	Precision  int         `json:"precision,omitempty"`
+	Scale      int         `json:"scale,omitempty"`
+	EnumID     string      `json:"enumId,omitempty"`
+	EnumValues []EnumValue `json:"enumValues,omitempty"`
+	EnumETag   string      `json:"enumEtag,omitempty"`
 }
