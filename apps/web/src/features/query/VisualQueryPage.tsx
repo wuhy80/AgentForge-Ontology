@@ -3,6 +3,7 @@ import { ArrowDownWideNarrow, ArrowRight, Check, ChevronRight, Columns3, Databas
 import { ApiClient, ApiError } from '../../lib/api';
 import type { DefinitionRecord, Organization, QueryResult, QuerySpec } from '../../lib/types';
 import { InstanceDialog } from './InstanceDialog';
+import { useSchemaWrites } from './useSchemaWrites';
 import { RelatedInstances } from './RelatedInstances';
 import { compileQuery, errorMessage, newGroup, valueText } from './query';
 import type { QueryEditor } from './query';
@@ -84,6 +85,7 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
   const properties = association ? rowQueryModel(association.rows, association.context, true).fields : schema.definition.schema!.properties;
   const binding = schema.definition.schema!.storageBinding;
   const readOnly = !!binding || !!association;
+  const writes = useSchemaWrites(api, schema.definition.id, !!binding);
   const filterProperties = binding && !association ? properties.filter((property) => {
     const mapping = property.mapping;
     return mapping?.dataSourceId === binding.dataSourceId && (!mapping.table || mapping.table === binding.table) && (!mapping.namespace || mapping.namespace === binding.namespace);
@@ -270,7 +272,7 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
     {notice && <div className="notice query-status" role="status">{notice}</div>}
     <section className="card query-results" aria-label="查询结果" aria-busy={busy}>
       <div className="query-section-heading"><div><Rows3 size={18} /><h2>查询结果</h2>{result && <span className="badge">本页 {rowCount} 条</span>}</div>
-        {readOnly ? <span className="muted">{association ? '关联明细 · 只读结果' : '来源映射 · 只读实例'}</span> : <button className="button" type="button" onClick={() => setDialog({})}><Plus size={16} />新建实例</button>}
+        {association || !writes.allowed('create') ? <span className="muted">{association ? '关联明细 · 只读结果' : '写入能力由当前权限与来源状态决定'}</span> : <button className="button" type="button" onClick={() => setDialog({})}><Plus size={16} />新建实例</button>}
       </div>
       {stale && result && <div className="query-stale" role="status"><span className="query-stale-dot" />结果已过期：配置或数据已改变，请重新运行查询。<span>续页已停用</span></div>}
       {!result ? <div className="empty-state query-result-empty"><div className="query-empty-icon"><Database size={27} /></div><h3>{busy ? '正在读取数据' : '准备好后，运行第一次查询'}</h3><p className="muted">{busy ? '你可以取消本次请求并继续调整条件。' : '勾选返回字段，按需添加条件。这里将展示服务端返回的真实结果。'}</p></div>

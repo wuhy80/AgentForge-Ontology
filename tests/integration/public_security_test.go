@@ -349,7 +349,7 @@ func TestPublicSecuritySessionsAndOPAEndToEnd(t *testing.T) {
 	directoryPage = c.QueryContext{}
 	a.reader.request("GET", continuation, nil, nil, 200, &directoryPage)
 	if len(directoryPage.Models) != 1 || directoryPage.NextCursor != "" {
-		t.Fatalf("directory continuation models=%d hasCursor=%v",len(directoryPage.Models),directoryPage.NextCursor!="")
+		t.Fatalf("directory continuation models=%d hasCursor=%v", len(directoryPage.Models), directoryPage.NextCursor != "")
 	}
 	a.admin.request("GET", continuation, nil, nil, 422, nil)
 	b.reader.request("GET", continuation, nil, nil, 422, nil)
@@ -398,6 +398,107 @@ func TestPublicSecuritySessionsAndOPAEndToEnd(t *testing.T) {
 	// An io.Reader wrapper hides Len; net/http sends this body with chunked
 	// transfer encoding rather than a Content-Length declaration.
 	a.reader.rawRequest("POST", dataServer.URL+"/data/query", io.LimitReader(strings.NewReader(strings.Repeat(" ", c.MaxDataRequestBytes+1)), int64(c.MaxDataRequestBytes+1)), nil, 413, nil)
+	// Exercise all eight built-in writes through the public authority.
+	{
+		for _, tenant := range tenants {
+			var base c.CurrentDefinition
+			tenant.admin.request("GET", metaServer.URL+"/metadata/definitions/"+tenant.models[0].id, nil, nil, 200, &base)
+			definition := base.Definition
+			definition.ID, definition.Name = "", "八写接口隔离验收"
+			definition.Schema.Indexes = []c.Index{{ID: c.NewID(), Name: "编码唯一", Unique: true, FieldIDs: []string{tenant.models[0].code}}}
+			var draft c.CurrentDefinition
+			headers := tenant.admin.request("POST", metaServer.URL+"/metadata/definitions", definition, nil, 201, &draft)
+			writeModel := tenant.models[0]
+			writeModel.id = draft.Definition.ID
+			tenant.admin.request("POST", metaServer.URL+"/metadata/definitions/"+writeModel.id+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
+			baseURL := dataServer.URL + "/data/schemas/" + writeModel.id
+			var capabilities c.WriteCapabilities
+			tenant.admin.request("GET", baseURL+"/write-capabilities", nil, nil, 200, &capabilities)
+			if len(capabilities.Operations) != 8 || !capabilities.OverwriteAllowed || capabilities.MaxBulkItems != 100 {
+				t.Fatal("administrator eight-write discovery is incomplete")
+			}
+			savePolicy(tenant, func(policy *c.PermissionPolicy) {
+				for _, operation := range []string{"instance.read", "instance.create", "instance.patch", "instance.delete", "instance.upsert"} {
+					condition := &c.Expression{Op: "eq", Field: writeModel.department, Value: raw("allowed")}
+					rule := c.PermissionRule{ID: c.NewID(), RoleID: tenant.role.ID, Effect: "allow", Operation: operation, ResourceID: writeModel.id,
+						ReadFields:  []string{writeModel.code, writeModel.department, writeModel.count, writeModel.amount},
+						WriteFields: []string{writeModel.code, writeModel.department, writeModel.count, writeModel.amount}, RowFilter: condition}
+					if operation == "instance.create" || operation == "instance.patch" || operation == "instance.upsert" {
+						rule.NewRowFilter = condition
+					}
+					policy.Rules = append(policy.Rules, rule)
+				}
+			})
+			tenant.reader.request("GET", baseURL+"/write-capabilities", nil, nil, 200, &capabilities)
+			if capabilities.OverwriteAllowed {
+				t.Fatal("ordinary upsert authority granted overwrite")
+			}
+			for _, field := range capabilities.Fields {
+				if field.ID == writeModel.secret {
+					t.Fatal("write capability discovery leaked hidden field metadata")
+				}
+			}
+			created := create(tenant.reader, writeModel, "single", "allowed", c.NewID(), 201)
+			var updated c.Instance
+			tenant.reader.request("PATCH", baseURL+"/instances/"+created.ID, c.WriteRequest{Values: map[string]json.RawMessage{writeModel.count: raw("9007199254740994")}}, map[string]string{"If-Match": `"` + created.ETag + `"`}, 200, &updated)
+			tenant.reader.request("DELETE", baseURL+"/instances/"+created.ID, nil, map[string]string{"If-Match": `"` + updated.ETag + `"`}, 204, nil)
+			upsert := c.UpsertRequest{Match: c.WriteMatch{IndexID: definition.Schema.Indexes[0].ID, Values: map[string]json.RawMessage{writeModel.code: raw("upsert")}}, Values: values(writeModel, "upsert", "allowed"), IdempotencyKey: c.NewID()}
+			var receipt c.WriteResult
+			tenant.reader.request("POST", baseURL+"/instances/upsert", upsert, nil, 201, &receipt)
+			if receipt.Outcome != "created" || receipt.ID == "" {
+				t.Fatal("upsert create receipt lost its outcome or identity")
+			}
+			upsert.IdempotencyKey = c.NewID()
+			tenant.reader.request("POST", baseURL+"/instances/upsert", upsert, nil, 428, nil)
+			upsert.Values = map[string]json.RawMessage{writeModel.count: raw("9007199254740995")}
+			tenant.reader.request("POST", baseURL+"/instances/upsert", upsert, map[string]string{"If-Match": `"` + receipt.ETag + `"`}, 200, &receipt)
+			upsert.ConflictPolicy, upsert.IdempotencyKey = "overwrite", c.NewID()
+			tenant.reader.request("POST", baseURL+"/instances/upsert", upsert, nil, 403, nil)
+			tenant.admin.request("POST", baseURL+"/instances/upsert", upsert, nil, 200, &receipt)
+			bulk := c.BulkWriteRequest{IdempotencyKey: c.NewID(), Items: []c.BulkWriteItem{
+				{ClientKey: "first", Values: values(writeModel, "bulk-1", "allowed")},
+				{ClientKey: "second", Values: values(writeModel, "bulk-2", "allowed")},
+			}}
+			var batch c.BulkWriteResult
+			tenant.reader.request("POST", baseURL+"/instances/bulk-create", bulk, nil, 200, &batch)
+			if !batch.Atomic || !batch.Committed || len(batch.Results) != 2 {
+				t.Fatal("bulk create receipt lost atomic commit or items")
+			}
+			tenant.reader.request("POST", baseURL+"/instances/bulk-create", bulk, nil, 200, &batch)
+			bulk.IdempotencyKey = c.NewID()
+			bulk.Items = []c.BulkWriteItem{}
+			for _, item := range batch.Results {
+				bulk.Items = append(bulk.Items, c.BulkWriteItem{ClientKey: item.ClientKey, ID: item.ID, IfMatch: `"` + item.ETag + `"`, Values: map[string]json.RawMessage{writeModel.count: raw("9007199254740996")}})
+			}
+			tenant.reader.request("POST", baseURL+"/instances/bulk-update", bulk, nil, 200, &batch)
+			bulk.IdempotencyKey, bulk.Items = c.NewID(), []c.BulkWriteItem{}
+			for _, item := range batch.Results {
+				bulk.Items = append(bulk.Items, c.BulkWriteItem{ClientKey: item.ClientKey, ID: item.ID, IfMatch: `"` + item.ETag + `"`})
+			}
+			tenant.reader.request("POST", baseURL+"/instances/bulk-delete", bulk, nil, 200, &batch)
+			bulk.IdempotencyKey, bulk.ConflictPolicy = c.NewID(), "check"
+			bulk.Items = []c.BulkWriteItem{{ClientKey: "upsert", Match: &c.WriteMatch{ID: c.NewID()}, Values: values(writeModel, "bulk-upsert", "allowed")}}
+			tenant.reader.request("POST", baseURL+"/instances/bulk-upsert", bulk, nil, 200, &batch)
+			if batch.Results[0].Outcome != "created" || string(batch.Results[0].Values[writeModel.count]) != `"9007199254740993"` {
+				t.Fatal("bulk upsert lost outcome or integer precision")
+			}
+			bulk.IdempotencyKey, bulk.ConflictPolicy = c.NewID(), ""
+			bulk.Items = []c.BulkWriteItem{
+				{ClientKey: "would-write", Values: values(writeModel, "rolled-back", "allowed")},
+				{ClientKey: "forbidden", Values: values(writeModel, "blocked", "forbidden")},
+			}
+			tenant.reader.request("POST", baseURL+"/instances/bulk-create", bulk, nil, 403, nil)
+			// The first item must have rolled back, including its unique key.
+			create(tenant.reader, writeModel, "rolled-back", "allowed", c.NewID(), 201)
+			tenant.reader.request("POST", baseURL+"/instances/bulk-create", bulk, map[string]string{"X-CSRF-Token": ""}, 403, nil)
+			tenant.reader.request("POST", baseURL+"/instances/bulk-create", bulk, map[string]string{"Origin": "https://attacker.test"}, 403, nil)
+			other := tenants[0]
+			if tenant == other {
+				other = tenants[1]
+			}
+			other.reader.request("GET", baseURL+"/write-capabilities", nil, nil, 404, nil)
+		}
+	}
 	// Policy publication changes permissions immediately for an existing Cookie;
 	// session revocation itself is exercised separately through user role edits.
 	savePolicy(a, func(policy *c.PermissionPolicy) {

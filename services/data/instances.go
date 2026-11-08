@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
@@ -198,114 +197,7 @@ func checkRowFilter(ctx context.Context, tx *sql.Tx, s *c.Schema, values map[str
 }
 
 func (h *handler) create(w http.ResponseWriter, r *http.Request) {
-	p, err := h.principal(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var req c.WriteRequest
-	if err = decode(w, r, &req); err != nil {
-		writeError(w, err)
-		return
-	}
-	if req.IdempotencyKey == "" || len(req.IdempotencyKey) > 128 {
-		writeError(w, problem(422, "invalid_idempotency_key", "创建需要 1..128 字节幂等键"))
-		return
-	}
-	current, err := h.current(r.Context(), p.TenantID, r.PathValue("schemaId"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if err = validateSchema(current.Definition); err != nil {
-		writeError(w, err)
-		return
-	}
-	dec, err := h.authorize(r.Context(), p, "instance.create", current.Definition.ID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if current.Definition.Schema.StorageBinding != nil {
-		writeError(w, problem(422, "mapped_writes_unsupported", "外部映射对象暂只开放读取；跨数据源写入、幂等与outbox事务尚未开放"))
-		return
-	}
-	var out c.Instance
-	replayed := false
-	err = h.cfg.Engine.WithTx(r.Context(), func(tx *sql.Tx) error {
-		if err := h.gate(r.Context(), tx, p, current); err != nil {
-			return err
-		}
-		var requestHash, entityID, response string
-		err := tx.QueryRowContext(r.Context(), "SELECT request_hash,entity_id,response FROM af_data_idempotency WHERE tenant_id=? AND schema_id=? AND subject_id=? AND request_key=? FOR UPDATE", p.TenantID, current.Definition.ID, p.Subject, req.IdempotencyKey).Scan(&requestHash, &entityID, &response)
-		if err == nil {
-			if requestHash != digest(req.Values) {
-				return problem(409, "idempotency_conflict", "同一幂等键不能代表不同意图")
-			}
-			if _, e := selectInstance(r.Context(), tx, current.Definition, p.TenantID, entityID, dec.RowFilter, false); e != nil {
-				return e
-			}
-			if json.Unmarshal([]byte(response), &out) != nil {
-				return problem(500, "idempotency_corrupt", "无法核对原创建结果")
-			}
-			// A current row may have changed owner or department since creation.
-			// Returning its historical response requires that old row to satisfy
-			// the current read condition as well; NewRowFilter is not applicable.
-			if e := checkRowFilter(r.Context(), tx, current.Definition.Schema, out.Values, dec.RowFilter); e != nil {
-				return e
-			}
-			replayed = true
-			return h.recheck(r.Context(), p, "instance.create", current.Definition.ID, dec)
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		values, err := buildValues(current.Definition.Schema, req.Values, nil, dec.WriteFields, true)
-		if err != nil {
-			return err
-		}
-		if err = checkNewRow(r.Context(), tx, current.Definition.Schema, values, dec); err != nil {
-			return err
-		}
-		out = c.Instance{ID: c.NewID(), SchemaID: current.Definition.ID, ETag: c.NewID(), Values: values}
-		budget := jsonBudget{remaining: c.MaxDataResponseBytes - 1}
-		if err = budget.add(out); err != nil {
-			return err
-		}
-		cols := []string{"`tenant_id`", "`id`", "`etag`"}
-		marks := []string{"?", "?", "?"}
-		args := []any{p.TenantID, out.ID, out.ETag}
-		for _, f := range current.Definition.Schema.Properties {
-			v, e := typedValue(f, values[f.ID])
-			if e != nil {
-				return e
-			}
-			cols = append(cols, quote(columnName(f.ID)))
-			marks = append(marks, "?")
-			args = append(args, v)
-		}
-		if _, err = tx.ExecContext(r.Context(), "INSERT INTO "+quote(tableName(current.Definition.ID))+" ("+strings.Join(cols, ",")+") VALUES ("+strings.Join(marks, ",")+")", args...); err != nil {
-			return err
-		}
-		body, _ := json.Marshal(out)
-		if _, err = tx.ExecContext(r.Context(), "INSERT INTO af_data_idempotency (tenant_id,schema_id,subject_id,request_key,request_hash,entity_id,response) VALUES (?,?,?,?,?,?,?)", p.TenantID, current.Definition.ID, p.Subject, req.IdempotencyKey, digest(req.Values), out.ID, string(body)); err != nil {
-			return err
-		}
-		if err = emit(r.Context(), tx, p.TenantID, "instance.created", out); err != nil {
-			return err
-		}
-		return h.recheck(r.Context(), p, "instance.create", current.Definition.ID, dec)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	w.Header().Set("ETag", `"`+out.ETag+`"`)
-	status := 201
-	if replayed {
-		status = 200
-	}
-	writeJSON(w, status, projectInstance(out, dec.ReadFields))
+	h.singleMutationHTTP(w, r, "create")
 }
 
 func (h *handler) read(w http.ResponseWriter, r *http.Request) {
@@ -373,133 +265,11 @@ func (h *handler) read(w http.ResponseWriter, r *http.Request) {
 func (h *handler) patch(w http.ResponseWriter, r *http.Request)  { h.change(w, r, false) }
 func (h *handler) delete(w http.ResponseWriter, r *http.Request) { h.change(w, r, true) }
 func (h *handler) change(w http.ResponseWriter, r *http.Request, deleting bool) {
-	p, err := h.principal(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	current, err := h.current(r.Context(), p.TenantID, r.PathValue("schemaId"))
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if current.Definition.Schema != nil && current.Definition.Schema.StorageBinding != nil {
-		operation := "instance.patch"
-		if deleting {
-			operation = "instance.delete"
-		}
-		if _, err := h.authorize(r.Context(), p, operation, current.Definition.ID); err != nil {
-			writeError(w, err)
-			return
-		}
-		writeError(w, problem(422, "mapped_writes_unsupported", "外部映射对象暂只开放读取；跨数据源写入与outbox事务尚未开放"))
-		return
-	}
-	etag := bareETag(r.Header.Get("If-Match"))
-	if !uuidPattern.MatchString(etag) {
-		writeError(w, problem(428, "precondition_required", "更新或删除需要读取时返回的 If-Match"))
-		return
-	}
-	if !uuidPattern.MatchString(r.PathValue("entityId")) {
-		writeError(w, problem(404, "not_found", "实例不存在或不可访问"))
-		return
-	}
-	var req c.WriteRequest
-	if !deleting {
-		if err = decode(w, r, &req); err != nil {
-			writeError(w, err)
-			return
-		}
-		if len(req.Values) == 0 || req.IdempotencyKey != "" {
-			writeError(w, problem(422, "invalid_patch", "PATCH 需要非空 values，不接受创建幂等键"))
-			return
-		}
-	}
-	if err = validateSchema(current.Definition); err != nil {
-		writeError(w, err)
-		return
-	}
-	operation := "instance.patch"
+	operation := "update"
 	if deleting {
-		operation = "instance.delete"
+		operation = "delete"
 	}
-	dec, err := h.authorize(r.Context(), p, operation, current.Definition.ID)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	var out c.Instance
-	err = h.cfg.Engine.WithTx(r.Context(), func(tx *sql.Tx) error {
-		if err := h.gate(r.Context(), tx, p, current); err != nil {
-			return err
-		}
-		old, err := selectInstance(r.Context(), tx, current.Definition, p.TenantID, r.PathValue("entityId"), dec.RowFilter, true)
-		if err != nil {
-			return err
-		}
-		if old.ETag != etag {
-			return problem(412, "precondition_failed", "实例已被修改，请重新读取")
-		}
-		if deleting {
-			if _, err = tx.ExecContext(r.Context(), "DELETE FROM "+quote(tableName(current.Definition.ID))+" WHERE tenant_id=? AND id=? AND etag=?", p.TenantID, old.ID, old.ETag); err != nil {
-				return err
-			}
-			out = old
-			if err = emit(r.Context(), tx, p.TenantID, "instance.deleted", old); err != nil {
-				return err
-			}
-		} else {
-			values, err := buildValues(current.Definition.Schema, req.Values, old.Values, dec.WriteFields, false)
-			if err != nil {
-				return err
-			}
-			if err = checkNewRow(r.Context(), tx, current.Definition.Schema, values, dec); err != nil {
-				return err
-			}
-			out = old
-			out.Values = values
-			out.ETag = c.NewID()
-			budget := jsonBudget{remaining: c.MaxDataResponseBytes - 1}
-			if err = budget.add(out); err != nil {
-				return err
-			}
-			sets := []string{"`etag`=?"}
-			args := []any{out.ETag}
-			keys := make([]string, 0, len(req.Values))
-			for key := range req.Values {
-				p, _ := findProperty(current.Definition.Schema, key)
-				keys = append(keys, p.ID)
-			}
-			sort.Strings(keys)
-			for _, id := range keys {
-				f, _ := findProperty(current.Definition.Schema, id)
-				v, e := typedValue(f, values[id])
-				if e != nil {
-					return e
-				}
-				sets = append(sets, quote(columnName(id))+"=?")
-				args = append(args, v)
-			}
-			args = append(args, p.TenantID, old.ID, old.ETag)
-			if _, err = tx.ExecContext(r.Context(), "UPDATE "+quote(tableName(current.Definition.ID))+" SET "+strings.Join(sets, ",")+" WHERE tenant_id=? AND id=? AND etag=?", args...); err != nil {
-				return err
-			}
-			if err = emit(r.Context(), tx, p.TenantID, "instance.updated", out); err != nil {
-				return err
-			}
-		}
-		return h.recheck(r.Context(), p, operation, current.Definition.ID, dec)
-	})
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	if deleting {
-		w.WriteHeader(204)
-		return
-	}
-	w.Header().Set("ETag", `"`+out.ETag+`"`)
-	writeJSON(w, 200, projectInstance(out, dec.ReadFields))
+	h.singleMutationHTTP(w, r, operation)
 }
 
 func emit(ctx context.Context, tx *sql.Tx, tenant, event string, instance c.Instance) error {

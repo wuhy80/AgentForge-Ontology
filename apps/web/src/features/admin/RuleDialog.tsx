@@ -67,7 +67,7 @@ export function RuleDialog({ rule, roles, definitions, categories, onClose, onSa
   const selected = candidates.find((item) => item.definition.id === resourceId)
   const properties = selected?.definition.schema?.properties ?? []
   const canCondition = effect === 'allow' && instanceOperation && resourceId !== '*' && properties.length > 0
-  const canNewCondition = canCondition && ['instance.create', 'instance.patch'].includes(operation)
+  const canNewCondition = canCondition && ['instance.create', 'instance.patch', 'instance.upsert', 'instance.upsert.overwrite'].includes(operation)
 
   function changeResource(value: string) {
     setResourceId(value); setReadFields([]); setWriteFields([]); setRowFilter(newGroup()); setNewRowFilter(newGroup()); setFilterError(''); setError('')

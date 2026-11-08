@@ -1,5 +1,6 @@
 import type {
   DataCapabilities, DefinitionInput, DefinitionRecord, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation, ScriptRuntime, SourceToolResult,
+  WriteCapabilities, UpsertRequest, WriteResult, BulkWriteRequest, BulkWriteResult, WriteOperation,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
   DataSource, DataSourceInput, SourceTableInfo, SourceTable, SourceTestResult, SourceQueryResult, SourceSQLToolResult, SchemaStorageMapping, SourceVersionOption, SourceOverview,
@@ -290,6 +291,16 @@ export class ApiClient {
   }
   query(spec: QuerySpec, signal?: AbortSignal): Promise<QueryResult> {
     return this.request('/api/data/query', { method: 'POST', body: spec, signal })
+  }
+  writeCapabilities(schemaId: string, signal?: AbortSignal): Promise<WriteCapabilities> {
+    return this.request(`/api/data/schemas/${encodeURIComponent(schemaId)}/write-capabilities`, { signal })
+  }
+  upsertInstance(schemaId: string, input: UpsertRequest, etag?: string, signal?: AbortSignal): Promise<WriteResult> {
+    return this.request(`/api/data/schemas/${encodeURIComponent(schemaId)}/instances/upsert`, { method: 'POST', body: input, etag, signal })
+  }
+  bulkWrite(schemaId: string, operation: Extract<WriteOperation, `bulk_${string}`>, input: BulkWriteRequest, signal?: AbortSignal): Promise<BulkWriteResult> {
+    const path = { bulk_create: 'bulk-create', bulk_update: 'bulk-update', bulk_delete: 'bulk-delete', bulk_upsert: 'bulk-upsert' }[operation]
+    return this.request(`/api/data/schemas/${encodeURIComponent(schemaId)}/instances/${path}`, { method: 'POST', body: input, signal })
   }
   queryContext(filters: { categoryId?: string; schemaId?: string; search?: string; cursor?: string; limit?: number }, signal?: AbortSignal): Promise<QueryContext> {
     const params = new URLSearchParams()

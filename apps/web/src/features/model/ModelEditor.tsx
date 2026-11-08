@@ -6,6 +6,7 @@ import { PropertyEditor } from './PropertyEditor'
 import { SchemaStorageEditor } from './SchemaStorageEditor'
 import { SchemaPropertiesEditor } from './SchemaPropertiesEditor'
 import { ModelDataPreview } from './ModelDataPreview'
+import { ModelWriteOperations } from './ModelWriteOperations'
 import { RelatedDefinitions } from './RelatedDefinitions'
 import { ActionTargetsEditor } from './ActionTargetsEditor'
 import { LinkStorageEditor, validateLinkStorage } from './LinkStorageEditor'
@@ -281,7 +282,10 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
             </div>)}
           </section>
           <section className="model-editor-panel" {...panelProps('links')}><RelatedDefinitions kind="link" definition={definition} entries={authorizedEntries} currentEntries={currentEntries} categories={categories} /></section>
-          <section className="model-editor-panel" {...panelProps('actions')}><RelatedDefinitions kind="action" definition={definition} entries={authorizedEntries} currentEntries={currentEntries} categories={categories} /></section>
+          <section className="model-editor-panel" {...panelProps('actions')}>
+            <ModelWriteOperations api={api} schemaId={definition.id} active={active && tab === 'actions' && !uncertain} hasCurrent={locked} />
+            <RelatedDefinitions kind="action" definition={definition} entries={authorizedEntries} currentEntries={currentEntries} categories={categories} />
+          </section>
         </>}
         {definition.enum && <section><div className="model-section-heading"><div><h3>枚举业务值</h3><p className="muted">业务编码保持稳定，显示标签用于业务界面。</p></div>{!locked && <button type="button" className="button subtle" onClick={() => update({ enum: { values: [...definition.enum!.values, { code: '', label: '', deprecated: false }] } })}><Plus size={15} />添加值</button>}</div><div className="table-wrap"><table><thead><tr><th>业务编码</th><th>显示标签</th><th>状态</th>{!locked && <th>操作</th>}</tr></thead><tbody>{definition.enum.values.map((value, position) => <tr key={position}><td><input className="field" disabled={locked} value={value.code} aria-label={`枚举值${position + 1}编码`} onChange={(event) => update({ enum: { values: definition.enum!.values.map((entry, offset) => offset === position ? { ...entry, code: event.target.value } : entry) } })} placeholder="例如：RUNNING" /></td><td><input className="field" value={value.label} aria-label={`枚举值${position + 1}标签`} onChange={(event) => update({ enum: { values: definition.enum!.values.map((entry, offset) => offset === position ? { ...entry, label: event.target.value } : entry) } })} placeholder="例如：运行中" /></td><td><label className="model-checkbox"><input type="checkbox" disabled={locked} checked={!!value.deprecated} onChange={(event) => update({ enum: { values: definition.enum!.values.map((entry, offset) => offset === position ? { ...entry, deprecated: event.target.checked } : entry) } })} />停用值</label></td>{!locked && <td><button type="button" className="button subtle model-icon-button" aria-label={`删除枚举值${position + 1}`} onClick={() => update({ enum: { values: definition.enum!.values.filter((_, offset) => offset !== position) } })}><Trash2 size={16} /></button></td>}</tr>)}</tbody></table></div></section>}
         {definition.link && <section><div className="model-section-heading"><div><h3>关系两端</h3><p className="muted">仅选择已经生效的对象模型，支持同一模型之间的关系。</p></div></div><div className="form-grid">

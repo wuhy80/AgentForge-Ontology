@@ -271,8 +271,8 @@ func validatePolicy(ctx context.Context, tx *sql.Tx, tenant string, policy contr
 				return err
 			}
 		}
-		if rule.NewRowFilter != nil && rule.Operation != "instance.create" && rule.Operation != "instance.patch" {
-			return problem(422, "unsupported_policy", "只有创建和修改操作可声明新值条件")
+		if rule.NewRowFilter != nil && rule.Operation != "instance.create" && rule.Operation != "instance.patch" && rule.Operation != "instance.upsert" && rule.Operation != "instance.upsert.overwrite" {
+			return problem(422, "unsupported_policy", "只有创建、修改和upsert操作可声明新值条件")
 		}
 	}
 	return nil

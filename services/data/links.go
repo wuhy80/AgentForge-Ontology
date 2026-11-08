@@ -261,6 +261,9 @@ func (h *handler) queryLink(ctx context.Context, p c.Principal, target c.Current
 			if err != nil {
 				return err
 			}
+			if err := prepareMappedWriteProjection(ctx, returnedTables, target); err != nil {
+				return err
+			}
 			compiled, err := compileMappedQueryPredicate(target.Definition, returnedTables, target.ETag, p, bound, query, h.cfg.CursorSecret, "", &predicate)
 			if err != nil {
 				return err

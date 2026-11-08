@@ -282,6 +282,20 @@ func compileMappedQueryPredicate(d c.Definition, tables []*mappedTable, etag str
 			}
 		}
 	}
+	if len(primary.writeSecret) != 0 {
+		// A write credential represents the complete typed row. Additional
+		// fields are internal scan inputs and never enter the public projection.
+		scanned := map[string]bool{}
+		for _, property := range result.ScanFields {
+			scanned[property.ID] = true
+		}
+		for _, property := range sortedMappedProperties(primary.properties) {
+			if !scanned[property.ID] {
+				result.ScanFields = append(result.ScanFields, property)
+				columns = append(columns, primary.quoted(property.Mapping.Column))
+			}
+		}
+	}
 	result.SQL = sourceBind(primary.source.Driver, "SELECT "+strings.Join(columns, ",")+" FROM "+primary.qualified()+" WHERE "+strings.Join(conditions, " AND ")+" ORDER BY "+order+" LIMIT ?")
 	result.Args = append(args, query.Page.Limit+1)
 	return result, nil
@@ -350,6 +364,7 @@ func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled m
 			return result, nil, err
 		}
 		item := c.Instance{ID: id, SchemaID: schemaID, Values: map[string]json.RawMessage{}}
+		fullValues := map[string]json.RawMessage{}
 		for _, property := range compiled.Projection {
 			item.Values[property.ID] = json.RawMessage("null")
 		}
@@ -365,6 +380,19 @@ func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled m
 			if _, selected := item.Values[property.ID]; selected {
 				item.Values[property.ID] = raw
 			}
+			if len(primary.writeSecret) != 0 {
+				fullValues[property.ID] = raw
+			}
+		}
+		if len(primary.writeSecret) != 0 {
+			full := item
+			full.Values = fullValues
+			stamped, err := stampMappedInstance(primary.writeSecret, primary.writeCurrent, full)
+			if err != nil {
+				_ = rows.Close()
+				return result, nil, err
+			}
+			item.ETag = stamped.ETag
 		}
 		if err = budget.add(item); err != nil {
 			_ = rows.Close()
@@ -473,7 +501,9 @@ func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled m
 		}
 	}
 	for i := range result.Data {
-		result.Data[i].ETag = digest(result.Data[i])
+		if result.Data[i].ETag == "" {
+			result.Data[i].ETag = digest(result.Data[i])
+		}
 	}
 	return result, lastValue, nil
 }
@@ -505,6 +535,9 @@ func (h *handler) queryMapped(ctx context.Context, principal c.Principal, curren
 				}
 			}
 		} else if err = validateReverseIndexes(current.Definition, tables); err != nil {
+			return err
+		}
+		if err := prepareMappedWriteProjection(ctx, tables, current); err != nil {
 			return err
 		}
 		compiled, err = compileMappedQuery(current.Definition, tables, current.ETag, principal, decision, query, h.cfg.CursorSecret, entityID)

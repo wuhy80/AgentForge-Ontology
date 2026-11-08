@@ -5,6 +5,7 @@ import type { DefinitionRecord, Instance, Property, Values } from '../../lib/typ
 import { Dialog } from '../../components/Dialog';
 import { buildWriteValues, errorMessage, initialDrafts, valueText, writeIntentSignature } from './query';
 import type { FieldDrafts } from './query';
+import { useSchemaWrites } from './useSchemaWrites';
 
 type Props = {
   api: ApiClient;
@@ -32,9 +33,13 @@ export function ValueInput({ property, value, onChange, disabled, id }: {
 }
 
 export function InstanceDialog({ api, schema, instanceId, createIntents, onClose, onChanged, onForbidden }: Props) {
-  const properties = schema.definition.schema?.properties ?? [];
-  const readOnly = !!schema.definition.schema?.storageBinding;
   const [record, setRecord] = useState<Instance>();
+  const writes = useSchemaWrites(api, schema.definition.id, !!schema.definition.schema?.storageBinding);
+  const properties = (schema.definition.schema?.properties ?? []).map((field) => {
+    const operation = writes.capabilities?.operations.find((item) => item.name === (instanceId || record ? 'update' : 'create'));
+    return operation ? { ...field, readOnly: field.readOnly || !(operation.writeFields.includes('*') || operation.writeFields.includes(field.id)) } : field;
+  });
+  const readOnly = !writes.allowed(instanceId || record ? 'update' : 'create');
   const [drafts, setDrafts] = useState<FieldDrafts>(() => initialDrafts(properties));
   const [editing, setEditing] = useState(!instanceId && !readOnly);
   const [loading, setLoading] = useState(Boolean(instanceId));
@@ -54,6 +59,11 @@ export function InstanceDialog({ api, schema, instanceId, createIntents, onClose
     alive.current = true;
     return () => { alive.current = false; };
   }, []);
+
+  useEffect(() => {
+    if (!instanceId) setEditing(writes.allowed('create'));
+    else if (!writes.allowed('update')) setEditing(false);
+  }, [writes.capabilities, instanceId]);
 
   useEffect(() => {
     if (!instanceId) return;
@@ -85,7 +95,7 @@ export function InstanceDialog({ api, schema, instanceId, createIntents, onClose
   }
 
   async function save() {
-    if (busy || loading) return;
+    if (busy || loading || !writes.allowed(record ? 'update' : 'create')) return;
     let values: Values;
     try {
       values = buildWriteValues(properties, drafts, record?.values);
@@ -132,7 +142,7 @@ export function InstanceDialog({ api, schema, instanceId, createIntents, onClose
   }
 
   async function remove() {
-    if (!record || busy) return;
+    if (!record || busy || !writes.allowed('delete')) return;
     setBusy(true);
     setError('');
     try {
@@ -209,7 +219,7 @@ export function InstanceDialog({ api, schema, instanceId, createIntents, onClose
               <button className="button subtle" type="button" disabled={busy} onClick={() => setConfirmDelete(false)}>保留实例</button></div>
           </div>}
           <div className="query-dialog-footer">
-            <div>{record && !readOnly && !editing && !confirmDelete && <button type="button" className="button subtle query-danger-text" disabled={busy} onClick={() => { setConfirmDelete(true); setSuccess(''); }}><Trash2 size={16} />删除实例</button>}{readOnly && <span className="muted">映射实例仅供读取</span>}</div>
+            <div>{record && writes.allowed('delete') && !editing && !confirmDelete && <button type="button" className="button subtle query-danger-text" disabled={busy} onClick={() => { setConfirmDelete(true); setSuccess(''); }}><Trash2 size={16} />删除实例</button>}{readOnly && <span className="muted">当前未开放此记录的写入操作</span>}</div>
             <div className="query-actions">
               {record && editing ? <button type="button" className="button" onClick={resetEdit} disabled={busy}>放弃修改</button>
                 : <button type="button" className="button" onClick={onClose} disabled={busy}>关闭</button>}

@@ -13,6 +13,8 @@ export const operations = [
   { value: 'instance.create', label: '创建实例' },
   { value: 'instance.patch', label: '修改实例' },
   { value: 'instance.delete', label: '删除实例' },
+  { value: 'instance.upsert', label: '创建或更新实例' },
+  { value: 'instance.upsert.overwrite', label: '同步覆盖实例' },
   { value: 'link.query', label: '查询关联数据' },
   { value: 'link.create', label: '添加对象关系' },
   { value: 'link.delete', label: '移除对象关系' },

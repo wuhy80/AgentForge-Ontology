@@ -10,6 +10,8 @@ Action可直接维护Python、JavaScript或Go源码，或调用[Function](Functi
 
 Metadata 的 action 模块维护定义及引用，Data 管理实例/关系，Execution 管理任务和尝试，Worker 执行代码。Action 不能绕过其他服务的接口直接修改其私有表。
 
+2026-11-08新增的每Schema八种写操作需求（create/update/delete/upsert及各自bulk）已落实为Data内置能力，实际契约见[数据读写](../数据读写.md#已确认需求2026-11-08)。对象详情分别展示内置操作与业务Action，不自动持久化八份可编辑Action。以后业务Action需要写入时仍调用受控Data契约，当前纯计算运行器不会因新增接口而自动获得网络、凭据或业务写入能力。
+
 租户、分类、分组及中文名称解析规则统一见 [组织与隔离](../组织与隔离.md)。用户按中文 name 维护和选择 Action、目标 Schema 及实现 Function，解析后保存稳定 ID 引用，且必须属于同一租户；输入输出按中文参数名编辑并映射已声明的技术协议键，用户无需填写内部 ID。每个 Action 仅有一份当前生效定义，不设置业务 version。
 
 ### 当前对象关联协议（2026-11-07）

@@ -73,6 +73,8 @@ type mappedTable struct {
 	catalog      c.SourceTable
 	exists       bool
 	managed      bool
+	writeSecret  []byte
+	writeCurrent c.CurrentDefinition
 }
 
 func (t mappedTable) locator() string { return t.source.ID + "\x00" + t.namespace + "\x00" + t.name }

@@ -52,8 +52,24 @@ func auditOperation(method, path string) string {
 		return "instance.query"
 	}
 	if strings.HasPrefix(path, "/data/schemas/") {
+		if strings.HasSuffix(path, "/write-capabilities") {
+			return "write.capabilities"
+		}
 		if strings.HasSuffix(path, "/form") {
 			return "form.read"
+		}
+		if method == http.MethodPost {
+			for suffix, operation := range map[string]string{
+				"/instances/upsert":      "instance.upsert",
+				"/instances/bulk-create": "instance.bulk_create",
+				"/instances/bulk-update": "instance.bulk_update",
+				"/instances/bulk-delete": "instance.bulk_delete",
+				"/instances/bulk-upsert": "instance.bulk_upsert",
+			} {
+				if strings.HasSuffix(path, suffix) {
+					return operation
+				}
+			}
 		}
 		if strings.Contains(path, "/instances") {
 			switch method {

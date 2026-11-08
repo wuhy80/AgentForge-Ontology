@@ -335,6 +335,11 @@ func (h *handler) prepareMapped(ctx context.Context, req c.PrepareRequest) (resu
 			}
 		}
 	}
+	sourceClosed, err := h.blockMappedWriteGate(ctx, req, tables)
+	if err != nil {
+		return result, err
+	}
+	closed = closed || sourceClosed
 	alreadyReady := false
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
 		// Source updates acquire the same locks before checking references. Once

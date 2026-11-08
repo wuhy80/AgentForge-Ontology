@@ -23,7 +23,16 @@ func main() {
 }
 func run() error {
 	migrate := flag.Bool("migrate", false, "显式应用 Data 平台迁移后退出")
+	initializeMapped := flag.Bool("initialize-mapped-writes", false, "显式初始化指定专用MySQL对象的写入设施后退出")
+	mappedTenant := flag.String("tenant", "", "显式来源写初始化的租户ID")
+	mappedSchema := flag.String("schema", "", "显式来源写初始化的Schema ID")
 	flag.Parse()
+	if *migrate && *initializeMapped {
+		return fmt.Errorf("平台迁移与来源写初始化须分别显式执行")
+	}
+	if *initializeMapped && (*mappedTenant == "" || *mappedSchema == "") || !*initializeMapped && (*mappedTenant != "" || *mappedSchema != "") {
+		return fmt.Errorf("来源写初始化须同时指定 -initialize-mapped-writes、-tenant 和 -schema")
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	start, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -53,7 +62,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	app := data.NewHandler(data.Config{Engine: e, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, MetadataURL: metadataURL, ServiceToken: service, CursorSecret: cursor, DataSourceKey: sourceKey, SourceNetworkPolicy: sourceNetwork})
+	config := data.Config{Engine: e, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, MetadataURL: metadataURL, ServiceToken: service, CursorSecret: cursor, DataSourceKey: sourceKey, SourceNetworkPolicy: sourceNetwork}
+	if *initializeMapped {
+		initializeCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		return data.InitializeMappedWrites(initializeCtx, config, *mappedTenant, *mappedSchema)
+	}
+	app := data.NewHandler(config)
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18081"

@@ -25,6 +25,7 @@ async function fixture(page: Page) {
   ]
   const drafts = new Map<string, DefinitionRecord>()
   const writes: Definition[] = []
+  const dataWrites: { path: string; body: { atomic?: boolean; idempotencyKey?: string; items?: { id?: string; clientKey: string; ifMatch?: string; values?: unknown }[]; match?: unknown; values?: unknown }; ifMatch?: string }[] = []
   const unhandled: string[] = []
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -37,6 +38,18 @@ async function fixture(page: Page) {
     if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
     if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'] })
     if (path === '/api/data/sources') return reply({ data: [], hasMore: false })
+    if (path === '/api/data/schemas/equipment/write-capabilities') return reply({ schemaId: 'equipment',
+      operations: ['create', 'update', 'delete', 'upsert', 'bulk_create', 'bulk_update', 'bulk_delete', 'bulk_upsert'].map((name) => ({ name, allowed: true, writeFields: ['name-field'] })),
+      fields: current[0].definition.schema!.properties, matchModes: ['id', 'unique_key'], uniqueKeys: [{ id: 'business-key', name: '设备名称唯一键', fieldIds: ['name-field'] }], overwriteAllowed: false,
+      maxBulkItems: 10, maxRequestBytes: 1048576, maxResponseBytes: 1048576 })
+    if (path.startsWith('/api/data/schemas/equipment/instances/')) {
+      const id = path.split('/').at(-1)!
+      if (method === 'GET') return reply({ schemaId: 'equipment', id, etag: `etag-${id}`, values: { 'name-field': id } })
+      const body = request.postDataJSON()
+      dataWrites.push({ path, body, ifMatch: request.headers()['if-match'] })
+      if (id === 'bulk-update') return reply({ schemaId: 'equipment', atomic: true, committed: true, results: body.items.map((item: { clientKey: string; id: string }) => ({ schemaId: 'equipment', id: item.id, clientKey: item.clientKey, outcome: 'updated' })) })
+      if (id === 'upsert') return reply({ schemaId: 'equipment', id: 'equipment-1', outcome: 'updated' })
+    }
     if (path === '/api/metadata/schemas/equipment/links') return reply({ data: [], hasMore: false })
     if (path === '/api/data/query' && method === 'POST') return reply({ fields: current[0].definition.schema!.properties, data: [{ id: 'equipment-1', schemaId: 'equipment', etag: 'equipment-1', values: { 'name-field': '设备一' } }], hasMore: false })
     const mappingTarget = path.match(/^\/api\/data\/schemas\/([^/]+)\/storage-mapping$/)
@@ -69,8 +82,44 @@ async function fixture(page: Page) {
     unhandled.push(`${method} ${path}`)
     return reply({ error: { code: 'unhandled', message: '未定义的隔离接口' } }, 404)
   })
-  return { writes, unhandled }
+  return { writes, unhandled, dataWrites }
 }
+
+test('八个内置操作：业务唯一键校验更新与整批更新使用读取的并发凭证', async ({ page }) => {
+  const state = await fixture(page)
+  await page.goto('/#models/equipment')
+  await page.getByRole('tab', { name: '动作信息', exact: true }).click()
+  await expect(page.locator('.model-write-grid article')).toHaveCount(8)
+  await page.getByRole('button', { name: '创建或更新数据', exact: true }).click()
+  const upsert = page.getByRole('dialog', { name: '创建或更新数据', exact: true })
+  await upsert.getByLabel('匹配方式').selectOption('business-key')
+  await upsert.getByRole('group', { name: '匹配键', exact: true }).getByLabel('设备名称', { exact: true }).fill('equipment-1')
+  await upsert.getByLabel('已有实例 ID（校验更新时填写）').fill('equipment-1')
+  await upsert.getByRole('button', { name: '读取记录', exact: true }).click()
+  await expect(upsert.getByText(/已读取当前记录/)).toBeVisible()
+  await upsert.getByLabel('设备名称的写入方式').selectOption('value')
+  await upsert.locator('.query-instance-fields').getByLabel('设备名称', { exact: true }).fill('更名设备')
+  await upsert.getByRole('button', { name: '提交', exact: true }).click()
+  await expect(upsert.getByText('操作已完成，共 1 条。')).toBeVisible()
+  expect(state.dataWrites[0]).toMatchObject({ ifMatch: '"etag-equipment-1"', body: { match: { indexId: 'business-key', values: { 'name-field': 'equipment-1' } }, values: { 'name-field': '更名设备' }, conflictPolicy: 'check' } })
+  await upsert.getByRole('button', { name: '完成', exact: true }).click()
+  await page.getByRole('button', { name: '批量更新数据', exact: true }).click()
+  const bulk = page.getByRole('dialog', { name: '批量更新数据', exact: true })
+  await bulk.getByRole('button', { name: /添加记录/ }).click()
+  for (const index of [1, 2]) {
+    const row = bulk.getByRole('region', { name: `写入记录 ${index}` })
+    await row.getByLabel('实例 ID', { exact: true }).fill(`equipment-${index}`)
+    await row.getByRole('button', { name: '读取记录', exact: true }).click()
+    await expect(row.getByText(/已读取当前记录/)).toBeVisible()
+    await row.getByLabel('设备名称的写入方式').selectOption('value')
+    await row.getByLabel('设备名称', { exact: true }).fill(`批量更名${index}`)
+  }
+  await bulk.getByRole('button', { name: '原子提交整批', exact: true }).click()
+  await expect(bulk.getByText('整批已提交，共 2 条。')).toBeVisible()
+  expect(state.dataWrites).toHaveLength(2)
+  expect(state.dataWrites[1].body).toMatchObject({ atomic: true, items: [{ id: 'equipment-1', ifMatch: '"etag-equipment-1"' }, { id: 'equipment-2', ifMatch: '"etag-equipment-2"' }] })
+  expect(state.unhandled).toEqual([])
+})
 
 test('对象页签保留编辑、整份保存并导航相关关系和跨分类动作', async ({ page }) => {
   const state = await fixture(page)

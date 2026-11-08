@@ -2,6 +2,21 @@
 // decimal values travel as strings; JsonValue also supports other JSON values.
 export type JsonValue = null | boolean | string | number | JsonValue[] | { [key: string]: JsonValue }
 export type Values = Record<string, JsonValue>
+export type WriteOperation = 'create' | 'update' | 'delete' | 'upsert' | 'bulk_create' | 'bulk_update' | 'bulk_delete' | 'bulk_upsert'
+export type ConflictPolicy = 'check' | 'overwrite'
+export interface WriteMatch { id?: string; indexId?: string; values?: Values }
+export interface UpsertRequest { match: WriteMatch; values: Values; conflictPolicy?: ConflictPolicy; idempotencyKey: string }
+export interface BulkWriteItem { clientKey: string; id?: string; ifMatch?: string; match?: WriteMatch; values?: Values }
+export interface BulkWriteRequest { atomic: true; items: BulkWriteItem[]; conflictPolicy?: ConflictPolicy; idempotencyKey: string }
+export interface WriteResult { schemaId: string; clientKey?: string; outcome: 'created' | 'updated' | 'deleted'; id: string; etag?: string; values?: Values }
+export interface BulkWriteResult { schemaId: string; atomic: true; committed: true; replayed?: boolean; results: WriteResult[] }
+export interface WriteOperationCapability { name: WriteOperation; allowed: boolean; reason?: string; writeFields: string[] }
+export interface WriteCapabilities {
+  schemaId: string; operations: WriteOperationCapability[]; fields: Property[]
+  matchModes: string[]; uniqueKeys: { id: string; name: string; fieldIds: string[] }[]
+  overwriteAllowed: boolean; overwriteWriteFields?: string[]; overwriteUniqueKeyIds?: string[]
+  maxBulkItems: number; maxRequestBytes: number; maxResponseBytes: number
+}
 export type Kind = 'schema' | 'enum' | 'link' | 'action' | 'function'
 export type DataType = 'string' | 'text' | 'longtext' | 'uuid' | 'int64' | 'decimal' | 'boolean' | 'timestamp'
 

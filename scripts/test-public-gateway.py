@@ -165,8 +165,26 @@ func main() {
                 assert response_headers.get('x-review-match') == '"old-etag"', (method, path)
                 assert response_headers.get('etag') == '"new-etag"', (method, path)
                 checks += 1
+            # Every new mutation is explicitly allowed on both browser aliases.
+            # Keep this group separate from the login/shared-bucket assertions.
+            for prefix in ['data', 'ontoapp-ontology/data']:
+                for suffix in ['upsert', 'bulk-create', 'bulk-update', 'bulk-delete', 'bulk-upsert']:
+                    path = f'/api/{prefix}/schemas/model/instances/{suffix}'
+                    status, response_headers, value = request('POST', path,
+                        {'Content-Type': 'application/json', 'Origin': headers['Origin'],
+                         'X-CSRF-Token': synthetic, 'Authorization': 'Bearer '+synthetic}, '{}')
+                    assert status == 200 and value['path'] == f'/data/schemas/model/instances/{suffix}', (path, status)
+                    assert value['authorization'] == '' and value['csrf'] == synthetic
+                    assert response_headers.get('cache-control') == 'no-store'
+                    checks += 1
+                path = f'/api/{prefix}/schemas/model/write-capabilities'
+                status, _, value = request('GET', path)
+                assert status == 200 and value['path'] == '/data/schemas/model/write-capabilities'
+                checks += 1
             for method, path in [('DELETE','/api/data/query'),('GET','/api/metadata/auth/unknown'),
                                  ('GET','/api/ontoapp-ontology/metadata/admin/users'),('GET','/api/execution/unknown'),
+                                 ('POST','/api/data/schemas/model/instances/bulk-execute'),
+                                 ('PUT','/api/data/schemas/model/instances/bulk-update'),
                                  ('POST','/api/data/../../internal/identity/session'),
                                  ('POST','/api/data/%2e%2e/%2e%2e/internal/identity/session'),
                                  ('GET','/api/%64ata/query/context')]:
@@ -194,6 +212,8 @@ func main() {
             # requests stay below the global burst; separate login buckets
             # would incorrectly admit all of these requests.
             login_statuses = []
+            # The mutation route matrix can exhaust the unrelated global burst.
+            time.sleep(1.5)
             for prefix in ['metadata'] * 6 + ['ontoapp-ontology/metadata'] * 6:
                 status, response_headers, value = request('POST',f'/api/{prefix}/auth/login')
                 login_statuses.append(status)

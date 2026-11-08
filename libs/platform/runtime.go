@@ -23,7 +23,7 @@ func policyError(message string) error {
 
 func policyOperation(operation string) bool {
 	switch operation {
-	case "organization.read", "organization.edit", "definition.read", "definition.edit", "definition.publish", "instance.create", "instance.read", "instance.patch", "instance.delete", "instance.query", "link.query", "link.create", "link.delete", "function.invoke", "action.invoke":
+	case "organization.read", "organization.edit", "definition.read", "definition.edit", "definition.publish", "instance.create", "instance.read", "instance.patch", "instance.delete", "instance.query", "instance.upsert", "instance.upsert.overwrite", "link.query", "link.create", "link.delete", "function.invoke", "action.invoke":
 		return true
 	}
 	return false
@@ -309,7 +309,7 @@ func mergeRuntime(runtime *contracts.RuntimePolicy, request contracts.Authorizat
 	if !decision.Allow {
 		return decision, nil
 	}
-	if request.Operation == "instance.patch" && len(oldFilters) > 1 {
+	if (request.Operation == "instance.patch" || request.Operation == "instance.upsert" || request.Operation == "instance.upsert.overwrite") && len(oldFilters) > 1 {
 		sameOld, sameNew := true, true
 		for i := 1; i < len(oldFilters); i++ {
 			sameOld = sameOld && expressionKey(oldFilters[i]) == expressionKey(oldFilters[0])

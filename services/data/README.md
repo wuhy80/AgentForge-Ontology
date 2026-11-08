@@ -1,6 +1,6 @@
 # Data 服务
 
-平台存储当前使用 MySQL。无 `storageBinding` 的默认 Schema 保留有类型实体表、受控发布、单条 CRUD 和单 Schema QuerySpec；显式绑定的数据源增加 `schema_2_db` / `db_2_schema`、MySQL/PostgreSQL 连接目录及按唯一键聚合的跨来源属性投影。PostgreSQL 当前仅作为外部数据源，不表示平台元数据或控制表已适配 PostgreSQL。服务通过 Metadata HTTP 接口核对会话、获取当前授权及读取权威当前定义，不读取 Metadata 私有表。本地账号和会话协议见 [Metadata identity](../metadata/identity/README.md)，公共权限规则见[权限设计](../../docs/权限/权限设计.md)；连接配置见[数据源](../../docs/数据源.md)，建模及映射规则以[Schema](../../docs/模块/Schema.md)为主要说明，查询规则仍见[数据读写](../../docs/数据读写.md)及[DataSet](../../docs/数据查询/DataSet.md)。
+平台存储当前使用 MySQL。无 `storageBinding` 的默认 Schema 保留有类型实体表、受控发布、八种内置写操作和单Schema QuerySpec；显式绑定的数据源增加 `schema_2_db` / `db_2_schema`、MySQL/PostgreSQL 连接目录及按唯一键聚合的跨来源属性投影。PostgreSQL 当前仅作为外部数据源，不表示平台元数据或控制表已适配 PostgreSQL。服务通过 Metadata HTTP 接口核对会话、获取当前授权及读取权威当前定义，不读取 Metadata 私有表。本地账号和会话协议见 [Metadata identity](../metadata/identity/README.md)，公共权限规则见[权限设计](../../docs/权限/权限设计.md)；连接配置见[数据源](../../docs/数据源.md)，建模及映射规则以[Schema](../../docs/模块/Schema.md)为主要说明，查询规则仍见[数据读写](../../docs/数据读写.md)及[DataSet](../../docs/数据查询/DataSet.md)。
 
 ## 运行与迁移
 
@@ -43,6 +43,9 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `POST /data/schemas/{schemaId}/instances` | 显式创建；必须提交幂等键 |
 | `GET /data/schemas/{schemaId}/instances/{entityId}` | 按当前行列授权读取 |
 | `PATCH`、`DELETE /data/schemas/{schemaId}/instances/{entityId}` | 必须携带最近读取结果的 `If-Match` |
+| `POST /data/schemas/{schemaId}/instances/upsert` | 明确ID或完整唯一键的upsert；幂等键必填，默认check |
+| `POST /data/schemas/{schemaId}/instances/bulk-create`、`bulk-update`、`bulk-delete`、`bulk-upsert` | 同Schema原子批量写；逐项clientKey与必要ifMatch，1～100项 |
+| `GET /data/schemas/{schemaId}/write-capabilities` | 当前调用者八项能力、可写字段、唯一键、覆盖范围及预算；不返回物理映射 |
 | `POST /data/query` | 中文名称或稳定 ID 绑定、类型化筛选、投影、排序和签名游标 |
 | `GET /data/query/context` | 按当前目录及实例查询权限返回最小模型/字段能力，支持分类、模型、搜索及分页 |
 | `GET /data/schemas/{schemaId}/form?operation=create` | 默认create，可显式patch；只返回当前可见字段及对应写权限的安全表单描述，具体语义见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07) |
@@ -59,21 +62,53 @@ MCP 接入另接受 Metadata 签发的 `mcp_` 外部 Bearer，仅允许窄路由
 
 发布失败后保留暂停状态，由 Metadata 重试同一个操作恢复。初次建表核验列、类型、可空性及完整索引；不接管未纳管同名表。默认无 binding 的已有模型仍只支持保持存储签名不变的展示修改；显式正向映射支持认证范围内追加可空列及索引，经同一计划编译器预览、执行和核验。反向映射只读取并验证已有结构，不对源表执行 DDL。预检拒绝不暂停现有映射；持久暂停后的失败不自动恢复流量。详细约束统一见 [Schema](../../docs/模块/Schema.md#2-建模方向与预览)。
 
+## 八种内置写操作
+
+每个已生效Schema按`(schemaId, operation)`动态获得`create/update/delete/upsert`与对应四个`bulk_*`，共享类型、行列权限及存储事务；不会创建八份Action定义。当前三个单条接口保留请求/响应与create历史幂等兼容，update继续PATCH且不提供PUT。详细规则唯一见[数据读写](../../docs/数据读写.md)，DTO在[write_operations.go](../../contracts/write_operations.go)。
+
+upsert正文为`{match, values, conflictPolicy?, idempotencyKey}`；match二选一为`{id}`或`{indexId, values}`。业务键须是当前真实完整唯一索引，match.values使用稳定字段ID，全部非null；重复写入匹配字段须类型等价且更新时不改键。创建分支可保留match.id，普通create仍由服务端生成UUID。其他唯一键冲突返回安全冲突，不选择另一行更新。
+
+`check`为默认：没有If-Match只创建，已存在428；带完整强If-Match只更新，消失或过期412。`overwrite`必须显式声明并另获`instance.upsert.overwrite`，不能与If-Match同用，有则PATCH、无则创建，仍落实全部相关字段与旧/新行条件。upsert同时要求`instance.upsert/create/patch`；四种bulk沿父操作权限，不新增bulk权限名。新权限不自动写入已有租户，须管理员显式配置并生效。
+
+bulk正文为`{atomic?, items, conflictPolicy?, idempotencyKey}`，仅支持默认true；每项clientKey唯一。create项提供values；update项提供id/ifMatch/values；delete项提供id/ifMatch；upsert项提供match/values和必要ifMatch，整批同一策略。ifMatch使用完整带双引号的强HTTP ETag，例`"不透明凭证"`，不能用一个外层头代表整批。values使用稳定字段ID或当前属性名，禁止同字段双重命名。单条upsert与bulk写入values必须非空，最多100项，重复身份或最终命中拒绝。
+
+单条upsert首次创建201、更新/重放200，返回`WriteResult{schemaId,outcome,id,etag,values?}`及HTTP ETag。bulk成功200，返回`{schemaId,atomic:true,committed:true,replayed?,results}`，results按输入顺序含clientKey；删除项不返回values/etag。失败返回统一安全错误，整批无任何已提交项；当前不提供部分成功或逐项错误结构。
+
+幂等键1～128字节，作用域包含租户、用户、Schema、操作，摘要包含原意图与并发条件；同键不同意图409。平台新增`008_data_write_receipts`，须显式`-migrate`，普通启动不建表。数据/回执/outbox同一本地事务，重放再次校验当前操作及历史/当前行义务，删除回执授权摘要变化即拒绝。当前没有自动过期或清理，保留策略需另行设计。事务竞争最多三次，受15秒整体预算约束；8MiB正文、完整响应及保留证据预算在提交前检查。
+
+能力发现返回八个`name/allowed/reason/writeFields`及安全fields、matchModes、uniqueKeys、overwriteAllowed、overwriteWriteFields、overwriteUniqueKeyIds、maxBulkItems和请求/响应预算。基础check与可选overwrite分别描述字段/唯一键，额外覆盖规则不收窄check。来源维护或未启用、无写权和关系限制均可使操作不可用，执行时仍重新核验，UI提示不授予权限。
+
 ## 显式来源映射
 
 数据源由当前权威会话中的租户管理员维护；模型作者读取可选源及表结构使用现有 `definition.edit` 授权，源目录权限不替代实例行列授权。物理表名、列名来自已校验绑定与目录，密码不进入模型正文。数据源的共享租户列与专属数据库规则见[数据源配置](../../docs/数据源.md)。
 
 版本配置实际协议为 `versionPolicy=auto|pinned` 与 `expectedVersionLine`，响应另有服务端 `compatibility`；测试返回 `success/serverVersion/compatibility`，连接或兼容失败为200且success=false，权限/格式/ETag错误仍返回相应HTTP错误。启用状态保存会实际检查，失败不替换原配置；停用状态允许离线保存。检查保存在原config_json中，无新增平台迁移。外部每条物理连接先核验产品、版本和关键配置，结构、查询和Link游标绑定能力签名；完整规则及认证范围唯一见[版本管理](../../docs/数据源.md#数据库版本选择与校验2026-11-07已确认并实现)与[存储引擎](../../docs/存储引擎.md#版本能力登记2026-11-07首批实现)。
 
-当前一个 Schema 最多映射8张来源表。主表提供稳定标识，关联来源按同类型唯一键匹配，每个主对象每来源最多一行，没有关联行的属性返回 `null`。跨来源属性可以投影；筛选、排序及权限行条件仅支持主表属性，涉及其他来源的条件明确拒绝。查询逐源读取，不承诺跨数据库的一致快照或事务。显式来源的实例创建、修改和删除当前拒绝，避免把默认存储的幂等/outbox事务保证套用到多个数据库。
+当前一个 Schema 最多映射8张来源表。主表提供稳定标识，关联来源按同类型唯一键匹配，每个主对象每来源最多一行，没有关联行的属性返回 `null`。跨来源属性可以投影；筛选、排序及权限行条件仅支持主表属性，涉及其他来源的条件明确拒绝。查询逐源读取，不承诺跨数据库的一致快照或事务。其中经显式认证/初始化的专用MySQL单主表可使用八操作；其他映射保持只读，不能把单库事务保证套到多表或跨源。
 
 2026-11-08已补齐数据库管理工作台后端：管理员`GET /data/sources/{id}/overview`真实观测、批量表字段/主键列计数及列默认值/注释。指标数值使用字符串并携带可用性、统计范围和口径，权限不足时该项不可用而不伪造0；MySQL的Questions差分为实例QPS，PostgreSQL本轮不提供QPS。目录展示描述不改变结构签名；概览交付前复核会话、管理员及来源配置ETag。详细字段及口径唯一见[数据库管理工作台](../../docs/数据源.md#数据库管理工作台2026-11-08已确认)，前后端分项验证见项目总览。表预览继续使用既有专属来源有界单表查询，共享来源不可通过管理页读取物理业务行。
 
 同日已按用户确认实现只读SQL控制台增量：`SourceQuery.limit`、`/sql/analyze`和`/sql/format`工具及固定目录排行模板。请求limit省略或0按100处理，其他值及SQL LIMIT须1～100，执行取两者较小值。工具沿当前管理员、同租户、启用专属来源及配置If-Match边界，仅做词法/封闭语法校验和格式化，不连接来源库或执行SQL，不承诺表存在及数据库读取权限；共享来源拒绝。实际DTO、模板与统计口径唯一见[SQL只读控制台](../../docs/数据源.md#sql只读控制台2026-11-08增量已确认)。CREATE/INSERT/UPDATE及DDL未进入本轮。
 
-能力响应中 `operations` 表示默认存储；`mappedOperations` 为 `read/query`，`sourceDrivers` 为 `mysql/postgresql`，`mappedUpdates` 为 `nullable-fields-and-indexes`。`crossSourceProjection` 为真，`crossSourceConditions` 与 `crossSourceTransactions` 为假；客户端应结合 Schema 是否具有 `storageBinding` 决定可用操作。
+能力响应中 `operations` 表示默认存储；`mappedOperations` 为 `read/query`，`sourceDrivers` 为 `mysql/postgresql`，`mappedUpdates` 为 `nullable-fields-and-indexes`。`crossSourceProjection` 为真，`crossSourceConditions` 与 `crossSourceTransactions` 为假；它表示所有映射共有的读取能力；具体八项写能力必须读取每Schema的write-capabilities，不能仅按有无storageBinding判断。全局另返回batch=true、writeOperations八项、perSchemaWriteCapabilities=true及maxBulkWriteItems=100。
 
-默认存储迁入专用来源使用[独立离线工具](../../tools/storage_relocation/README.md)，没有公开重绑接口，也不在启动或普通请求中执行。Data 负责校验来源与目标归属、整批关闭 gate 并排空已准入事务、复用映射 DDL 编译器复制及逐字段核验，最后由协调器在 Metadata 提交并核验后整批激活。源表保留，目标已有不同内容时拒绝覆盖；完整范围、预算与恢复要求统一见[默认存储迁入专用源](../../docs/发布与迁移.md#默认存储迁入专用源2026-11-07)。迁移不开放显式来源实例写入；当前[个人知识库](../../docs/应用场景/个人知识库.md#配置复核与专用来源迁移当前)已沿此路径迁入专属数据库，导入器以保存清单做只读核对。
+默认存储迁入专用来源使用[独立离线工具](../../tools/storage_relocation/README.md)，没有公开重绑接口，也不在启动或普通请求中执行。Data 负责校验来源与目标归属、整批关闭 gate 并排空已准入事务、复用映射 DDL 编译器复制及逐字段核验，最后由协调器在 Metadata 提交并核验后整批激活。源表保留，目标已有不同内容时拒绝覆盖；完整范围、预算与恢复要求统一见[默认存储迁入专用源](../../docs/发布与迁移.md#默认存储迁入专用源2026-11-07)。离线迁移本身不启用来源实例写入；当前[个人知识库](../../docs/应用场景/个人知识库.md#配置复核与专用来源迁移当前)已沿此路径迁入专属数据库，导入器以保存清单做只读核对。
+
+### 专用MySQL来源的显式写初始化
+
+在Data服务目录及正式配置环境中先执行`go run ./cmd/server -migrate`，再单独执行：
+
+```powershell
+go run ./cmd/server -initialize-mapped-writes -tenant <租户ID> -schema <SchemaID>
+```
+
+命令不能与-migrate合用，必须明确租户和Schema；仍检查平台gate、权威当前定义、来源网络/TLS及真实结构。仅支持专用MySQL、单主表、完整非生成业务列映射、独立UUID系统主键、InnoDB/utf8mb4_0900_bin和真实索引；触发器、级联约束、共享、多表/跨源及PostgreSQL拒绝。外键关系列不允许普通属性直写，当前任何已绑定Link的来源端点均暂不开放delete/bulk_delete。详细认证条件见数据读写第9节。
+
+来源账号另须直接拥有该库/全局SELECT和TRIGGER，以及全局REFERENCES（或全局SELECT）以完整看见跨库入站约束，不能将不可见目录误判为无触发器/外键。全局REFERENCES不授业务读取，不要求全实例业务SELECT；间接角色、table-only或复杂范围尚未认证，返回不可写。程序不会自动授予或修改已有数据库账号权限。
+
+业务列须精确匹配类型、长度、精度及排序规则，不能仅按反向只读的宽松类型兼容认证写入；CHAR裁剪、短VARCHAR、低精度时间与不一致文本排序规则均拒绝。主键为规范小写UUID，文本使用utf8mb4_0900_bin，UUID使用ascii_bin或utf8mb4_0900_bin。部分REVOKE导致无法证明完整目录可见时同样拒绝。
+
+显式命令创建来源内af_source_write_identity/gates/receipts/outbox及source_write迁移记录，绑定租户/来源/表，不修改业务行或来源配置；普通启动与请求不迁移也不自动启用。来源写入、回执和outbox同事务，源gate参与prepare排空与activate恢复。已启用来源的ETag为完整规范化状态HMAC，投影不改变凭证，隐藏字段改变也使旧凭证过期；来源备份须含控制表及持久密钥。未启用映射保持读取协议。本批没有对现有个人知识库执行初始化。
 
 ## 关联行查询
 
@@ -85,7 +120,7 @@ MCP 接入另接受 Metadata 签发的 `mcp_` 外部 Bearer，仅允许窄路由
 
 2026-11-08补充公网资源预算：Data每进程同时最多处理1个操作，最多4个等待者且最多等待250ms；等待发生在会话远程校验和正文读取之前，超出返回429 `data_busy`及`Retry-After: 1`，取消及时出队。同进程多个handler共用预算，健康/就绪探针豁免。该默认值面向160M单服务模板保守设置，不代表吞吐验收。请求context最多15秒，过期/取消返回受控JSON；数据库取消依赖实际驱动的QueryContext支持。完整JSON响应最多8 MiB，先计入编码转义、字段和游标开销，再有界编码与缓冲后提交，超限返回422 `response_budget`，不会先发送部分成功结果。实例、映射、Link关联行及来源SQL在逐行积累期间也检查预算；创建/更新在提交前限制完整实例状态，幂等身份与冲突规则不变。调用方遇到响应超限应减少投影或分页，不能静默截断；目录更严格的字节分页以OntologySQL主说明为准。单个数据库行在Scan前仍可能由驱动分配接收内存，以上不是对任意恶意来源报文的完整内存隔离，来源网络和数据库读取预算仍需受控。
 
-Data 在同一事务内提交实例、创建幂等记录和 outbox，并在更新及删除时检查当前 ETag。幂等重试返回原创建结果，读取仍检查当前权限；同键不同意图拒绝。创建、修改同时检查可写字段和新行条件，修改还检查旧行条件。查询权限在 SQL 中先于排序和分页执行，不通过读取一页后删行实现行过滤。
+Data在所属单一本地事务内提交实例、操作幂等记录和outbox，并在更新及删除时检查当前 ETag。幂等重试返回原创建结果，读取仍检查当前权限；同键不同意图拒绝。创建、修改同时检查可写字段和新行条件，修改还检查旧行条件。查询权限在 SQL 中先于排序和分页执行，不通过读取一页后删行实现行过滤。
 
 请求开始与本地事务提交前分别通过 Metadata 请求当前授权决策，由其读取当前用户、角色和已生效策略后交给 OPA 求值；不复用旧允许，决策变化会回滚。单条读取使用 `instance.read`，集合查询使用独立的 `instance.query`，创建、修改及删除分别使用对应操作授权。本实现没有完成跨服务原子撤权协议，不能据此承诺撤权与正在提交的写入严格串行。Schema gate 通过本地事务行锁保证发布和 Data 请求的入场顺序；当前每个 Schema 的操作会串行竞争该锁，吞吐尚未测量。
 
@@ -109,6 +144,10 @@ QuerySpec 目前每页为 1 至 100 条、最多一个业务排序字段并以�
 
 ## 验证
 
+2026-11-08八写操作增量已通过九个Go模块的测试与vet，Data全量启用真实MySQL/PostgreSQL。新增核心用例覆盖八操作、八并发同键upsert、唯一键精确比较、原子回滚、旧create回放兼容、权限收紧及覆盖范围；来源用例使用独立随机平台/来源库，覆盖八操作、回执/读取HMAC一致、隐藏字段变化、源内幂等/outbox与发布排空/恢复。另以临时低权账号验证隐藏触发器不得认证，临时跨库外键验证global REFERENCES提供完整元数据可见性且级联约束拒绝；触发器创建使用独立测试维护账号，未改现有来源权限。真实TLS两租户公开Cookie矩阵及42项Nginx回源检查通过，完整分项结果见项目总览。测试库/账号按runner finally清理，本轮未迁移现网或修改知识库；生产故障恢复、三库写入及性能仍未验收。
+
+来源基本实库要求MYSQL_TEST_DSN与不同security_库的MAPPED_WRITE_TEST_DSN；隐藏目录/跨库约束补充分别使用MAPPED_WRITE_LIMITED_TEST_DSN及MAPPED_WRITE_REFERENCING_TEST_DSN。若测试MySQL启用binlog且创建触发器要求额外维护权限，可用MAPPED_WRITE_DDL_TEST_DSN仅创建/清理合成trigger，实际被认证来源连接仍沿其最小认证权限。未提供对应环境的补充用例明确跳过，不能据普通单元通过声明完整来源验收。
+
 2026-11-08只读SQL控制台增量以`scripts/check.ps1 -SourceIntegration`完整通过八个Go模块测试及vet，另通过可信Go启动器vet。真实MySQL/PostgreSQL验证普通查询请求limit生效、四种固定排行SQL执行和系统/`af_`表过滤；PostgreSQL另以临时角色核对SELECT与schema USAGE双重权限及未知reltuples返回NULL。HTTP模块覆盖静态工具离线不连接来源、当前管理员/租户/If-Match/启停/共享来源边界，交付前撤权、注销及ETag变化后拒绝，真实query的请求上限与会话复核。用例仅创建和清理随机测试表、schema及NOLOGIN角色，没有平台迁移，不作为新生产权限、性能或三库共同认证。
 
 2026-11-08数据库管理增量以`scripts/check.ps1 -SourceIntegration`完整通过八个Go模块测试及vet，另通过可信Go启动器vet；最终目录计数改动另通过Data真实MySQL/PostgreSQL模块测试及vet。真实数据库验证概览、目录、默认值SQL NULL/原文、中文注释、展示描述变化后结构签名保持及批量字段/主键列计数。HTTP模块回归使用既有fixture注入会话检查器，覆盖跨租户和交付前撤销管理员、注销、配置ETag更新的拒绝；该项不冒充新增完整真实登录链或生产撤权验收。没有新增平台迁移；前端交互、本地Data就绪及缓存账号登录401导致的真实浏览器验收未完成均见项目总览。
@@ -117,7 +156,7 @@ QuerySpec 目前每页为 1 至 100 条、最多一个业务排序字段并以�
 go test ./...
 ```
 
-设置 `MYSQL_TEST_DSN` 后，相同命令还会执行真实 MySQL 集成用例，未设置时明确跳过该用例。集成测试使用随机租户及 Schema，不删除或清空共享平台表；验证预览无写入、发布门禁、条件授权、幂等、唯一冲突、并发凭证、NULL/NOT、事务及 outbox 回滚和改名后的当前映射。单元测试覆盖注入参数、隐藏字段、精度边界、游标篡改及上下文隔离。检查通过不代表已完成三库认证、跨服务原子撤权或性能验收。
+设置`MYSQL_TEST_DSN`后，相同命令还会执行真实MySQL集成用例；来源八操作另要求`MAPPED_WRITE_TEST_DSN`指向不同且库名以`security_`开头的独立空专用MySQL测试库（测试会显式迁移控制表），未设置时明确跳过该用例。集成测试使用随机租户及 Schema，不删除或清空共享平台表；验证预览无写入、发布门禁、条件授权、幂等、唯一冲突、并发凭证、NULL/NOT、事务及 outbox 回滚和改名后的当前映射。单元测试覆盖注入参数、隐藏字段、精度边界、游标篡改及上下文隔离。检查通过不代表已完成三库认证、跨服务原子撤权或性能验收。
 
 OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套、精确数值/微秒、命名参数、UTF-16/CRLF、注释/转义、未支持语法拒绝，以及目录、搜索、补全不暴露隐藏模型/字段/物理映射。2026-11-07真实MySQL＋OPA集成在 `tests/integration` 的既有隔离租户内验证文本与JSON共用结果、行列权限、精确数值及游标续页；映射集成同时验证MySQL/PostgreSQL来源初页和续页的字段描述没有物理映射。当前个人知识库另经公开Cookie会话和CSRF完成442对象只读核对，结果见项目总览；没有新增业务测试对象。
 

@@ -183,6 +183,25 @@ describe('ApiClient writes and errors', () => {
     await expect(new ApiClient('test').dataCapabilities()).rejects.toMatchObject({ status: 502, code: 'invalid_response' })
   })
 
+  it('读取写能力并通过公开 upsert 和四个批量接口保留精度、幂等键和并发凭证', async () => {
+    const fetcher = vi.fn().mockImplementation(async () => json({ schemaId: 'schema/id' }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient(), signal = new AbortController().signal
+    api.setCSRFToken('csrf')
+    await api.writeCapabilities('schema/id', signal)
+    const input = { match: { id: 'row' }, values: { amount: '9007199254740993.0001' }, conflictPolicy: 'check' as const, idempotencyKey: 'intent' }
+    await api.upsertInstance('schema/id', input, '"etag"', signal)
+    for (const operation of ['bulk_create', 'bulk_update', 'bulk_delete', 'bulk_upsert'] as const) {
+      await api.bulkWrite('schema/id', operation, { atomic: true, idempotencyKey: 'bulk-intent', items: [{ clientKey: 'one', id: 'row', ifMatch: '"etag"', values: input.values }] }, signal)
+    }
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/data/schemas/schema%2Fid/write-capabilities', '/api/data/schemas/schema%2Fid/instances/upsert',
+      ...['bulk-create', 'bulk-update', 'bulk-delete', 'bulk-upsert'].map((suffix) => `/api/data/schemas/schema%2Fid/instances/${suffix}`)])
+    expect(fetcher.mock.calls[1][1].headers).toMatchObject({ 'If-Match': '"etag"', 'X-CSRF-Token': 'csrf' })
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual(input)
+    expect(JSON.parse(fetcher.mock.calls[3][1].body).items[0]).toMatchObject({ ifMatch: '"etag"', values: input.values })
+    for (const [, options] of fetcher.mock.calls) expect(options).toMatchObject({ signal, credentials: 'same-origin', cache: 'no-store' })
+  })
+
   it('invalidates pending reads after 401 and invokes the global reset only once', async () => {
     let finishRead!: (value: Response) => void
     const pending = new Promise<Response>((resolve) => { finishRead = resolve })

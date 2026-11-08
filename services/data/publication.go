@@ -257,6 +257,9 @@ func (h *handler) activate(w http.ResponseWriter, r *http.Request) {
 		if operation != req.OperationID || digest != req.Digest || (status != "prepared" && status != "ready") {
 			return problem(409, "publication_conflict", "操作并非已完成准备的当前映射")
 		}
+		if err := h.activateMappedWriteGate(r.Context(), current, req); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(r.Context(), "UPDATE af_data_gates SET status='ready' WHERE tenant_id=? AND definition_id=? AND operation_id=? AND digest=?", tenant, req.DefinitionID, req.OperationID, req.Digest)
 		return err
 	})
