@@ -72,8 +72,8 @@ func normalizedName(value string) (string, []byte, error) {
 }
 
 func validPassword(value string) error {
-	if len(value) < 12 || len(value) > 72 || !utf8.ValidString(value) {
-		return problem(422, "invalid_password", "密码必须为12到72字节")
+	if len(value) < 6 || len(value) > 72 || !utf8.ValidString(value) {
+		return problem(422, "invalid_password", "密码必须为6到72字节")
 	}
 	return nil
 }

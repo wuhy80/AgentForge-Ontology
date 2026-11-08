@@ -677,7 +677,7 @@ function ChangePassword({ api, onClose, onUpdated }: { api: ApiClient; onClose: 
       : <form onSubmit={submit}>
         {error && <div className="notice notice-error" role="alert">{error}</div>}
         <label className="field">当前密码<input type="password" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} required /></label>
-        <label className="field">新密码<input type="password" autoComplete="new-password" minLength={12} maxLength={72} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+        <label className="field">新密码<input type="password" autoComplete="new-password" minLength={6} maxLength={72} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
         <label className="field">确认新密码<input type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} required /></label>
         <button className="button primary" disabled={busy}>{busy ? '正在保存…' : '保存密码'}</button>
       </form>}
