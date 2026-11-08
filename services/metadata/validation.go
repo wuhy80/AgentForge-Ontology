@@ -198,10 +198,10 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if c.SideEffects != "none" && c.SideEffects != "dataWrite" && c.SideEffects != "externalWrite" {
 			return problem(400, "invalid_side_effects", "必须显式声明none、dataWrite或externalWrite")
 		}
+		if c.FunctionID != "" && c.ArtifactRef != "" {
+			return problem(422, "unsupported_runtime", "实现函数与产物引用不能同时配置")
+		}
 		if c.Runtime != nil {
-			if d.Kind != contracts.KindFunction {
-				return problem(422, "unsupported_runtime", "Action通过绑定Function执行，不能直接配置脚本")
-			}
 			if c.SideEffects != "none" || c.ArtifactRef != "" || c.FunctionID != "" {
 				return problem(422, "unsupported_runtime", "Python脚本仅支持无副作用计算，不能同时绑定产物或其他函数")
 			}
@@ -334,9 +334,15 @@ func compatibleUpdate(old, next contracts.Definition) error {
 	a, b := withoutDisplayMetadata(old), withoutDisplayMetadata(next)
 	// Action targets are discoverable metadata. They may be updated through the
 	// same draft/publication flow, which rechecks every live dependency. Callable
-	// signatures, implementation and side effects still require runtime support.
+	// signatures, implementation modes and side effects remain locked.
 	if a.Kind == contracts.KindAction && a.Action != nil && b.Action != nil {
 		a.Action.TargetSchemaIDs, b.Action.TargetSchemaIDs = nil, nil
+		// An inline Action may replace its code, and an unconfigured pure Action
+		// may acquire code. Existing implementations cannot switch modes or drop
+		// the executable source of an already active Action.
+		if b.Action.Runtime != nil && a.Action.SideEffects == "none" && b.Action.SideEffects == "none" && a.Action.FunctionID == "" && b.Action.FunctionID == "" && a.Action.ArtifactRef == "" && b.Action.ArtifactRef == "" {
+			a.Action.Runtime, b.Action.Runtime = nil, nil
+		}
 	}
 	// A pure Function may acquire or replace its inline implementation while
 	// preserving its stable parameter signature. Started invocations own an

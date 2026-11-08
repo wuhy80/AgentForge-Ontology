@@ -1,6 +1,6 @@
 # Ontology 中文工作台
 
-React + TypeScript + Vite 前端，对接仓库现有的 Metadata/Data 服务。查询交互主要说明见[可视化查询编辑器](../../docs/数据查询/可视化查询编辑器.md)，公共权限规则见[权限设计](../../docs/权限/权限设计.md)，本地账号及会话实际协议见 [Metadata identity](../../services/metadata/identity/README.md)。完整能力边界见[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)，后端启动及真实验证方式见[开发指南](../../docs/开发指南.md#前端工作台)。
+React + TypeScript + Vite 前端，对接仓库现有的Metadata、Data和Execution服务。查询交互主要说明见[可视化查询编辑器](../../docs/数据查询/可视化查询编辑器.md)，源码编辑规则见[Function](../../docs/模块/Function.md#独立源码编辑2026-11-07用户确认)，公共权限规则见[权限设计](../../docs/权限/权限设计.md)，本地账号及会话实际协议见[Metadata identity](../../services/metadata/identity/README.md)。完整能力边界见[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)，后端启动及真实验证方式见[开发指南](../../docs/开发指南.md#前端工作台)。
 
 ## 开发与构建
 
@@ -11,7 +11,7 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-开发地址为 `http://127.0.0.1:5173`。后端须分别运行在 `18080`、`18081`；同源 `/api/metadata`、`/api/data` 分别移除 `/api` 前缀转发至公开路由。启动仓库的 `scripts/start-dev.ps1` 后，以忽略目录 `.cache/dev/admin.json` 初始化的租户、用户名和密码登录；重复启动不会重置已有密码。正常流程不需要签发或粘贴访问凭证，也不向浏览器提供数据库、服务密钥或可切换租户头。
+开发地址为`http://127.0.0.1:5173`。Metadata、Data、Execution后端分别运行在`18080`、`18081`、`18082`；同源`/api/metadata`、`/api/data`、`/api/execution`分别移除`/api`前缀转发至公开路由。启动仓库的`scripts/start-dev.ps1`后，以忽略目录`.cache/dev/admin.json`初始化的租户、用户名和密码登录；重复启动不会重置已有密码。正常流程不需要签发或粘贴访问凭证，也不向浏览器提供数据库、服务密钥或可切换租户头。
 
 会话由 HttpOnly、SameSite=Strict Cookie 承载，最长8小时；页面刷新时重新读取当前会话。浏览器通过同源请求携带 Cookie，并由 API 层为登录以外的非安全方法请求添加内存中的 CSRF token；服务端同时校验 `Origin`。这也适用于 POST 查询和预览。退出调用后端注销会话，账号停用、密码重置和角色绑定变化会撤销旧会话。首次登录后可从工作台修改密码。
 
@@ -41,6 +41,7 @@ npm.cmd run test:e2e -- workspace.spec.ts
 | [数据预览](src/features/model/ModelDataPreview.tsx) | 直接读取当前生效对象的小页实例，选择字段和记录，底部按 Link 正反方向预览关联数据；不提供业务写入入口 |
 | [Schema 映射](src/features/model/SchemaStorageEditor.tsx) | 两种建模方向、主表稳定身份及逐属性跨源/跨表目录选择；默认平台存储也展示实际生效表列，草稿与生效映射分开标识；反向导入保留已有属性身份 |
 | [Link 映射](src/features/model/LinkStorageEditor.tsx) | 区分纯定义、平台关系表、已有外部关联表和外键；可视化表列选择、关系示意、一次性补绑定 |
+| [Python源码](src/components/PythonSourceEditor.tsx) | Function及直接源码Action独立使用的CodeMirror编辑器；Python高亮、本地语法与中文参数补全、缩进、括号及行号，运行范围仍仅Python纯计算 |
 | [数据源配置](src/features/sources/SourcesPage.tsx) | 管理员维护MySQL/PostgreSQL连接、自动识别或指定版本、真实兼容状态、TLS及租户隔离；测试当前编辑配置并复用服务端保留密码，查看表列；密码只写入 |
 | [数据探索](src/features/query/QueryPage.tsx) | 默认OntologySQL，顶部指导、左侧模型/右侧字段、双击与键盘插入、CodeMirror懒加载、参数、服务端补全/诊断、结果详情/关联及续页；保留可视化完整子集转换 |
 | [实例详情](src/features/query/InstanceDialog.tsx) | 单条创建/读取/修改/确认删除，保持精度、幂等及并发凭证 |

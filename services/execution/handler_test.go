@@ -277,6 +277,130 @@ func TestActionBindingRequiresBothInvokesAndMapsOwnIDs(t *testing.T) {
 	}
 }
 
+func inlineAction(f *fixture) c.Definition {
+	raw, _ := json.Marshal(f.fn)
+	var action c.Definition
+	_ = json.Unmarshal(raw, &action)
+	action.ID, action.Kind, action.Name, action.Action, action.Function = "inline-action", c.KindAction, "独立源码动作", action.Function, nil
+	action.Action.Input[0].ID, action.Action.Output[0].ID = "action-in", "action-out"
+	action.Action.TargetSchemaIDs = []string{"associated-schema"}
+	return action
+}
+
+const inlineActionBody = `{"definitionId":"inline-action","input":{"action-in":"9007199254740993.10"}}`
+
+func TestInlineActionOwnSourceAuthorizationSnapshotAndReplay(t *testing.T) {
+	f := newFixture()
+	action := inlineAction(f)
+	f.meta.set(action)
+	// A native Action must never invent or require a Function identity.
+	f.auth.deny("function.invoke", f.fn.ID)
+	f.auth.deny("function.invoke", action.ID)
+	first := invocation(t, request(f.h, "POST", "/execution/invocations", "inline-1", inlineActionBody), 201)
+	if first.Kind != c.KindAction || first.Status != "succeeded" || string(first.Output["action-out"]) != `"9007199254740993.10"` {
+		t.Fatalf("invalid inline Action result: %+v", first)
+	}
+	record, err := f.store.FindKey(context.Background(), "tenant", "user", "inline-1")
+	if err != nil || record.Implementation.Kind != c.KindAction || record.Implementation.ID != action.ID || record.Implementation.Function != nil || record.Implementation.Action.Runtime.Source != action.Action.Runtime.Source {
+		t.Fatalf("Action implementation identity or code was lost: %+v %v", record.Implementation, err)
+	}
+	replay := invocation(t, request(f.h, "POST", "/execution/invocations", "inline-1", inlineActionBody), 200)
+	if replay.ID != first.ID || f.runner.calls.Load() != 1 {
+		t.Fatal("inline Action replay restarted the computation")
+	}
+	// The stored snapshot remains immutable and newly published code invalidates
+	// old output as well as same-key replay, without automatically rerunning it.
+	action.Action.Runtime.Source += "\n# updated Action source"
+	f.meta.set(action)
+	for _, w := range []*httptest.ResponseRecorder{
+		request(f.h, "GET", "/execution/invocations/"+first.ID, "", ""),
+		request(f.h, "POST", "/execution/invocations", "inline-1", inlineActionBody),
+	} {
+		if w.Code != 409 || strings.Contains(w.Body.String(), "9007199254740993") {
+			t.Fatalf("stale Action output delivered: %d %s", w.Code, w.Body)
+		}
+	}
+	next := invocation(t, request(f.h, "POST", "/execution/invocations", "inline-2", inlineActionBody), 201)
+	if next.CodeDigest == first.CodeDigest || next.CodeDigest != sourceDigest(action.Action.Runtime.Source) || f.runner.calls.Load() != 2 {
+		t.Fatal("new Action invocation did not use its current source")
+	}
+	old, _ := f.store.FindKey(context.Background(), "tenant", "user", "inline-1")
+	if old.Implementation.Action.Runtime.Source != record.Implementation.Action.Runtime.Source {
+		t.Fatal("source update rewrote the persisted Action snapshot")
+	}
+	f.auth.deny("action.invoke", action.ID)
+	for _, w := range []*httptest.ResponseRecorder{
+		request(f.h, "GET", "/execution/invocations/"+next.ID, "", ""),
+		request(f.h, "POST", "/execution/invocations", "inline-2", inlineActionBody),
+		request(f.h, "POST", "/execution/invocations", "inline-3", inlineActionBody),
+	} {
+		if w.Code != 403 || strings.Contains(w.Body.String(), "9007199254740993") {
+			t.Fatalf("revoked Action access delivered output: %d %s", w.Code, w.Body)
+		}
+	}
+	if f.runner.calls.Load() != 2 {
+		t.Fatal("revoked Action executed")
+	}
+}
+
+func TestInlineActionRejectsAmbiguousOrUnsupportedImplementations(t *testing.T) {
+	for name, mutate := range map[string]func(*c.Callable){
+		"bound and source":       func(callable *c.Callable) { callable.FunctionID = "function" },
+		"artifact and source":    func(callable *c.Callable) { callable.ArtifactRef = "artifact" },
+		"side effects":           func(callable *c.Callable) { callable.SideEffects = "dataWrite" },
+		"unsupported language":   func(callable *c.Callable) { callable.Runtime.Language = "javascript" },
+		"missing implementation": func(callable *c.Callable) { callable.Runtime = nil },
+		"unsupported parameter":  func(callable *c.Callable) { callable.Input[0].EnumID = "enum" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture()
+			action := inlineAction(f)
+			mutate(action.Action)
+			f.meta.set(action)
+			w := request(f.h, "POST", "/execution/invocations", "invalid-action", inlineActionBody)
+			if w.Code != 422 || f.runner.calls.Load() != 0 || len(f.store.records) != 0 {
+				t.Fatalf("unsupported Action was admitted: %d %s", w.Code, w.Body)
+			}
+		})
+	}
+}
+
+func TestInlineActionRechecksOwnPermissionBeforeStartAndDelivery(t *testing.T) {
+	for _, stage := range []string{"after-claim", "after-run"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newFixture()
+			action := inlineAction(f)
+			f.meta.set(action)
+			revoke := func() { f.auth.deny("action.invoke", action.ID) }
+			if stage == "after-claim" {
+				f.store.onClaim = revoke
+			} else {
+				f.runner.run = func(context.Context, *c.ScriptRuntime, map[string]json.RawMessage, string) (map[string]json.RawMessage, error) {
+					revoke()
+					return map[string]json.RawMessage{"结果": json.RawMessage(`"9007199254740993.10"`)}, nil
+				}
+			}
+			w := request(f.h, "POST", "/execution/invocations", "revoked-inline", inlineActionBody)
+			if w.Code != 403 || strings.Contains(w.Body.String(), "9007199254740993") {
+				t.Fatalf("revoked native Action result escaped: %d %s", w.Code, w.Body)
+			}
+			record, err := f.store.FindKey(context.Background(), "tenant", "user", "revoked-inline")
+			if err != nil || record.Invocation.Status == "running" || stage == "after-claim" && f.runner.calls.Load() != 0 {
+				t.Fatalf("invalid persisted native Action outcome: %+v %v", record, err)
+			}
+		})
+	}
+}
+
+func TestImplementationSnapshotReadsExistingPersistedJSON(t *testing.T) {
+	f := newFixture()
+	raw, err := json.Marshal(map[string]any{"root": f.fn, "function": f.fn})
+	var record Record
+	if err != nil || json.Unmarshal(raw, &record) != nil || digest(record.Implementation) != digest(f.fn) {
+		t.Fatal("existing Function evidence no longer loads")
+	}
+}
+
 func TestCallValidationRejectsUnimplementedCapabilities(t *testing.T) {
 	for _, test := range []struct {
 		name   string

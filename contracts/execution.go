@@ -3,9 +3,9 @@ package contracts
 import "encoding/json"
 
 // ScriptRuntime is the first executable implementation. Source is part of the
-// current definition; JavaScript, custom images and external URLs are not yet
-// accepted. The Python entrypoint accepts/returns dictionaries keyed by the
-// declared Chinese parameter names. HTTP parameters use stable property IDs.
+// current Action or Function definition; JavaScript, custom images and external
+// URLs are not yet accepted. The Python entrypoint accepts/returns dictionaries
+// keyed by declared Chinese parameter names. HTTP uses stable property IDs.
 type ScriptRuntime struct {
 	Language       string `json:"language"`
 	Source         string `json:"source"`

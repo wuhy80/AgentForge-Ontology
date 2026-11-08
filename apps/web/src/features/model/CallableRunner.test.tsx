@@ -14,13 +14,38 @@ function fixture() {
       input: [{ id: 'input-id', name: '数值', dataType: 'int64', required: true }], output: [{ id: 'output-id', name: '结果', dataType: 'int64' }] },
   } }
   const result: Invocation = { id: 'invocation', definitionId: 'fn', definitionName: '精确计算', kind: 'function', status: 'succeeded', output: { 'output-id': '9007199254740993' }, createdAt: '2026-11-07T00:00:00Z', codeDigest: 'digest' }
-  const api = { getCurrent: vi.fn().mockResolvedValue(record), executionCapabilities: vi.fn().mockResolvedValue({ invocation: true, runtimes: ['python'], synchronous: true }), invoke: vi.fn().mockResolvedValue(result), getInvocation: vi.fn().mockResolvedValue(result) }
+  const api = { getCurrent: vi.fn().mockResolvedValue(record), executionCapabilities: vi.fn().mockResolvedValue({ invocation: true, runtimes: ['python'], synchronous: true, actionInlineSource: true }), invoke: vi.fn().mockResolvedValue(result), getInvocation: vi.fn().mockResolvedValue(result) }
   const props = { api: api as unknown as ApiClient, definitionId: 'fn', tenantId: 'tenant' }
   return { api, props, record, result }
 }
 async function open() { await userEvent.click(screen.getByRole('button', { name: '打开运行面板' })); return screen.findByLabelText('数值int64') }
 
 describe('当前定义运行面板', () => {
+  it('独立源码动作按自身稳定参数运行，保留绑定动作的权限说明', async () => {
+    const { api, props, record, result } = fixture()
+    const action: DefinitionRecord = { ...record, definition: { ...record.definition, kind: 'action', function: undefined, action: record.definition.function } }
+    api.getCurrent.mockResolvedValue(action)
+    api.executionCapabilities.mockResolvedValue({ invocation: true, runtimes: ['python'], synchronous: true, actionInlineSource: true })
+    api.invoke.mockResolvedValue({ ...result, kind: 'action' })
+    render(<CallableRunner {...props} />)
+    await userEvent.type(await open(), '7')
+    expect(screen.getByText(/需要当前动作的运行权限/)).toBeTruthy()
+    expect(screen.queryByText(/绑定函数的运行权限/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: '运行' }))
+    expect(await screen.findByText('运行成功')).toBeTruthy()
+    expect(api.invoke).toHaveBeenCalledWith('fn', { 'input-id': '7' }, expect.any(String), expect.any(AbortSignal))
+  })
+
+  it('执行服务尚不支持独立动作时明确拒绝，不提交运行请求', async () => {
+    const { api, props, record } = fixture()
+    api.getCurrent.mockResolvedValue({ ...record, definition: { ...record.definition, kind: 'action', function: undefined, action: record.definition.function } })
+    api.executionCapabilities.mockResolvedValue({ invocation: true, runtimes: ['python'], synchronous: true, actionInlineSource: false })
+    render(<CallableRunner {...props} />)
+    await userEvent.click(screen.getByRole('button', { name: '打开运行面板' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('尚未开放动作独立源码')
+    expect(api.invoke).not.toHaveBeenCalled()
+  })
+
   it('只在打开时检查能力，按服务器当前签名与稳定ID无损提交参数，结束后再次运行使用新幂等键', async () => {
     const { api, props } = fixture()
     render(<CallableRunner {...props} />)

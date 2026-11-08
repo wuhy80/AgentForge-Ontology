@@ -39,8 +39,9 @@ export function CallableRunner({ api, definitionId, tenantId, active = true }: {
       if (controller.signal.aborted) return
       if (record.definition.id !== definitionId || record.definition.tenantId !== tenantId || record.status !== 'active' || !['action', 'function'].includes(record.definition.kind)) throw new Error('当前生效定义已改变，请刷新模型目录。')
       const target = record.definition.action ?? record.definition.function!
-      if (target.sideEffects !== 'none' || record.definition.function && !target.runtime || record.definition.action && !target.functionId) throw new Error('此定义尚未配置可运行的无副作用 Python 实现。')
+      if (target.sideEffects !== 'none' || record.definition.function && !target.runtime || record.definition.action && !target.runtime && !target.functionId || target.runtime && (target.runtime.language !== 'python' || !!target.functionId || !!target.artifactRef)) throw new Error('此定义尚未配置可运行的无副作用 Python 实现。')
       if (!capabilities.invocation || !capabilities.runtimes.includes('python')) throw new Error('Python 执行服务尚未就绪，请检查本地执行服务。')
+      if (record.definition.action && target.runtime && !capabilities.actionInlineSource) throw new Error('执行服务尚未开放动作独立源码，请更新本地执行服务。')
       setCurrent(record); setDrafts(initialDrafts(target.input ?? []))
     } catch (cause) {
       if (!controller.signal.aborted) { setCurrent(undefined); setInvocation(undefined); setError(errorMessage(cause)) }
@@ -98,7 +99,7 @@ export function CallableRunner({ api, definitionId, tenantId, active = true }: {
       {busy && <p role="status"><LoaderCircle className="model-spin" size={16} />正在确认或执行，请稍候…</p>}
       {!current && !busy && <button type="button" className="button" onClick={() => void open()}><RefreshCw size={16} />重新载入运行参数</button>}
       {current && callable && <>
-        <p className="muted">当前生效：{current.definition.name}。{current.definition.action ? '运行动作还需拥有其绑定函数的运行权限。' : '需要当前函数的运行权限。'}</p>
+        <p className="muted">当前生效：{current.definition.name}。{current.definition.action ? callable.functionId ? '运行动作还需拥有其绑定函数的运行权限。' : '需要当前动作的运行权限。' : '需要当前函数的运行权限。'}</p>
         <fieldset className="model-fieldset" disabled={busy || invocation?.status === 'running'}>
           <div className="model-invocation-inputs">{(callable.input ?? []).map((property, index) => {
             const draft = drafts[property.id] ?? { mode: 'omit', text: '' }

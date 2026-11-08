@@ -184,7 +184,7 @@ export interface Callable {
   runtime?: ScriptRuntime
 }
 export interface ScriptRuntime { language: 'python'; source: string; entrypoint: string; timeoutSeconds: number }
-export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; reason?: string }
+export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; actionInlineSource?: boolean; reason?: string }
 export interface Invocation {
   id: string
   definitionId: string

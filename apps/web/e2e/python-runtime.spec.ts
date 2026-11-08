@@ -3,11 +3,12 @@ import type { Definition, DefinitionRecord, Invocation, Values } from '../src/li
 
 // Every API endpoint is intercepted. This checks the browser UI contract;
 // MySQL, current permissions and Python container execution use Go integration.
-async function fixture(page: Page) {
+async function fixture(page: Page, kind: 'function' | 'action' = 'function') {
   const tenantId = 'python-runtime-fixture'
+  const definitionId = `python-${kind}`
   let current: DefinitionRecord = { status: 'active', etag: 'current-original', definition: {
-    id: 'python-function', tenantId, categoryId: 'knowledge', groupId: 'computations', kind: 'function', name: '原文转换',
-    function: { sideEffects: 'none', runtime: { language: 'python', source: 'def main(inputs):\n    return {"转换结果": inputs["原文"]}\n', entrypoint: 'main', timeoutSeconds: 5 },
+    id: definitionId, tenantId, categoryId: 'knowledge', groupId: 'computations', kind, name: '原文转换',
+    [kind]: { sideEffects: 'none', runtime: { language: 'python', source: 'def main(inputs):\n    return {"转换结果": inputs["原文"]}\n', entrypoint: 'main', timeoutSeconds: 5 },
       input: [{ id: 'input-original', name: '原文', dataType: 'string', required: true }], output: [{ id: 'output-result', name: '转换结果', dataType: 'string' }] },
   } }
   let draft: DefinitionRecord | undefined
@@ -29,7 +30,7 @@ async function fixture(page: Page) {
     if (path === '/api/metadata/categories') return reply({ data: [{ id: 'knowledge', tenantId, name: '个人知识库' }], hasMore: false })
     if (path === '/api/metadata/groups') return reply({ data: [{ id: 'computations', tenantId, categoryId: 'knowledge', name: '计算能力' }], hasMore: false })
     if (path === '/api/metadata/definitions') return reply({ data: url.searchParams.get('view') === 'draft' ? draft ? [draft] : [] : [current], hasMore: false })
-    if (path === '/api/metadata/definitions/python-function/draft') {
+    if (path === `/api/metadata/definitions/${definitionId}/draft`) {
       if (method === 'PUT') {
         const definition = request.postDataJSON() as Definition
         writes.push(structuredClone(definition))
@@ -38,19 +39,19 @@ async function fixture(page: Page) {
       }
       return draft ? reply(draft) : reply({ code: 'not_found', message: '没有草稿' }, 404)
     }
-    if (path === '/api/metadata/definitions/python-function') return reply(current)
-    if (path === '/api/metadata/definitions/python-function/publish') {
+    if (path === `/api/metadata/definitions/${definitionId}`) return reply(current)
+    if (path === `/api/metadata/definitions/${definitionId}/publish`) {
       current = { ...draft!, status: 'active', etag: 'current-updated' }
       draft = undefined
       return reply({ id: 'publication', tenantId, definitionId: current.definition.id, status: 'succeeded' })
     }
-    if (path === '/api/execution/capabilities') return reply({ invocation: true, runtimes: ['python'], synchronous: true })
+    if (path === '/api/execution/capabilities') return reply({ invocation: true, runtimes: ['python'], synchronous: true, actionInlineSource: true })
     if (path === '/api/execution/invocations' && method === 'POST') {
       expect(request.headers()['x-csrf-token']).toBe('fixture-csrf')
       const body = request.postDataJSON() as { definitionId: string; input: Values }
       requests.push({ body, key: request.headers()['idempotency-key'] })
       const text = String(body.input['input-original'])
-      lastInvocation = { id: `invocation-${requests.length}`, definitionId: current.definition.id, definitionName: current.definition.name, kind: 'function', status: 'succeeded', output: { 'output-result': current.definition.function!.runtime!.source.includes('.upper()') ? text.toUpperCase() : text }, createdAt: '2026-11-07T00:00:00Z', codeDigest: 'fixture-code' }
+      lastInvocation = { id: `invocation-${requests.length}`, definitionId: current.definition.id, definitionName: current.definition.name, kind, status: 'succeeded', output: { 'output-result': current.definition[kind]!.runtime!.source.includes('.upper()') ? text.toUpperCase() : text }, createdAt: '2026-11-07T00:00:00Z', codeDigest: 'fixture-code' }
       return reply(lastInvocation, 201)
     }
     if (path.startsWith('/api/execution/invocations/')) return denyResult ? reply({ code: 'forbidden', message: '当前无权读取运行结果' }, 403) : reply(lastInvocation)
@@ -60,14 +61,26 @@ async function fixture(page: Page) {
   return { requests, writes, unhandled, denyResult: () => { denyResult = true } }
 }
 
-test('Python编辑与发布、当前态运行、中文结果及撤权清理，1440px和390px布局', async ({ page }) => {
-  const state = await fixture(page)
+for (const kind of ['function', 'action'] as const) test(`${kind} 独立 Python 高亮补全、发布与运行、撤权清理及窄屏布局`, async ({ page }) => {
+  const state = await fixture(page, kind)
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.goto('/#models/python-function')
+  await page.goto(`/#models/python-${kind}`)
   const editor = page.getByRole('region', { name: '模型编辑', exact: true })
   const source = editor.getByRole('textbox', { name: 'Python 源码', exact: true })
-  await expect(source).toHaveValue(/def main\(inputs\)/)
+  await expect(editor.getByRole('region', { name: kind === 'action' ? '动作源码' : '函数源码', exact: true })).toBeVisible()
+  await expect(source).toContainText('def main(inputs):')
+  await expect(source.locator('span').filter({ hasText: /^def$/ })).toBeVisible()
+  await source.fill('def main(inputs):\n    return inputs["')
+  await source.press('Control+Space')
+  const inputOption = page.getByRole('option', { name: /原文/ })
+  await expect(inputOption).toBeVisible()
+  await inputOption.click()
+  await expect(source).toContainText('inputs["原文')
+  await source.fill('def main(inputs):\n    return {"')
+  await source.press('Control+Space')
+  await page.getByRole('option', { name: /转换结果/ }).click()
+  await expect(source).toContainText('return {"转换结果')
   await source.fill('def main(inputs):\n    return {"转换结果": inputs["原文"].upper()}\n')
   await editor.getByRole('button', { name: '打开运行面板', exact: true }).click()
   const input = editor.getByRole('textbox', { name: /^原文/ })
@@ -76,18 +89,19 @@ test('Python编辑与发布、当前态运行、中文结果及撤权清理，14
   const results = editor.getByRole('region', { name: '运行结果', exact: true })
   await expect(results.getByRole('heading', { name: '运行成功', exact: true })).toBeVisible()
   await expect(results.getByRole('definition')).toHaveText('中文测试 mixedCase')
-  expect(state.requests[0].body).toEqual({ definitionId: 'python-function', input: { 'input-original': '中文测试 mixedCase' } })
+  expect(state.requests[0].body).toEqual({ definitionId: `python-${kind}`, input: { 'input-original': '中文测试 mixedCase' } })
   expect(state.requests[0].key).toBeTruthy()
-  await expect(source).toHaveValue(/\.upper\(\)/)
+  await expect(source).toContainText('.upper()')
   await editor.getByRole('button', { name: '保存草稿', exact: true }).click()
   await expect(editor.getByText('草稿已保存。可以继续配置索引、预览存储计划或发布。', { exact: true })).toBeVisible()
-  expect(state.writes[0].function!.runtime!.source).toContain('.upper()')
+  expect(state.writes[0][kind]!.runtime!.source).toContain('.upper()')
   await editor.getByRole('button', { name: '发布定义', exact: true }).click()
   await expect(editor.getByText('发布成功，当前定义已生效。', { exact: true })).toBeVisible()
   await editor.getByRole('button', { name: '打开运行面板', exact: true }).click()
   await editor.getByRole('textbox', { name: /^原文/ }).fill('中文测试 mixedCase')
   await editor.getByRole('button', { name: '运行', exact: true }).click()
   await expect(results.getByRole('definition')).toHaveText('中文测试 MIXEDCASE')
+  await source.fill(`def main(inputs):\n    return {"转换结果": inputs["原文"].upper()}\n# ${'x'.repeat(600)}`)
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await expect(results).toBeVisible()

@@ -207,6 +207,10 @@ func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 		Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 5, Source: "def main(inputs):\n    print('private diagnostic must not escape')\n    return {'字符数': str(len(inputs['正文']))}\n"},
 	}})
 	action := publish(c.Definition{Kind: c.KindAction, Name: "统计笔记", Action: &c.Callable{FunctionID: fn.Definition.ID, SideEffects: "none", Input: []c.Property{{Name: "正文", DataType: "string", Required: true}}, Output: []c.Property{{Name: "字符数", DataType: "int64", Required: true}}}})
+	inline := publish(c.Definition{Kind: c.KindAction, Name: "独立源码统计笔记", Action: &c.Callable{
+		Input: []c.Property{{Name: "正文", DataType: "string", Required: true}}, Output: []c.Property{{Name: "字符数", DataType: "int64", Required: true}}, SideEffects: "none",
+		Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 5, Source: "def main(inputs):\n    return {'字符数': str(len(inputs['正文']) + 10)}\n"},
+	}})
 	if fn.Definition.Function.Input[0].ID == action.Definition.Action.Input[0].ID {
 		t.Fatal("independent signatures must keep their own parameter identity")
 	}
@@ -258,6 +262,45 @@ func TestPythonExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	admin.request("GET", resultURL, nil, nil, 403, nil)
 	admin.request("POST", execServer.URL+"/execution/invocations", intent, map[string]string{"Idempotency-Key": key}, 403, nil)
 	admin.request("POST", execServer.URL+"/execution/invocations", actionIntent, map[string]string{"Idempotency-Key": c.NewID()}, 403, nil)
+	// An Action with its own source requires only its own invoke grant, even
+	// when the referenced Function used by another Action is explicitly denied.
+	inlineIntent := c.InvocationRequest{DefinitionID: inline.Definition.ID, Input: map[string]json.RawMessage{inline.Definition.Action.Input[0].ID: raw("Hello知识")}}
+	inlineKey := c.NewID()
+	var inlineResult c.Invocation
+	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": inlineKey}, 201, &inlineResult)
+	inlineOutputID := inline.Definition.Action.Output[0].ID
+	if inlineResult.Kind != c.KindAction || inlineResult.Status != "succeeded" || string(inlineResult.Output[inlineOutputID]) != `"17"` {
+		t.Fatalf("native Action did not execute its own source: %+v", inlineResult)
+	}
+	inlineURL := execServer.URL + "/execution/invocations/" + inlineResult.ID
+	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": inlineKey}, 200, &replay)
+	if replay.ID != inlineResult.ID {
+		t.Fatal("native Action replay executed again")
+	}
+	other.request("GET", inlineURL, nil, nil, 404, nil)
+	peerClient.request("GET", inlineURL, nil, nil, 404, nil)
+	inlineDenied := append(append([]c.PermissionRule{}, denied...), c.PermissionRule{ID: c.NewID(), RoleID: roleID, Effect: "deny", Operation: "action.invoke", ResourceID: inline.Definition.ID})
+	savePolicy(inlineDenied)
+	admin.request("GET", inlineURL, nil, nil, 403, nil)
+	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": inlineKey}, 403, nil)
+	savePolicy(denied)
+	// Saving source is separate from publication. Existing calls keep the
+	// current source until publication; afterwards old results are rejected.
+	inline.Definition.Action.Runtime.Source = "def main(inputs):\n    return {'字符数': str(len(inputs['正文']) + 20)}\n"
+	var inlineDraft c.CurrentDefinition
+	inlineHeaders := admin.request("PUT", metaServer.URL+"/metadata/definitions/"+inline.Definition.ID+"/draft", inline.Definition, map[string]string{"If-Match": `"` + inline.ETag + `"`}, 200, &inlineDraft)
+	admin.request("GET", inlineURL, nil, nil, 200, &replay)
+	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
+	if string(replay.Output[inlineOutputID]) != `"17"` {
+		t.Fatal("unpublished native Action source was executed")
+	}
+	admin.request("POST", metaServer.URL+"/metadata/definitions/"+inline.Definition.ID+"/publish", nil, map[string]string{"If-Match": inlineHeaders.Get("ETag")}, 200, nil)
+	admin.request("GET", inlineURL, nil, nil, 409, nil)
+	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": inlineKey}, 409, nil)
+	admin.request("POST", execServer.URL+"/execution/invocations", inlineIntent, map[string]string{"Idempotency-Key": c.NewID()}, 201, &replay)
+	if string(replay.Output[inlineOutputID]) != `"27"` || replay.CodeDigest == inlineResult.CodeDigest {
+		t.Fatal("new native Action source did not become effective")
+	}
 	savePolicy(policy.Current.Rules)
 	// New code uses a new snapshot; old results cannot be misinterpreted.
 	fn.Definition.Function.Runtime.Source = "def main(inputs):\n    return {'字符数': str(len(inputs['正文']) + 1)}\n"

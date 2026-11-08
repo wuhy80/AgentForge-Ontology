@@ -93,6 +93,26 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	actionDefinition.Action.Input[0].ID, actionDefinition.Action.Output[0].ID = "action-in", "action-out"
 	action := create(actionDefinition)
 	publish(action, 200)
+	inlineDefinition := executableAction()
+	inlineDefinition.Name = "独立Python动作"
+	inline := create(inlineDefinition)
+	publish(inline, 200)
+	originalSource := inline.Definition.Action.Runtime.Source
+	inline.Definition.Action.Runtime.Source = "def main(inputs):\n    return {'结果': inputs['文本'].upper()}\n"
+	var inlineUpdate, inlineCurrent c.CurrentDefinition
+	request("PUT", "/metadata/definitions/"+inline.Definition.ID+"/draft", inline.ETag, inline.Definition, 200, &inlineUpdate)
+	request("GET", "/metadata/definitions/"+inline.Definition.ID, "", nil, 200, &inlineCurrent)
+	if inlineCurrent.Definition.Action.Runtime.Source != originalSource {
+		t.Fatal("unpublished Action code replaced current source")
+	}
+	publish(inlineUpdate, 200)
+	request("GET", "/metadata/definitions/"+inline.Definition.ID, "", nil, 200, &inlineCurrent)
+	if inlineCurrent.Definition.Action.Runtime.Source != inlineUpdate.Definition.Action.Runtime.Source {
+		t.Fatal("published Action code did not become current")
+	}
+	inlineCurrent.Definition.Action.Runtime, inlineCurrent.Definition.Action.FunctionID = nil, function.Definition.ID
+	request("PUT", "/metadata/definitions/"+inline.Definition.ID+"/draft", inlineCurrent.ETag, inlineCurrent.Definition, 200, &inlineUpdate)
+	publish(inlineUpdate, 422)
 	// Signature mismatches are rejected before a publication operation starts.
 	bad := actionDefinition
 	bad.Name = "错误签名"

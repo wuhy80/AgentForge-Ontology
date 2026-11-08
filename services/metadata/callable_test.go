@@ -14,31 +14,92 @@ func executableFunction() c.Definition {
 	return d
 }
 
-func TestInlinePythonRequiresPureFunctionAndUnambiguousImplementation(t *testing.T) {
+func executableAction() c.Definition {
+	d := executableFunction()
+	d.Kind, d.Action, d.Function = c.KindAction, d.Function, nil
+	return d
+}
+
+func TestInlinePythonRequiresPureCallableAndUnambiguousImplementation(t *testing.T) {
 	valid := executableFunction()
 	if err := canonicalDefinition(&valid, false); err != nil {
 		t.Fatal(err)
 	}
-	for name, mutate := range map[string]func(*c.Definition){
-		"action script":         func(d *c.Definition) { d.Kind, d.Action, d.Function = c.KindAction, d.Function, nil },
-		"external side effects": func(d *c.Definition) { d.Function.SideEffects = "externalWrite" },
-		"data side effects":     func(d *c.Definition) { d.Function.SideEffects = "dataWrite" },
-		"ambiguous artifact":    func(d *c.Definition) { d.Function.ArtifactRef = "some-image" },
-		"nested function":       func(d *c.Definition) { d.Function.FunctionID = "another-function" },
-		"unsupported language":  func(d *c.Definition) { d.Function.Runtime.Language = "js" },
-		"enum parameter":        func(d *c.Definition) { d.Function.Input[0].EnumID = "enum-id" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			d := executableFunction()
-			mutate(&d)
-			if err := canonicalDefinition(&d, false); err == nil {
-				t.Fatal("unsupported implementation accepted")
-			}
-		})
+	for _, create := range []func() c.Definition{executableFunction, executableAction} {
+		d := create()
+		if d.Action != nil {
+			d.Action.TargetSchemaIDs = []string{"associated-schema"}
+		}
+		if err := canonicalDefinition(&d, false); err != nil {
+			t.Fatal("pure inline callable rejected", err)
+		}
+		for name, mutate := range map[string]func(*c.Callable){
+			"external side effects": func(c *c.Callable) { c.SideEffects = "externalWrite" },
+			"data side effects":     func(c *c.Callable) { c.SideEffects = "dataWrite" },
+			"ambiguous artifact":    func(c *c.Callable) { c.ArtifactRef = "some-image" },
+			"function and artifact": func(c *c.Callable) { c.Runtime, c.FunctionID, c.ArtifactRef = nil, "function-id", "some-image" },
+			"nested function":       func(c *c.Callable) { c.FunctionID = "another-function" },
+			"unsupported language":  func(c *c.Callable) { c.Runtime.Language = "js" },
+			"enum parameter":        func(c *c.Callable) { c.Input[0].EnumID = "enum-id" },
+		} {
+			t.Run(string(d.Kind)+"/"+name, func(t *testing.T) {
+				candidate := create()
+				callable := candidate.Function
+				if candidate.Action != nil {
+					callable = candidate.Action
+				}
+				mutate(callable)
+				if err := canonicalDefinition(&candidate, false); err == nil {
+					t.Fatal("unsupported implementation accepted")
+				}
+			})
+		}
 	}
 	valid.Function.Runtime = nil
 	if err := canonicalDefinition(&valid, false); err != nil {
 		t.Fatal("metadata-only legacy definition rejected", err)
+	}
+}
+
+func TestInlineActionRuntimeUpdatePreservesModeAndSignature(t *testing.T) {
+	old := executableAction()
+	copyDefinition := func(in c.Definition) c.Definition {
+		raw, _ := json.Marshal(in)
+		var out c.Definition
+		_ = json.Unmarshal(raw, &out)
+		return out
+	}
+	next := copyDefinition(old)
+	next.Action.Runtime.Source += "\n# new source"
+	next.Action.Runtime.Entrypoint, next.Action.Runtime.TimeoutSeconds = "calculate", 10
+	next.Action.TargetSchemaIDs = []string{"associated-schema"}
+	if err := compatibleUpdate(old, next); err != nil || old.Action.Runtime.TimeoutSeconds != 5 {
+		t.Fatal("inline Action update rejected or changed current snapshot", err)
+	}
+	for name, mutate := range map[string]func(*c.Callable){
+		"remove source":  func(callable *c.Callable) { callable.Runtime = nil },
+		"bind function":  func(callable *c.Callable) { callable.Runtime, callable.FunctionID = nil, "function-id" },
+		"bind artifact":  func(callable *c.Callable) { callable.Runtime, callable.ArtifactRef = nil, "artifact" },
+		"output type":    func(callable *c.Callable) { callable.Output[0].DataType = "text" },
+		"side effects":   func(callable *c.Callable) { callable.SideEffects = "dataWrite" },
+		"input required": func(callable *c.Callable) { callable.Input[0].Required = false },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := copyDefinition(old)
+			mutate(candidate.Action)
+			if compatibleUpdate(old, candidate) == nil {
+				t.Fatal("active Action mode or signature changed")
+			}
+		})
+	}
+	legacy := copyDefinition(old)
+	legacy.Action.Runtime = nil
+	if compatibleUpdate(legacy, next) != nil {
+		t.Fatal("pure metadata-only Action cannot acquire source")
+	}
+	legacy.Action.FunctionID = "function-id"
+	if compatibleUpdate(legacy, next) == nil {
+		t.Fatal("active bound Action switched to inline source")
 	}
 }
 

@@ -14,16 +14,18 @@ import (
 // Record is private execution evidence, never an HTTP response. Code, caller
 // input and exact definitions remain inside this service's store.
 type Record struct {
-	Invocation  c.Invocation               `json:"invocation"`
-	TenantID    string                     `json:"tenantId"`
-	SubjectID   string                     `json:"subjectId"`
-	RequestKey  string                     `json:"requestKey"`
-	RequestHash string                     `json:"requestHash"`
-	Root        c.Definition               `json:"root"`
-	Function    c.Definition               `json:"function"`
-	Input       map[string]json.RawMessage `json:"input"`
-	ImageID     string                     `json:"imageId"`
-	DeadlineAt  time.Time                  `json:"deadlineAt"`
+	Invocation  c.Invocation `json:"invocation"`
+	TenantID    string       `json:"tenantId"`
+	SubjectID   string       `json:"subjectId"`
+	RequestKey  string       `json:"requestKey"`
+	RequestHash string       `json:"requestHash"`
+	Root        c.Definition `json:"root"`
+	// Keep the original JSON key so existing persisted Function/Action records
+	// remain readable. The definition retains its real Action or Function kind.
+	Implementation c.Definition               `json:"function"`
+	Input          map[string]json.RawMessage `json:"input"`
+	ImageID        string                     `json:"imageId"`
+	DeadlineAt     time.Time                  `json:"deadlineAt"`
 }
 
 type Store interface {

@@ -4,12 +4,12 @@
 
 ## 当前能力
 
-- 同步执行已生效、`sideEffects: none`、配置 `runtime` 的 Python Function；Action 可以绑定签名相同的已生效 Function。中文参数名、类型、空值、默认值和必填语义须一致，参数 ID 可以各自独立。
+- 同步执行已生效、`sideEffects: none`、配置`runtime`的Python Function及直接源码Action。Action也可使用`functionId`绑定签名相同的已生效Function；绑定双方的中文参数名、类型、空值、默认值和必填语义须一致，参数ID可以各自独立。Action的内联源码、函数引用和制品引用互斥。
 - Python入口由作者声明，工作台初始示例为`main`，接受并返回以声明中文参数名为键的字典。HTTP输入、输出使用稳定参数ID。int64、decimal始终以字符串传递，Python计算可显式使用`int`、`decimal.Decimal`，输出再转为字符串。
 - 输入输出支持 string、text、longtext、uuid、int64、decimal、boolean、timestamp；单次输入/输出仍受 256 KiB 总预算。枚举引用、存储映射与复杂参数类型明确拒绝。可选输入缺省时不注入键，有默认值则使用默认值；null 仅在 nullable 时接受。
-- 执行记录按租户与发起用户隔离；记录实际源码、定义上下文、输入、源码 SHA-256 与实际容器 image ID。HTTP 仅返回状态、输出、摘要及安全错误，不返回源码、原始输入、stdout、stderr 或 traceback。
+- 执行记录按租户与发起用户隔离；记录真实调用目标、实际源码、定义上下文、输入、源码SHA-256与实际容器image ID。直接源码Action保存自己的实现快照，绑定Action另外保存Function上下文。HTTP仅返回状态、输出、摘要及安全错误，不返回源码、原始输入、stdout、stderr或traceback。
 
-未开放 JavaScript、自定义镜像、容器业务程序、HTTP/gRPC 外部实现、第三方依赖安装、网络访问、业务数据读写、模型 API 调用、事件/周期调度、后台队列、自动重试和调用委托。此前无 runtime 的 Action/Function 仍可登记；业务调用会明确拒绝。
+未开放JavaScript、自定义镜像、容器业务程序、HTTP/gRPC外部实现、第三方依赖安装、网络访问、业务数据读写、模型API调用、事件/周期调度、后台队列、自动重试和调用委托。既无runtime也未绑定可执行Function的定义仍可登记；业务调用会明确拒绝。
 
 ## HTTP 入口
 
@@ -17,11 +17,13 @@
 | --- | --- |
 | `GET /healthz` | 进程存活 |
 | `GET /readyz` | 存储表、Docker 与本地 Python 镜像就绪 |
-| `GET /execution/capabilities` | 已登录用户读取运行器实际可用状态 |
+| `GET /execution/capabilities` | 已登录用户读取运行器实际可用状态；`actionInlineSource=true`表示支持Action直接源码 |
 | `POST /execution/invocations` | 同步发起计算，必须带 `Idempotency-Key` |
 | `GET /execution/invocations/{id}` | 当前发起用户按 ID 核对状态与读取结果 |
 
-公共入口沿用 HttpOnly Cookie、Origin 与 CSRF 规则。服务凭据不能替代用户调用。调用 Function 需要 `function.invoke`；调用 Action 同时需要该 Action 的 `action.invoke` 和绑定 Function 的 `function.invoke`。首批操作均为整项授权，不接受行条件或参数字段投影。定义读取与调用权限分别维护，未自动为已有租户策略追加授权。
+能力响应中的`actionRequiresFunctionInvoke=true`是旧兼容字段，仅指绑定Function的Action；直接源码Action的支持由`actionInlineSource`表达。
+
+公共入口沿用HttpOnly Cookie、Origin与CSRF规则。服务凭据不能替代用户调用。Function、直接源码Action、绑定Action的调用授权统一见[权限设计](../../docs/权限/权限设计.md#首批纯计算调用2026-11-07已实现)；本服务在受理、启动及结果交付时执行对应检查，不根据源码编辑权限推导调用许可。未自动为已有租户策略追加授权。
 
 受理、实际启动、结果交付、GET 和幂等重放均复核当前会话、当前权限和当前定义。退出注销即使账号仍启用，也不能交付旧会话的结果。定义上下文变化后，旧结果返回 `409 definition_changed`，保守拒绝整份结果；不按旧文本重新解析同名定义。此检查不等于跨服务原子即时撤权。
 

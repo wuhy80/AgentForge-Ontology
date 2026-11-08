@@ -161,7 +161,17 @@ func wholeFields(fields []string) bool {
 	return len(fields) == 0 || len(fields) == 1 && fields[0] == "*"
 }
 
-type plan struct{ root, fn c.Definition }
+type plan struct{ root, implementation c.Definition }
+
+func definitionCallable(d c.Definition) *c.Callable {
+	if d.Kind == c.KindFunction {
+		return d.Function
+	}
+	if d.Kind == c.KindAction {
+		return d.Action
+	}
+	return nil
+}
 
 func (h *handler) plan(ctx context.Context, p c.Principal, id string) (plan, error) {
 	var out plan
@@ -180,39 +190,46 @@ func (h *handler) plan(ctx context.Context, p c.Principal, id string) (plan, err
 		return out, err
 	}
 	if out.root.Kind == c.KindAction {
-		if out.root.Action == nil || out.root.Action.FunctionID == "" || out.root.Action.Runtime != nil || out.root.Action.SideEffects != "none" {
-			return out, problem(422, "unsupported_action", "首批仅执行绑定无副作用Function的Action")
+		if out.root.Action == nil || out.root.Action.SideEffects != "none" || out.root.Action.ArtifactRef != "" {
+			return out, problem(422, "unsupported_action", "仅执行内联Python或绑定无副作用Function的Action")
+		}
+		if out.root.Action.Runtime != nil {
+			out.implementation = out.root
+			return out, executable(out.implementation)
+		}
+		if out.root.Action.FunctionID == "" {
+			return out, problem(422, "runtime_missing", "此Action尚未配置Python源码或绑定Function")
 		}
 		fn, err := h.cfg.Metadata.Current(ctx, p.TenantID, out.root.Action.FunctionID)
 		if err != nil {
 			return out, err
 		}
-		out.fn = fn.Definition
-		if fn.Status != "active" || out.fn.Kind != c.KindFunction || out.fn.Function == nil || out.fn.TenantID != p.TenantID || out.fn.ID != out.root.Action.FunctionID {
+		out.implementation = fn.Definition
+		if fn.Status != "active" || out.implementation.Kind != c.KindFunction || out.implementation.Function == nil || out.implementation.TenantID != p.TenantID || out.implementation.ID != out.root.Action.FunctionID {
 			return out, problem(422, "invalid_function", "动作实现必须是同租户已生效Function")
 		}
-		if err := h.authorize(ctx, p, c.KindFunction, out.fn.ID); err != nil {
+		if err := h.authorize(ctx, p, c.KindFunction, out.implementation.ID); err != nil {
 			return out, err
 		}
-		if !sameSignature(out.root.Action.Input, out.fn.Function.Input) || !sameSignature(out.root.Action.Output, out.fn.Function.Output) {
+		if !sameSignature(out.root.Action.Input, out.implementation.Function.Input) || !sameSignature(out.root.Action.Output, out.implementation.Function.Output) {
 			return out, problem(422, "signature_mismatch", "动作与实现函数的输入输出声明不一致")
 		}
 	} else {
-		out.fn = out.root
+		out.implementation = out.root
 	}
-	if err := executable(out.fn); err != nil {
+	if err := executable(out.implementation); err != nil {
 		return out, err
 	}
 	return out, nil
 }
 
-func executable(fn c.Definition) error {
-	if fn.Kind != c.KindFunction || fn.Function == nil || fn.Function.Runtime == nil {
-		return problem(422, "runtime_missing", "此Function尚未配置Python实现")
+func executable(definition c.Definition) error {
+	callable := definitionCallable(definition)
+	if callable == nil || callable.Runtime == nil {
+		return problem(422, "runtime_missing", "此定义尚未配置Python实现")
 	}
-	callable := fn.Function
 	runtime := callable.Runtime
-	if callable.SideEffects != "none" || callable.FunctionID != "" || callable.ArtifactRef != "" || len(callable.TargetSchemaIDs) > 0 {
+	if callable.SideEffects != "none" || callable.FunctionID != "" || callable.ArtifactRef != "" || definition.Kind == c.KindFunction && len(callable.TargetSchemaIDs) > 0 {
 		return problem(422, "unsupported_runtime", "首批仅支持无副作用的内联Python计算")
 	}
 	if c.ValidateScriptRuntime(runtime) != nil {
@@ -246,7 +263,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p c.Princ
 		_, err := h.cfg.Runner.Ready(ctx)
 		available = err == nil
 	}
-	out := map[string]any{"invocation": available, "runtimes": []string{"python"}, "synchronous": true, "async": false, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionRequiresFunctionInvoke": true}
+	out := map[string]any{"invocation": available, "runtimes": []string{"python"}, "synchronous": true, "async": false, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionInlineSource": true, "actionRequiresFunctionInvoke": true}
 	if !available {
 		out["reason"] = "Python运行器或执行存储尚未就绪"
 	}
@@ -301,10 +318,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	if err != nil {
 		return err
 	}
-	rootCallable := initial.root.Function
-	if initial.root.Action != nil {
-		rootCallable = initial.root.Action
-	}
+	rootCallable := definitionCallable(initial.root)
+	runtime := definitionCallable(initial.implementation).Runtime
 	namedInput, err := buildInput(rootCallable.Input, request.Input)
 	if err != nil {
 		return err
@@ -316,7 +331,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		return problem(503, "runtime_unavailable", "Python运行器尚未就绪")
 	}
 	now := time.Now().UTC()
-	record := Record{TenantID: p.TenantID, SubjectID: p.Subject, RequestKey: key, RequestHash: hash, Root: initial.root, Function: initial.fn, Input: namedInput, ImageID: imageID, DeadlineAt: now.Add(time.Duration(initial.fn.Function.Runtime.TimeoutSeconds)*time.Second + 90*time.Second), Invocation: c.Invocation{ID: c.NewID(), DefinitionID: initial.root.ID, DefinitionName: initial.root.Name, Kind: initial.root.Kind, Status: "running", CreatedAt: now.Format(time.RFC3339Nano), CodeDigest: sourceDigest(initial.fn.Function.Runtime.Source)}}
+	record := Record{TenantID: p.TenantID, SubjectID: p.Subject, RequestKey: key, RequestHash: hash, Root: initial.root, Implementation: initial.implementation, Input: namedInput, ImageID: imageID, DeadlineAt: now.Add(time.Duration(runtime.TimeoutSeconds)*time.Second + 90*time.Second), Invocation: c.Invocation{ID: c.NewID(), DefinitionID: initial.root.ID, DefinitionName: initial.root.Name, Kind: initial.root.Kind, Status: "running", CreatedAt: now.Format(time.RFC3339Nano), CodeDigest: sourceDigest(runtime.Source)}}
 	// Recheck after setup and immediately before admission; no saved allow or
 	// user-supplied viaAction context can substitute for these current checks.
 	if err := h.checkRecord(r.Context(), r, p, record); err != nil {
@@ -341,8 +356,8 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		record.Invocation.Error = &c.Error{Code: "authorization_changed", Message: "启动前当前身份、授权或定义已改变"}
 		return h.finish(w, r, p, record, 201)
 	}
-	runCtx, stop := context.WithTimeout(r.Context(), time.Duration(initial.fn.Function.Runtime.TimeoutSeconds)*time.Second)
-	output, runErr := h.cfg.Runner.Run(runCtx, initial.fn.Function.Runtime, namedInput, imageID)
+	runCtx, stop := context.WithTimeout(r.Context(), time.Duration(runtime.TimeoutSeconds)*time.Second)
+	output, runErr := h.cfg.Runner.Run(runCtx, runtime, namedInput, imageID)
 	stop()
 	if runErr != nil {
 		var re *RunError
@@ -399,7 +414,7 @@ func (h *handler) checkRecord(ctx context.Context, r *http.Request, p c.Principa
 	if err != nil {
 		return err
 	}
-	if digest(current.root) != digest(record.Root) || digest(current.fn) != digest(record.Function) {
+	if digest(current.root) != digest(record.Root) || digest(current.implementation) != digest(record.Implementation) {
 		return problem(409, "definition_changed", "当前定义已改变，无法按原执行上下文安全交付结果；请使用新请求标识重新运行")
 	}
 	return nil
