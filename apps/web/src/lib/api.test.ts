@@ -67,6 +67,25 @@ describe('ApiClient transport and complete directories', () => {
 })
 
 describe('ApiClient writes and errors', () => {
+  it('manages personal connections and OAuth consent without persisting bearer credentials', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json({ data: [], resource: 'http://127.0.0.1:18084/mcp', issuer: 'http://127.0.0.1:18080' }))
+      .mockResolvedValueOnce(json({ connection: { id: 'connection', name: 'dsh', scopes: ['ontology:discover'], createdAt: 1, expiresAt: 2, kind: 'personal' }, accessToken: 'mcp_secret' }, 201))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(json({ client: { clientId: 'client', name: 'dsh', redirectUris: ['https://client.example/cb'] }, scopes: ['ontology:discover'], resource: 'http://127.0.0.1:18084/mcp' }))
+      .mockResolvedValueOnce(json({ redirectUri: 'https://client.example/cb?code=one&state=two' }))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient()
+    api.setCSRFToken('csrf')
+    const request = { client_id: 'client', redirect_uri: 'https://client.example/cb', response_type: 'code', code_challenge_method: 'S256', code_challenge: 'A'.repeat(43), scope: 'ontology:discover', state: 'two', resource: 'http://127.0.0.1:18084/mcp' }
+    await api.listConnections(); await api.createConnection({ name: 'dsh', scopes: ['ontology:discover'], expiresInSeconds: 3600 }); await api.revokeConnection('connection')
+    await api.previewOAuth(request); await api.authorizeOAuth(request, true)
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual(['/api/metadata/auth/connections', '/api/metadata/auth/connections', '/api/metadata/auth/connections/connection', '/api/metadata/auth/oauth/preview', '/api/metadata/auth/oauth/authorize'])
+    expect(JSON.parse(fetcher.mock.calls[4][1].body)).toMatchObject({ ...request, approve: true })
+    expect(fetcher.mock.calls[4][1].credentials).toBe('same-origin')
+    expect(fetcher.mock.calls[4][1].body).not.toContain('mcp_secret')
+  })
+
   it('数据库查询和静态SQL工具均携带配置凭证、CSRF及实际行数上限', async () => {
     const fetcher = vi.fn().mockImplementation(async () => json({ valid: true, sql: 'SELECT * FROM orders;', dialect: 'mysql', message: '检查通过' }))
     vi.stubGlobal('fetch', fetcher)

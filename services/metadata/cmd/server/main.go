@@ -52,6 +52,9 @@ func run() error {
 		origin = "http://127.0.0.1:5173"
 	}
 	accounts := identity.NewStore(e.DB(), &platform.OPAAuthorizer{URL: os.Getenv("ONTOLOGY_OPA_URL"), BearerToken: os.Getenv("ONTOLOGY_OPA_TOKEN")}, origin)
+	if err := accounts.ConfigureExternal(os.Getenv("ONTOLOGY_AUTH_ISSUER"), os.Getenv("ONTOLOGY_MCP_RESOURCE")); err != nil {
+		return err
+	}
 	if *bootstrap {
 		return accounts.Bootstrap(ctx, os.Getenv("ONTOLOGY_BOOTSTRAP_TENANT"), os.Getenv("ONTOLOGY_BOOTSTRAP_USERNAME"), os.Getenv("ONTOLOGY_BOOTSTRAP_PASSWORD"))
 	}
@@ -59,7 +62,10 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.Handle("/metadata/auth/", accounts.NewHandler())
 	mux.Handle("/metadata/admin/", accounts.NewHandler())
+	mux.Handle("/oauth/", accounts.NewHandler())
+	mux.Handle("/.well-known/oauth-authorization-server", accounts.NewHandler())
 	mux.Handle("POST /internal/identity/session", internalSession(service, accounts))
+	mux.Handle("POST /internal/metadata/query-directory", metadata.NewQueryDirectoryHandler(service, accounts, app))
 	mux.Handle("POST /internal/authorization/decision", internalDecision(service, accounts))
 	mux.Handle("/", app)
 	addr := os.Getenv("ONTOLOGY_LISTEN")

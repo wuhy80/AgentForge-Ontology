@@ -22,6 +22,8 @@ go vet ./...
 | `ONTOLOGY_OPA_TOKEN` | 可选的 OPA 服务凭据 |
 | `ONTOLOGY_DATA_URL` | Data 服务地址 |
 | `ONTOLOGY_PUBLIC_ORIGIN` | 工作台允许的完整来源，默认 `http://127.0.0.1:5173`；须与浏览器实际地址一致 |
+| `ONTOLOGY_AUTH_ISSUER` | OAuth 对外 issuer；本地 MCP 为 `http://127.0.0.1:18084`，须与网关配置一致 |
+| `ONTOLOGY_MCP_RESOURCE` | 外部凭据绑定的资源，默认 `http://127.0.0.1:18084/mcp`，须与网关配置一致 |
 | `ONTOLOGY_LISTEN` | 监听地址，默认 `127.0.0.1:18080` |
 | `ONTOLOGY_BOOTSTRAP_TENANT`、`ONTOLOGY_BOOTSTRAP_USERNAME`、`ONTOLOGY_BOOTSTRAP_PASSWORD` | 仅显式执行 `-bootstrap-admin` 时使用的初始租户及管理员账号 |
 
@@ -47,6 +49,9 @@ go run ./cmd/server
 | `GET /metadata/capabilities` | 当前开放能力与限制；Schema双向模式及 `display-and-mapped-additions` 更新边界 |
 | `POST /metadata/auth/login`、`GET /metadata/auth/session`、`POST /metadata/auth/logout` | 账号登录、恢复当前会话及服务端注销 |
 | `PUT /metadata/auth/password` | 核对当前密码、修改密码并旋转会话 |
+| `GET/POST /metadata/auth/connections`、`DELETE /metadata/auth/connections/{id}` | 当前用户查看、创建和撤销个人外部连接；密钥仅在创建响应中返回一次 |
+| `GET /.well-known/oauth-authorization-server`、`/oauth/authorize`、`/oauth/register`、`/oauth/token`、`/oauth/revoke` | OAuth 发现、PKCE 授权及撤销；具体方法和协议见 [identity](identity/README.md#外部连接与-mcp-oauth2026-11-08-已接入) |
+| `POST /metadata/auth/oauth/preview`、`POST /metadata/auth/oauth/authorize` | 当前 Cookie 会话预览并决定外部应用授权，沿用 Origin 与 CSRF |
 | `/metadata/admin/users`、`/metadata/admin/roles` | 当前租户的用户、启停、密码重置及角色管理 |
 | `/metadata/admin/user-groups`、`/metadata/admin/user-groups/{id}` | 租户用户组、组角色及成员；列表/创建使用GET/POST，详情/更新使用GET/PUT，更新须带强If-Match |
 | `/metadata/admin/policy`、`POST /metadata/admin/policy/publish` | 权限策略草稿及显式生效 |
@@ -62,8 +67,11 @@ go run ./cmd/server
 | `GET /metadata/publications/{id}` | 核对操作状态及恢复进度 |
 | `GET /metadata/resolve?category=分类名&name=定义名&kind=schema` | 中文名称解析；kind 可选 |
 | `GET /metadata/schemas/{id}/links` | 发现正反方向，按 Link ID 与 direction 定位 |
+| `GET /metadata/callables`、`GET /metadata/callables/{id}` | 按当前调用权限发现最小 Action/Function 签名，不返回源码或私有实现 |
 
 `GET current`、`GET draft` 和 `GET resolve` 是内部服务凭据唯一可访问的业务路径；必须同时提供 `X-Tenant-ID`。精确草稿读取供Execution试运行，Execution独立复核真实调用者的编辑与调用权限；服务凭据不能编辑、发布或替代普通用户发起计算。内部身份核对及权限决策分别通过受服务凭据保护的 `/internal/identity/session`、`/internal/authorization/decision` 提供给Data/Execution。JSON `etag` 为裸并发凭证，HTTP `ETag` 和 `If-Match` 使用双引号包围凭证。
+
+MCP 外部 Bearer 仅开放受限发现、查询和当前纯计算路由，每次由身份服务恢复真实用户并核验范围，继续执行业务权限。`POST /internal/metadata/query-directory` 是 Data 使用的窄内部目录桥，同时校验服务凭据和真实调用者；它不授予外部凭据读取完整定义、源码或物理映射的权限。外部认证协议见 [identity](identity/README.md#外部连接与-mcp-oauth2026-11-08-已接入)，客户端配置见 [MCP 服务](../mcp/README.md)。
 
 组织及定义列表默认100条、最多200条，使用返回的 `nextCursor` 作为下一次 `after`。这与 Data 的查询游标分别处理。
 

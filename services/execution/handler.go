@@ -347,6 +347,9 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	if request.DraftETag != "" && !draftETagPattern.MatchString(request.DraftETag) {
 		return problem(400, "invalid_draft_etag", "草稿并发凭证须为已保存草稿的ETag")
 	}
+	if request.DraftETag != "" && platform.ValidAccessToken(platform.Bearer(r)) {
+		return problem(403, "connection_scope_denied", "外部连接仅允许调用当前生效定义，不允许草稿试运行")
+	}
 	hash := digest(request)
 	previous, err := h.cfg.Store.FindKey(r.Context(), p.TenantID, p.Subject, key)
 	if err == nil {
@@ -471,6 +474,9 @@ func (h *handler) checkRecord(ctx context.Context, r *http.Request, p c.Principa
 	var current plan
 	var err error
 	if record.Invocation.Mode == c.InvocationModeDraft {
+		if platform.ValidAccessToken(platform.Bearer(r)) {
+			return problem(403, "connection_scope_denied", "外部连接不允许读取草稿执行结果")
+		}
 		if !draftETagPattern.MatchString(record.Invocation.DraftETag) {
 			return problem(409, "invalid_record", "草稿执行记录的并发凭证无效")
 		}

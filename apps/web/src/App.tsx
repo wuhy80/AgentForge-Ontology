@@ -20,6 +20,7 @@ import {
   Sparkles,
   Workflow,
   Users,
+  KeyRound,
 } from 'lucide-react'
 import { ApiClient, ApiError } from './lib/api'
 import type { DataCapabilities, DefinitionRecord, Kind, MetadataCapabilities, Organization, Session as AccountSession } from './lib/types'
@@ -31,11 +32,13 @@ import { Dialog } from './components/Dialog'
 import { AdminPage } from './features/admin/AdminPage'
 import { OrganizationsPage } from './features/organizations/OrganizationsPage'
 import { SourcesPage } from './features/sources/SourcesPage'
+import { ConnectionsPage } from './features/connections/ConnectionsPage'
+import { OAuthConsentPage } from './features/connections/OAuthConsentPage'
 
 const QueryPage = lazy(() => import('./features/query/QueryPage').then((module) => ({ default: module.QueryPage })))
 const OntologyPage = lazy(() => import('./features/ontology/OntologyPage').then((module) => ({ default: module.OntologyPage })))
 
-type View = 'overview' | 'ontology' | 'organizations' | 'sources' | 'models' | 'query' | 'admin'
+type View = 'overview' | 'ontology' | 'organizations' | 'sources' | 'models' | 'query' | 'admin' | 'connections' | 'oauth'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
 type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
@@ -57,12 +60,13 @@ const navGroups: { name: string; items: NavItem[] }[] = [
     { route: 'query', view: 'query', name: '数据探索', icon: Search },
     { route: 'organizations', view: 'organizations', name: '分类与分组', icon: FolderTree },
     { route: 'admin', view: 'admin', name: '用户与权限', icon: Users, administrator: true },
+    { route: 'connections', view: 'connections', name: '外部连接', icon: KeyRound },
   ] },
 ]
 
 function currentView(route = window.location.hash.slice(1)): View {
   const hash = route.split(/[/?]/)[0]
-  return hash === 'ontology' || hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' ? hash : 'overview'
+  return hash === 'ontology' || hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' || hash === 'connections' || hash === 'oauth' ? hash : 'overview'
 }
 
 function Brand({ light = false }: { light?: boolean }) {
@@ -426,7 +430,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
   const schemas = scopedCurrent.filter((record) => record.definition.kind === 'schema')
   const modelKind = modelRouteKind(route, entries)
   const isCurrentNav = (item: NavItem) => view === item.view && (!item.kind || item.kind === modelKind)
-  const title = navGroups.flatMap((group) => group.items).find(isCurrentNav)!.name
+  const title = navGroups.flatMap((group) => group.items).find(isCurrentNav)?.name ?? (view === 'oauth' ? '应用授权' : view === 'connections' ? '外部连接' : '工作空间')
   return (
     <div className="app-layout">
       <a
@@ -620,6 +624,9 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
               <section hidden={view !== 'sources'}>
                 <SourcesPage api={session.api} administrator={session.account.user.administrator} active={view === 'sources'} />
               </section>
+              <section hidden={view !== 'connections'}>
+                <ConnectionsPage api={session.api} />
+              </section>
               <section hidden={view !== 'query'}>
                 <DialogScope active={view === 'query'}>
                   {queryVisited.current && <Suspense fallback={<p className="muted">正在加载数据查询…</p>}><QueryPage
@@ -636,6 +643,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
               {view === 'admin' && (session.account.user.administrator
                 ? <AdminPage api={session.api} session={session.account} categories={categories} definitions={current} onSessionChanged={() => { void session.api.getSession().then(onAccountUpdated).catch(() => {}) }} />
                 : <div className="notice notice-error" role="alert">你没有用户与权限管理权限。</div>)}
+              {view === 'oauth' && <OAuthConsentPage api={session.api} account={session.account} route={route} disconnecting={disconnecting} onDisconnect={onDisconnect} />}
             </>
           )}
         </main>

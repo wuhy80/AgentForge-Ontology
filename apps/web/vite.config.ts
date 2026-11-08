@@ -4,6 +4,10 @@ import react from '@vitejs/plugin-react'
 // Only the public service prefixes are proxied. The browser never receives a
 // service token, signing key, database credential or an internal API route.
 const proxy = {
+  // OAuth authorization/discovery endpoints are public metadata endpoints;
+  // they must not inherit a browser API token or be rewritten through MCP.
+  '/oauth': { target: 'http://127.0.0.1:18080' },
+  '/.well-known': { target: 'http://127.0.0.1:18080' },
   '/api/metadata': { target: 'http://127.0.0.1:18080', rewrite: (path: string) => path.replace(/^\/api/, '') },
   '/api/data': { target: 'http://127.0.0.1:18081', rewrite: (path: string) => path.replace(/^\/api/, '') },
   '/api/execution': { target: 'http://127.0.0.1:18082', rewrite: (path: string) => path.replace(/^\/api/, '') },

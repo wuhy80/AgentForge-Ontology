@@ -3,7 +3,7 @@ package identity
 import "github.com/wuhy80/AgentForge-Ontology/libs/storage"
 
 // Migrations must be appended to the Metadata migration set and run explicitly.
-var Migrations = []storage.Migration{
+var Migrations = append([]storage.Migration{
 	{ID: "008_identity_tenants", SQL: `CREATE TABLE af_identity_tenants (
  tenant_id VARBINARY(128) NOT NULL PRIMARY KEY,
  authorization_state CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
@@ -72,4 +72,4 @@ var Migrations = []storage.Migration{
  PRIMARY KEY (tenant_id,group_id,user_id),
  KEY ix_identity_user_group_members_user (tenant_id,user_id,group_id)
 ) ENGINE=InnoDB`},
-}
+}, externalMigrations...)

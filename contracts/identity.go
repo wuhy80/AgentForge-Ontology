@@ -21,9 +21,11 @@ type Role struct {
 }
 
 type Session struct {
-	User      User   `json:"user"`
-	ExpiresAt int64  `json:"expiresAt"`
-	CSRFToken string `json:"csrfToken"`
+	User          User     `json:"user"`
+	ExpiresAt     int64    `json:"expiresAt"`
+	CSRFToken     string   `json:"csrfToken"`
+	AccessScopes  []string `json:"accessScopes,omitempty"`
+	AccessTokenID string   `json:"accessTokenId,omitempty"`
 }
 
 type LoginRequest struct {
@@ -116,10 +118,13 @@ type RuntimePolicy struct {
 }
 
 type SessionCheck struct {
-	Token     string `json:"token"`
-	CSRFToken string `json:"csrfToken"`
-	Method    string `json:"method"`
-	Origin    string `json:"origin"`
+	Token       string `json:"token"`
+	CSRFToken   string `json:"csrfToken"`
+	Method      string `json:"method"`
+	Origin      string `json:"origin"`
+	AccessToken string `json:"accessToken,omitempty"`
+	Path        string `json:"path,omitempty"`
+	Resource    string `json:"resource,omitempty"`
 }
 
 type AuthorizationCheck struct {

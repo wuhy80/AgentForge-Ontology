@@ -34,6 +34,8 @@ Go工具请求为`{"definitionId":"已保存定义ID","operation":"check或forma
 
 公共入口沿用HttpOnly Cookie、Origin与CSRF规则。服务凭据不能替代用户调用。Function、直接源码Action、绑定Action的调用授权统一见[权限设计](../../docs/权限/权限设计.md#首批纯计算调用2026-11-07已实现)；本服务在受理、启动及结果交付时执行对应检查，不根据源码编辑权限推导调用许可。未自动为已有租户策略追加授权。
 
+MCP 外部 Bearer 另允许读取执行能力、发起当前态纯计算及读取本人结果，由 Metadata 核验 `ontology:invoke` 范围和真实用户；执行仍复用上述业务授权、幂等及交付前复核。外部凭据不允许草稿试运行或源码工具，禁止与 Cookie 混用，协议与配置见[MCP接入](../../docs/MCP接入.md)及[身份服务](../metadata/identity/README.md#外部连接与-mcp-oauth2026-11-08-已接入)。
+
 受理、实际启动、结果交付、GET 和幂等重放均复核当前会话、当前权限和当前定义。退出注销即使账号仍启用，也不能交付旧会话的结果。定义上下文变化后，旧结果返回 `409 definition_changed`，保守拒绝整份结果；不按旧文本重新解析同名定义。此检查不等于跨服务原子即时撤权。
 
 POST 请求使用 `contracts.InvocationRequest`，例如：
@@ -94,6 +96,8 @@ go run ./cmd/server
 ## 验证
 
 模块测试涵盖稳定参数映射、精确数值、类型拒绝、Action 双重授权、启动/结果/幂等重放的当前身份权限检查、源码变更后旧结果拒绝、并发限制、过期记录终态及容器清理失败阻断/恢复。
+
+`TestExternalConnectionRejectsDraftExecutionReplayAndResults` 验证同一用户的外部凭据不能执行草稿、重放工作台草稿请求或读取其结果，当前态计算及结果仍可用；MCP 真实服务测试另验证直接 Execution 请求的草稿拒绝。
 
 草稿专项覆盖未发布Function、Action绑定当前Function、edit与invoke联合授权、ETag变更/发布后的拒绝、当前态不受草稿影响、诊断坐标和受控消息；Metadata/identity测试覆盖样例保存发布与对应类型草稿资源授权。
 

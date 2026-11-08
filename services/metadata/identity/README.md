@@ -8,6 +8,14 @@
 
 管理路由包括 users、user-groups、roles、policy、policy/publish、simulate 和 audit；用户/角色列表返回 `{data:[]}`，超过2000条明确失败。审计仅返回最近200条，以 `{data:[],hasMore:true|false}` 明确是否还有更早记录。修改用户/用户组/角色及策略保存/生效须带双引号包围的强 If-Match，缺失返回428、冲突返回412。策略草稿不改变当前授权，生效、用户及角色变更在同一事务更新授权状态并记录无密码/会话值的审计。策略模拟不执行数据读写。
 
+## 外部连接与 MCP OAuth（2026-11-08 已接入）
+
+显式执行 Metadata 迁移 `015_identity_access_connections`、`016_identity_oauth_clients`、`017_identity_oauth_codes` 后，已登录用户可通过 `GET/POST /metadata/auth/connections` 查看或创建个人外部连接，`DELETE /metadata/auth/connections/{id}` 撤销。创建请求为 `{name,scopes,expiresInSeconds}`，有效期限制为1小时至30天，范围固定为 `ontology:discover`、`ontology:query`、`ontology:invoke`；query/invoke 必须同时包含 discover。成功创建只在响应中返回一次 `mcp_<64位小写十六进制>`，数据库只保存摘要及用户/有效角色快照，列表永不返回密钥。凭据绑定租户和用户，账号停用、用户 ETag/直接角色/启用用户组角色变化、过期或撤销后失效；每次请求仍复核当前服务端授权。外部 Bearer 仅允许 MCP 所需的公开能力路由，不接受 Cookie 与 Bearer 混用，也不能调用管理、编辑、草稿、数据源或源码工具。
+
+OAuth 授权服务器端点由 `ONTOLOGY_AUTH_ISSUER` 配置（缺省为工作台来源），MCP 资源由 `ONTOLOGY_MCP_RESOURCE` 配置（缺省 `http://127.0.0.1:18084/mcp`）。`GET /.well-known/oauth-authorization-server` 发布 issuer、authorize/token/register/revoke、S256 PKCE 及三类范围；`POST /oauth/register` 只接受 HTTPS 或 localhost/127.0.0.1/[::1] 回环 HTTP 回调且不允许用户信息、查询或片段。授权码流程仅支持 `authorization_code`，授权码一次性、5分钟有效，Token endpoint 必须校验客户端、精确回调地址、S256 verifier、资源受众及用户/角色快照；access token 有效1小时，refresh token 明确不支持。浏览器同意页面使用 `POST /metadata/auth/oauth/preview` 和 `POST /metadata/auth/oauth/authorize`，均沿用当前会话、Origin 与 CSRF，服务端返回已校验的 `redirectUri`。MCP 网关应代理 OAuth 公开端点，并在下游按真实用户权限复核，不能以服务凭据代替用户。
+
+2026-11-08，`TestMySQLExternalConnectionsAndOAuth` 已通过真实 MySQL 验证连接 scope、目录桥、跨租户撤销拒绝、资源绑定、PKCE、授权拒绝、授权码过期/重放，以及角色变化和账号停用失效；官方 SDK 与真实浏览器结果统一见[MCP接入](../../../docs/MCP接入.md#6-验证与验收)。
+
 身份用户组支持 `GET/POST /metadata/admin/user-groups`、`GET/PUT /metadata/admin/user-groups/{id}`，列表为 `{data:[]}`，单项使用 `contracts.UserGroup`（id、name、description、enabled、roleIds、userIds、etag），写入使用 `contracts.UserGroupInput`。名称按 NFC 与大小写折叠在当前租户用户组内唯一，名称冲突返回409；用户组、账号、角色各自拥有名称空间。该身份目录与 Metadata 定义组织的 `Group` 独立。当前不提供嵌套、删除或自助加组，未知字段返回400；成员与角色必须属于当前租户，停用账号可登记为成员但不获得授权。组成员关系只在用户组入口维护，用户与会话的 `roleIds` 始终仅表示直接角色。
 
 实际授权与策略模拟共用有效角色计算：直接角色加上全部启用用户组角色，去重后最多64个；每个用户最多加入64组，停用组同样计入。每组最多64角色、256成员；每租户最多2000用户组、20000条成员引用。组写入在租户事务锁内验证完整结果与用户合并预算，直接角色更新也检查合并预算；超限返回422并回滚整个事务，不静默截断。组列表在超过目录预算时同样返回422。组不授予管理员标记，不能安全合并的多组/多角色字段与条件授权仍明确拒绝。

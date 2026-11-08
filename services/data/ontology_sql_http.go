@@ -1,6 +1,7 @@
 package data
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
+	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 )
 
 const sqlDirectoryBudget = 1000
@@ -281,9 +283,9 @@ func validateOntologySQLDecision(d c.Definition, decision c.Decision) error {
 	return validateOntologySQLCapabilities(d, decision, c.QuerySpec{})
 }
 
-// Public directory reads deliberately retain the caller's identity. The service
-// credential, caller-supplied tenant headers and private Metadata tables are not
-// used for discovering definitions or category names.
+// Directory reads retain the caller's identity. External tokens use the narrow
+// service-authenticated bridge, which checks that token and runs the same user
+// directory authorization; service credentials never substitute for the user.
 func (h *handler) sqlDirectoryGET(r *http.Request, path string, out any) error {
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, strings.TrimRight(h.cfg.MetadataURL, "/")+path, nil)
 	if err != nil {
@@ -293,6 +295,22 @@ func (h *handler) sqlDirectoryGET(r *http.Request, path string, out any) error {
 		if value := r.Header.Get(header); value != "" {
 			req.Header.Set(header, value)
 		}
+	}
+	if strings.HasPrefix(platform.Bearer(r), "mcp_") {
+		check, err := platform.SessionRequest(r)
+		if err != nil {
+			return problem(401, "unauthenticated", "无法确认外部连接身份")
+		}
+		body, err := json.Marshal(c.QueryDirectoryRequest{Check: check, Path: path})
+		if err != nil {
+			return err
+		}
+		req, err = http.NewRequestWithContext(r.Context(), http.MethodPost, strings.TrimRight(h.cfg.MetadataURL, "/")+"/internal/metadata/query-directory", bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+h.cfg.ServiceToken)
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {

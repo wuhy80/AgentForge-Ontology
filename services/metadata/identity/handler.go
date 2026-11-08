@@ -26,6 +26,7 @@ func (s *Store) NewHandler() http.Handler {
 	mux.HandleFunc("GET /metadata/auth/session", wrap(s.sessionHTTP))
 	mux.HandleFunc("POST /metadata/auth/logout", wrap(s.logoutHTTP))
 	mux.HandleFunc("PUT /metadata/auth/password", wrap(s.passwordHTTP))
+	s.registerExternalRoutes(mux, wrap)
 	mux.HandleFunc("GET /metadata/admin/users", wrap(s.listUsers))
 	mux.HandleFunc("POST /metadata/admin/users", wrap(s.createUser))
 	mux.HandleFunc("GET /metadata/admin/users/{id}", wrap(s.getUser))

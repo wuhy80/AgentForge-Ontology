@@ -30,6 +30,8 @@ type Store struct {
 	DB            *sql.DB
 	OPA           *platform.OPAAuthorizer
 	Origin        string
+	OAuthIssuer   string
+	MCPResource   string
 	loginMu       sync.Mutex
 	loginAttempts map[string]loginAttempt
 }

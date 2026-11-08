@@ -32,7 +32,7 @@ try {
     } else {
         foreach($name in $names|Where-Object{$_ -notin @('GOCACHE','GOWORK')}){[Environment]::SetEnvironmentVariable($name,$null,'Process')}
     }
-    foreach($module in @('contracts','libs/storage','libs/platform','services/metadata','services/data','services/execution','tests/integration','tools/storage_relocation')){
+    foreach($module in @('contracts','libs/storage','libs/platform','services/metadata','services/data','services/execution','services/mcp','tests/integration','tools/storage_relocation')){
         if($Integration){$env:MYSQL_TEST_DSN=if($module -eq 'services/data'){$env:ONTOLOGY_TEST_DATA_DSN}else{$env:ONTOLOGY_TEST_METADATA_DSN}}
         Push-Location(Join-Path $repoRoot $module)
         try {

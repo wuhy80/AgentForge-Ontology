@@ -7,6 +7,7 @@ import type {
   QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
   QueryPathsRequest, QueryPathsResult, QueryFieldInsertionRequest, QueryFieldInsertionResult,
 } from './types'
+import type { ConnectionDirectory, CreateConnection, CreatedConnection, OAuthAuthorization, OAuthPreview } from './external-auth'
 
 export class ApiError extends Error {
   readonly status: number
@@ -128,6 +129,20 @@ export class ApiClient {
   }
   changePassword(currentPassword: string, password: string): Promise<Session> {
     return this.readSession('/api/metadata/auth/password', { method: 'PUT', body: { currentPassword, password } })
+  }
+
+  listConnections(signal?: AbortSignal): Promise<ConnectionDirectory> { return this.request('/api/metadata/auth/connections', { signal }) }
+  createConnection(input: CreateConnection, signal?: AbortSignal): Promise<CreatedConnection> {
+    return this.request('/api/metadata/auth/connections', { method: 'POST', body: input, signal })
+  }
+  revokeConnection(id: string, signal?: AbortSignal): Promise<void> {
+    return this.request(`/api/metadata/auth/connections/${encodeURIComponent(id)}`, { method: 'DELETE', signal })
+  }
+  previewOAuth(input: OAuthAuthorization, signal?: AbortSignal): Promise<OAuthPreview> {
+    return this.request('/api/metadata/auth/oauth/preview', { method: 'POST', body: input, signal })
+  }
+  authorizeOAuth(input: OAuthAuthorization, approve: boolean, signal?: AbortSignal): Promise<{ redirectUri: string }> {
+    return this.request('/api/metadata/auth/oauth/authorize', { method: 'POST', body: { ...input, approve }, signal })
   }
 
   async listUsers(signal?: AbortSignal): Promise<User[]> {

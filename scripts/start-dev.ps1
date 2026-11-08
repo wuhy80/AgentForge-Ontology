@@ -47,7 +47,7 @@ if (-not (Test-Path -LiteralPath $adminFile)) {
 }
 $initialAdmin = Get-Content -LiteralPath $adminFile -Raw -Encoding UTF8 | ConvertFrom-Json
 
-$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD','ONTOLOGY_PYTHON_IMAGE','ONTOLOGY_JAVASCRIPT_IMAGE','ONTOLOGY_GO_IMAGE')
+$envNames = @('GOCACHE','GOWORK','ONTOLOGY_MYSQL_DSN','ONTOLOGY_AUTH_SECRET','ONTOLOGY_SERVICE_TOKEN','ONTOLOGY_CURSOR_SECRET','ONTOLOGY_DATA_SOURCE_KEY','ONTOLOGY_OPA_URL','ONTOLOGY_METADATA_URL','ONTOLOGY_DATA_URL','ONTOLOGY_EXECUTION_URL','ONTOLOGY_LISTEN','ONTOLOGY_PUBLIC_ORIGIN','ONTOLOGY_AUTH_ISSUER','ONTOLOGY_MCP_RESOURCE','ONTOLOGY_MCP_LISTEN','ONTOLOGY_MCP_ALLOWED_ORIGINS','ONTOLOGY_BOOTSTRAP_TENANT','ONTOLOGY_BOOTSTRAP_USERNAME','ONTOLOGY_BOOTSTRAP_PASSWORD','ONTOLOGY_PYTHON_IMAGE','ONTOLOGY_JAVASCRIPT_IMAGE','ONTOLOGY_GO_IMAGE')
 $savedEnvironment = @{}
 foreach ($name in $envNames) { $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 try {
@@ -60,7 +60,12 @@ try {
     $env:ONTOLOGY_OPA_URL = 'http://127.0.0.1:28181'
     $env:ONTOLOGY_METADATA_URL = 'http://127.0.0.1:18080'
     $env:ONTOLOGY_DATA_URL = 'http://127.0.0.1:18081'
+    $env:ONTOLOGY_EXECUTION_URL = 'http://127.0.0.1:18082'
     $env:ONTOLOGY_PUBLIC_ORIGIN = 'http://127.0.0.1:5173'
+    $env:ONTOLOGY_AUTH_ISSUER = 'http://127.0.0.1:18084'
+    $env:ONTOLOGY_MCP_RESOURCE = 'http://127.0.0.1:18084/mcp'
+    $env:ONTOLOGY_MCP_LISTEN = '127.0.0.1:18084'
+    $env:ONTOLOGY_MCP_ALLOWED_ORIGINS = $env:ONTOLOGY_PUBLIC_ORIGIN
     if (-not $env:ONTOLOGY_PYTHON_IMAGE) { $env:ONTOLOGY_PYTHON_IMAGE = 'python:3.12-alpine' }
     if (-not $env:ONTOLOGY_JAVASCRIPT_IMAGE) { $env:ONTOLOGY_JAVASCRIPT_IMAGE = 'node:22-alpine' }
     if (-not $env:ONTOLOGY_GO_IMAGE) { $env:ONTOLOGY_GO_IMAGE = 'agentforge-go:1.25' }
@@ -123,7 +128,15 @@ try {
         $processes[$service] = $process.Id
         $processes | ConvertTo-Json | Set-Content -LiteralPath $pidFile -Encoding UTF8
     }
-    foreach ($port in @(18080,18081,18082)) {
+    if (-not $processes.ContainsKey('mcp')) {
+        $binary = Join-Path $binRoot 'mcp.exe'
+        Push-Location (Join-Path $repoRoot 'services/mcp')
+        try { & go build -o $binary ./cmd/server; if ($LASTEXITCODE -ne 0) { throw 'mcp build failed' } } finally { Pop-Location }
+        $process = Start-Process -FilePath $binary -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $devRoot 'mcp.stdout.log') -RedirectStandardError (Join-Path $devRoot 'mcp.stderr.log')
+        $processes['mcp'] = $process.Id
+        $processes | ConvertTo-Json | Set-Content -LiteralPath $pidFile -Encoding UTF8
+    }
+    foreach ($port in @(18080,18081,18082,18084)) {
         $ready = $false
         for ($attempt=0; $attempt -lt 20; $attempt++) {
             try { $response = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/readyz" -TimeoutSec 2; if ($response.StatusCode -eq 200) { $ready = $true; break } } catch {}
@@ -131,13 +144,13 @@ try {
         }
         if (-not $ready) { throw "Service on $port is not ready. Inspect .cache/dev/*.stderr.log." }
     }
-    foreach ($service in @('metadata','data','execution')) {
+    foreach ($service in @('metadata','data','execution','mcp')) {
         $process = Get-Process -Id $processes[$service] -ErrorAction SilentlyContinue
         if (-not $process -or $process.Path -ne (Join-Path $binRoot "$service.exe")) {
             throw "Cannot verify the $service server process. Another application may own the port; inspect .cache/dev/*.stderr.log."
         }
     }
-    Write-Output 'Metadata: http://127.0.0.1:18080 ; Data: http://127.0.0.1:18081 ; Execution: http://127.0.0.1:18082'
+    Write-Output 'Metadata: http://127.0.0.1:18080 ; Data: http://127.0.0.1:18081 ; Execution: http://127.0.0.1:18082 ; MCP: http://127.0.0.1:18084/mcp'
     Write-Output 'Sign in with the account initialized in .cache/dev/admin.json. Existing account passwords are never reset by startup. Stop services with scripts/stop-dev.ps1.'
 } finally {
     foreach ($name in $envNames) { [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process') }

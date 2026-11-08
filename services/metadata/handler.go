@@ -57,6 +57,8 @@ func NewHandler(cfg Config) http.Handler {
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 	})
 	mux.HandleFunc("GET /metadata/capabilities", h.wrap(h.capabilities))
+	mux.HandleFunc("GET /metadata/callables", h.wrap(h.listCallables))
+	mux.HandleFunc("GET /metadata/callables/{id}", h.wrap(h.describeCallable))
 	mux.HandleFunc("POST /metadata/categories", h.wrap(h.createCategory))
 	mux.HandleFunc("GET /metadata/categories", h.wrap(h.listCategories))
 	mux.HandleFunc("POST /metadata/groups", h.wrap(h.createGroup))

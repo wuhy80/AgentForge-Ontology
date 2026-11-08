@@ -32,6 +32,9 @@ func (s *Store) checkOrigin(origin string) error {
 // CheckSession always reads the current account and role membership; the cookie
 // carries no identity, grants, or selected tenant supplied by the browser.
 func (s *Store) CheckSession(ctx context.Context, check contracts.SessionCheck) (contracts.Session, error) {
+	if check.AccessToken != "" {
+		return s.checkAccess(ctx, check)
+	}
 	var session contracts.Session
 	if len(check.Token) != 64 {
 		return session, &platform.AccessError{Status: 401, Code: "unauthenticated", Message: "请重新登录"}

@@ -22,7 +22,7 @@ type RemoteSessionChecker struct {
 
 func (c *RemoteSessionChecker) CheckSession(ctx context.Context, check contracts.SessionCheck) (contracts.Session, error) {
 	var session contracts.Session
-	if !opaqueCredential.MatchString(check.Token) {
+	if (check.AccessToken == "" && !opaqueCredential.MatchString(check.Token)) || (check.AccessToken != "" && (!ValidAccessToken(check.AccessToken) || check.Token != "")) {
 		return session, &AccessError{Status: 401, Code: "unauthenticated", Message: "登录已失效，请重新登录"}
 	}
 	err := authorityCall(ctx, c.URL, c.ServiceToken, c.Client, "/internal/identity/session", check, &session)

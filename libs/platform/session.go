@@ -76,6 +76,28 @@ func CheckRequestOrigin(r *http.Request) error {
 // credentials and caller-supplied tenant/user headers cannot select an identity.
 func SessionRequest(r *http.Request) (contracts.SessionCheck, error) {
 	check := contracts.SessionCheck{Method: r.Method, Origin: r.Header.Get("Origin"), CSRFToken: r.Header.Get("X-CSRF-Token")}
+	if strings.HasPrefix(Bearer(r), "mcp_") {
+		if !ValidAccessToken(Bearer(r)) {
+			return check, &AccessError{Status: 401, Code: "unauthenticated", Message: "外部连接凭据无效"}
+		}
+		for _, cookie := range r.Cookies() {
+			if cookie.Name == SessionCookieName {
+				return check, &AccessError{Status: 401, Code: "ambiguous_credentials", Message: "请分别使用浏览器会话或外部连接凭据"}
+			}
+		}
+		if _, allowed := AccessRoute(r.Method, r.URL.Path); !allowed {
+			return check, &AccessError{Status: 403, Code: "connection_scope_denied", Message: "外部连接不允许此接口"}
+		}
+		if check.Origin != "" {
+			originRequest := r.Clone(r.Context())
+			originRequest.Method = http.MethodPost
+			if err := CheckRequestOrigin(originRequest); err != nil {
+				return check, err
+			}
+		}
+		check.AccessToken, check.Path = Bearer(r), r.URL.Path
+		return check, nil
+	}
 	count := 0
 	for _, cookie := range r.Cookies() {
 		if cookie.Name == SessionCookieName {
@@ -98,6 +120,13 @@ func SessionRequest(r *http.Request) (contracts.SessionCheck, error) {
 func validateSession(session contracts.Session, check contracts.SessionCheck) error {
 	if !session.User.Enabled || strings.TrimSpace(session.User.ID) == "" || len(session.User.ID) > 200 || strings.TrimSpace(session.User.TenantID) == "" || len(session.User.TenantID) > 100 || session.ExpiresAt <= time.Now().Unix() {
 		return &AccessError{Status: 401, Code: "unauthenticated", Message: "登录已失效，请重新登录"}
+	}
+	if check.AccessToken != "" {
+		required, allowed := AccessRoute(check.Method, check.Path)
+		if !ValidAccessToken(check.AccessToken) || !allowed || session.AccessTokenID == "" || !HasAccessScope(session.AccessScopes, required) {
+			return &AccessError{Status: 403, Code: "connection_scope_denied", Message: "外部连接范围不足"}
+		}
+		return nil
 	}
 	if UnsafeMethod(check.Method) && (!opaqueCredential.MatchString(session.CSRFToken) || subtle.ConstantTimeCompare([]byte(session.CSRFToken), []byte(check.CSRFToken)) != 1) {
 		return &AccessError{Status: 403, Code: "invalid_csrf", Message: "请求校验已失效，请刷新后重试"}
@@ -156,6 +185,14 @@ func ProtectSessionRoutes(serviceToken string, metadata bool, checker SessionChe
 		mux.Handle("POST /metadata/auth/login", auth)
 		mux.Handle("GET /metadata/auth/session", auth)
 		mux.Handle("POST /metadata/auth/logout", auth)
+		mux.Handle("GET /.well-known/oauth-authorization-server", app)
+		// OAuth discovery, authorization, token exchange, dynamic registration,
+		// and revocation are public protocol endpoints. The identity handler
+		// performs the session/consent check where the flow requires it.
+		mux.Handle("GET /oauth/authorize", app)
+		mux.Handle("POST /oauth/token", app)
+		mux.Handle("POST /oauth/register", app)
+		mux.Handle("POST /oauth/revoke", app)
 		serviceRead := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if EqualSecret(Bearer(r), serviceToken) {
 				app.ServeHTTP(w, r)
