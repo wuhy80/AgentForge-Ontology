@@ -18,6 +18,7 @@ func TestTransactionOptionalExtensionsPreserveOriginalReceiptIntent(t *testing.T
 		t.Fatal("optional transaction extensions changed old receipt hashes")
 	}
 	request.Links = []TransactionLinkCreate{}
+	request.LinkDeletes = []TransactionLinkDelete{}
 	encoded, err = json.Marshal(request)
 	if err != nil || string(encoded) != original {
 		t.Fatal("empty optional Link plan changed old receipt hashes")

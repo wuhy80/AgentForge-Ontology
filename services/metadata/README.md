@@ -4,6 +4,8 @@
 
 ## 构建与运行
 
+2026-11-15：公开 `GET /metadata/schemas/{schemaId}/links` 在原方向/基数目录中增加逻辑 `storageMode`（managed/junction/foreign_key）。它不返回数据源凭据、物理映射或授予关系写权；OntoApp据此排除不支持事务维护的关系。创建/删除及两端行权限仍由Data独立校验，详见[数据读写](../../docs/数据读写.md#6-对象和-link-一起保存)。
+
 本批增加默认平台Schema安全追加准入与Enum使用闭环。能力响应 `definitionUpdates=display-and-safe-additions`、`schemaMigrations={addFields:true,addIndexes:true,destructive:false}`、`enumReferences=true`；`callableRuntimes` 声明可保存的三语言，实际执行就绪仍以Execution能力接口为准，Metadata自身 `invocation=false`。新增属性/索引的准入和Data物理编译共用[追加校验](../../contracts/schema_migration.go)；完整范围、默认值及恢复规则见所属主要说明。
 
 属性持久化只接受 `enumId`；GET当前/草稿及授权最小调用签名可附加服务端解析的 `enumValues`、`enumEtag`。这些为只读派生元数据，客户端保存前须移除，服务器拒绝伪造上下文；原定义ETag不因只读展开变为业务版本。Enum更新对当前依赖默认值执行检查，实际编码/废弃规则唯一见[Enum](../../docs/模块/Enum.md#当前实现协议2026-11-08)。

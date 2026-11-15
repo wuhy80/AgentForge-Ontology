@@ -35,6 +35,7 @@ type WriteTransactionRequest struct {
 	IdempotencyKey string                  `json:"idempotencyKey"`
 	Operations     []TransactionOperation  `json:"operations"`
 	Links          []TransactionLinkCreate `json:"links,omitempty"`
+	LinkDeletes    []TransactionLinkDelete `json:"linkDeletes,omitempty"`
 }
 
 // TransactionEndpoint selects an existing UUID or a create/upsert result from
@@ -45,7 +46,7 @@ type TransactionEndpoint struct {
 }
 
 // TransactionLinkCreate creates a managed Link after all object mutations.
-// It cannot remove/replace relations or express mapped/complex graph commands.
+// Replacement uses explicit LinkDeletes and Links in the same transaction.
 type TransactionLinkCreate struct {
 	LinkID    string              `json:"linkId"`
 	ClientKey string              `json:"clientKey"`
@@ -58,16 +59,26 @@ type TransactionLinkResult struct {
 	Instance  LinkInstance `json:"instance"`
 }
 
+// TransactionLinkDelete removes one known managed edge before object mutations.
+// IfMatch is the quoted strong ETag returned when reading that edge.
+type TransactionLinkDelete struct {
+	LinkID    string `json:"linkId"`
+	ClientKey string `json:"clientKey"`
+	ID        string `json:"id"`
+	IfMatch   string `json:"ifMatch"`
+}
+
 // Status is committed or failed for durable receipts; not_found is only a
 // lookup response and never proves an earlier request cannot still commit.
 type WriteTransactionResult struct {
-	Atomic      bool                    `json:"atomic"`
-	Committed   bool                    `json:"committed"`
-	Replayed    bool                    `json:"replayed,omitempty"`
-	Status      string                  `json:"status"`
-	Results     []WriteResult           `json:"results"`
-	LinkResults []TransactionLinkResult `json:"linkResults,omitempty"`
-	Error       *Error                  `json:"error,omitempty"`
+	Atomic            bool                    `json:"atomic"`
+	Committed         bool                    `json:"committed"`
+	Replayed          bool                    `json:"replayed,omitempty"`
+	Status            string                  `json:"status"`
+	Results           []WriteResult           `json:"results"`
+	LinkResults       []TransactionLinkResult `json:"linkResults,omitempty"`
+	LinkDeleteResults []TransactionLinkResult `json:"linkDeleteResults,omitempty"`
+	Error             *Error                  `json:"error,omitempty"`
 }
 
 // ScriptExecutionResult is a private runner envelope. No credentials or live

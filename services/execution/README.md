@@ -64,7 +64,7 @@ Execution在请求Data前持久保存计划及待交付输出，以`committing`�
 
 2026-11-15 Data事务DTO新增可选valueRefs，Execution的持久计划与恢复保留原引用，不用解析后的UUID替换原意图；声明范围与原会话/CSRF校验继续适用。新增模拟Data客户端回归覆盖保存、响应丢失与重启后status核对，不代表真实MySQL或容器SDK集成。三语言SDK构造接口本批未扩展，直接HTTP引用的范围见Data主说明。
 
-同日Data直接HTTP事务另增加managed Link创建数组links；现有Callable.dataWrite未声明Link能力，Data内部执行桥明确拒绝非空links（含恢复核对），不能借共享DTO扩大执行授权。运行器信封及三语言SDK仍只构造Schema操作，本批不扩展Action/Function业务范围。
+同日Data直接HTTP事务增加managed Link创建数组links及删除数组linkDeletes；现有Callable.dataWrite未声明Link能力，Data内部执行桥明确拒绝非空links/linkDeletes（含恢复核对），不能借共享DTO扩大执行授权。运行器信封及三语言SDK仍只构造Schema操作，本批不扩展Action/Function业务范围。
 
 Data内部桥接独立验证服务身份及原用户会话/CSRF、当前调用定义与声明，再复用逐项业务权限。容器不接收任何凭据或数据库句柄；不通过改写Origin调用公共Data接口。需显式Data迁移009和更新Go镜像，Execution记录沿既有JSON列保存，不增加自动迁移。能力`dataWriteTransactions`表示运行器、持久准备与Data客户端已配置；`dataWriteDraftInvocation=false`。
 

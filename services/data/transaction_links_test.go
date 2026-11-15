@@ -291,7 +291,106 @@ func TestTransactionLinkHTTPRejectsUnsupportedCommandsAndCombinedBudget(t *testi
 		Operations []string `json:"transactionLinkOperations"`
 		Storage    string   `json:"transactionLinkStorage"`
 	}
-	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &caps) != nil || !reflect.DeepEqual(caps.Operations, []string{"create"}) || caps.Storage != "managed" {
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &caps) != nil || !reflect.DeepEqual(caps.Operations, []string{"create", "delete"}) || caps.Storage != "managed" {
 		t.Fatal("Link transaction capability boundary missing")
+	}
+}
+
+func TestTransactionLinkDeletesValidationAndAuthority(t *testing.T) {
+	for _, scenario := range []string{"valid", "duplicate", "shared_key", "unquoted", "weak", "bad_id", "denied", "changed"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := newTransactionLinkFixture(t)
+			body := c.WriteTransactionRequest{IdempotencyKey: "delete-edge", LinkDeletes: []c.TransactionLinkDelete{{LinkID: f.link.Definition.ID, ClientKey: "delete", ID: c.NewID(), IfMatch: `"` + c.NewID() + `"`}}}
+			switch scenario {
+			case "duplicate":
+				body.LinkDeletes = append(body.LinkDeletes, body.LinkDeletes[0])
+				body.LinkDeletes[1].ClientKey = "other"
+			case "shared_key":
+				body.Operations = []c.TransactionOperation{transactionCreate(f.source.Definition.ID, "delete", "CODE")}
+			case "unquoted":
+				body.LinkDeletes[0].IfMatch = c.NewID()
+			case "weak":
+				body.LinkDeletes[0].IfMatch = "W/" + body.LinkDeletes[0].IfMatch
+			case "bad_id":
+				body.LinkDeletes[0].ID = "invalid"
+			case "denied":
+				base := f.authorize
+				f.authorize = func(r c.AuthorizationRequest) c.Decision {
+					d := base(r)
+					if r.Operation == "link.delete" {
+						d.Allow = false
+					}
+					return d
+				}
+			}
+			before := digest(body)
+			links, schemas, err := f.prepare(body)
+			if digest(body) != before {
+				t.Fatal("preflight mutated retry intent")
+			}
+			if scenario == "valid" || scenario == "changed" {
+				if err != nil || len(schemas) != 2 || len(links) != 1 || links[0].deletion == nil {
+					t.Fatalf("delete-only plan invalid: %v", err)
+				}
+				if scenario == "changed" {
+					base := f.authorize
+					f.authorize = func(r c.AuthorizationRequest) c.Decision {
+						d := base(r)
+						if r.Operation == "link.delete" {
+							d.State = "changed"
+						}
+						return d
+					}
+					if f.h.recheckTransactionLinks(context.Background(), f.p, links) == nil {
+						t.Fatal("delete authority not rechecked")
+					}
+				}
+			} else if err == nil {
+				t.Fatal("invalid delete plan accepted")
+			}
+		})
+	}
+	f := newTransactionLinkFixture(t)
+	body := c.WriteTransactionRequest{IdempotencyKey: "too-many", Operations: make([]c.TransactionOperation, 100), LinkDeletes: []c.TransactionLinkDelete{{}}}
+	if _, err := f.h.executeWriteTransaction(context.Background(), f.p, body, false); err == nil {
+		t.Fatal("deletes bypassed shared budget")
+	}
+}
+
+func TestTransactionLinkDeleteReplayRejectsCorruptOrChangedAuthorization(t *testing.T) {
+	for _, broken := range []string{"count", "id", "etag", "client", "endpoint", "authorization"} {
+		t.Run(broken, func(t *testing.T) {
+			f := newTransactionLinkFixture(t)
+			deletion := c.TransactionLinkDelete{LinkID: f.link.Definition.ID, ClientKey: "remove", ID: c.NewID(), IfMatch: `"` + c.NewID() + `"`}
+			links, _, err := f.prepare(c.WriteTransactionRequest{IdempotencyKey: "delete", LinkDeletes: []c.TransactionLinkDelete{deletion}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source, target := c.Instance{ID: c.NewID(), SchemaID: f.source.Definition.ID}, c.Instance{ID: c.NewID(), SchemaID: f.target.Definition.ID}
+			saved := transactionSaved{Status: "committed", LinkDeletes: []transactionSavedLink{{Result: c.TransactionLinkResult{ClientKey: "remove", Instance: c.LinkInstance{ID: deletion.ID, ETag: bareETag(deletion.IfMatch), LinkID: deletion.LinkID, SourceID: source.ID, TargetID: target.ID}}, Source: source, Target: target, Authorization: transactionLinkAuthorization(links[0])}}}
+			switch broken {
+			case "count":
+				saved.LinkDeletes = nil
+			case "id":
+				saved.LinkDeletes[0].Result.Instance.ID = c.NewID()
+			case "etag":
+				saved.LinkDeletes[0].Result.Instance.ETag = c.NewID()
+			case "client":
+				saved.LinkDeletes[0].Result.ClientKey = "other"
+			case "endpoint":
+				saved.LinkDeletes[0].Target.SchemaID = c.NewID()
+			case "authorization":
+				saved.LinkDeletes[0].Authorization["target"] = "changed"
+			}
+			_, err = replayTransactionLinkDeletes(context.Background(), nil, f.p, links, saved)
+			var api *apiError
+			want := "idempotency_corrupt"
+			if broken == "authorization" {
+				want = "authorization_changed"
+			}
+			if !errors.As(err, &api) || api.code != want {
+				t.Fatalf("invalid deletion receipt reached business SQL: %v", err)
+			}
+		})
 	}
 }

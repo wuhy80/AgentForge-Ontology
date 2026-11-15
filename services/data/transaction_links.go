@@ -11,6 +11,7 @@ import (
 
 type preparedTransactionLink struct {
 	request                                  c.TransactionLinkCreate
+	deletion                                 *c.TransactionLinkDelete
 	current                                  c.CurrentDefinition
 	plan                                     *linkPlan
 	decision, sourceDecision, targetDecision c.Decision
@@ -19,9 +20,10 @@ type preparedTransactionLink struct {
 // Endpoint snapshots remain private in the same budgeted receipt. Replay checks
 // both historical and current row visibility before returning relation identity.
 type transactionSavedLink struct {
-	Result c.TransactionLinkResult `json:"result"`
-	Source c.Instance              `json:"source"`
-	Target c.Instance              `json:"target"`
+	Result        c.TransactionLinkResult `json:"result"`
+	Source        c.Instance              `json:"source"`
+	Target        c.Instance              `json:"target"`
+	Authorization map[string]string       `json:"authorization,omitempty"`
 }
 
 func transactionEndpoint(endpoint c.TransactionEndpoint, schemaID string, operations map[string]c.TransactionOperation) (c.TransactionEndpoint, error) {
@@ -43,7 +45,7 @@ func transactionEndpoint(endpoint c.TransactionEndpoint, schemaID string, operat
 }
 
 func (h *handler) prepareTransactionLinks(ctx context.Context, p c.Principal, body c.WriteTransactionRequest, mutations []preparedTransactionOperation, schemas []c.CurrentDefinition) ([]preparedTransactionLink, []c.CurrentDefinition, error) {
-	if len(body.Links) == 0 {
+	if len(body.Links)+len(body.LinkDeletes) == 0 {
 		return nil, schemas, nil
 	}
 	operations := map[string]c.TransactionOperation{}
@@ -61,8 +63,29 @@ func (h *handler) prepareTransactionLinks(ctx context.Context, p c.Principal, bo
 			state = decision.State
 		}
 	}
-	links := make([]preparedTransactionLink, 0, len(body.Links))
-	for _, request := range body.Links {
+	requests := append([]c.TransactionLinkCreate(nil), body.Links...)
+	for _, deletion := range body.LinkDeletes {
+		requests = append(requests, c.TransactionLinkCreate{LinkID: deletion.LinkID, ClientKey: deletion.ClientKey})
+	}
+	deleted := map[string]bool{}
+	links := make([]preparedTransactionLink, 0, len(requests))
+	for i, request := range requests {
+		var deletion *c.TransactionLinkDelete
+		operation := "link.create"
+		if i >= len(body.Links) {
+			copy := body.LinkDeletes[i-len(body.Links)]
+			deletion, operation = &copy, "link.delete"
+			etag := bareETag(copy.IfMatch)
+			if !uuidPattern.MatchString(copy.ID) || len(copy.IfMatch) != 38 || copy.IfMatch != `"`+etag+`"` || !uuidPattern.MatchString(etag) {
+				return nil, nil, problem(422, "invalid_transaction_link_delete", "删除关系需要实例 UUID 和带引号的强 If-Match")
+			}
+			key := copy.LinkID + ":" + strings.ToLower(copy.ID)
+			if deleted[key] {
+				return nil, nil, problem(422, "duplicate_transaction_link", "同一关系实例不能重复删除")
+			}
+			deleted[key] = true
+			deletion.ID = strings.ToLower(deletion.ID)
+		}
 		if !validWriteKey(request.ClientKey) || clients[request.ClientKey] {
 			return nil, nil, problem(422, "invalid_client_key", "对象和关系项目的 clientKey 须在整笔事务内唯一")
 		}
@@ -77,7 +100,7 @@ func (h *handler) prepareTransactionLinks(ctx context.Context, p c.Principal, bo
 		if current.Definition.ID != request.LinkID {
 			return nil, nil, problem(503, "metadata_unavailable", "关系权威响应标识不匹配")
 		}
-		decision, err := h.authorizeLink(ctx, p, "link.create", request.LinkID)
+		decision, err := h.authorizeLink(ctx, p, operation, request.LinkID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -114,14 +137,16 @@ func (h *handler) prepareTransactionLinks(ctx context.Context, p c.Principal, bo
 				return nil, nil, err
 			}
 		}
-		request.Source, err = transactionEndpoint(request.Source, plan.source.Definition.ID, operations)
-		if err == nil {
-			request.Target, err = transactionEndpoint(request.Target, plan.target.Definition.ID, operations)
+		if deletion == nil {
+			request.Source, err = transactionEndpoint(request.Source, plan.source.Definition.ID, operations)
+			if err == nil {
+				request.Target, err = transactionEndpoint(request.Target, plan.target.Definition.ID, operations)
+			}
 		}
 		if err != nil {
 			return nil, nil, err
 		}
-		links = append(links, preparedTransactionLink{request: request, current: current, plan: plan, decision: decision, sourceDecision: sourceDecision, targetDecision: targetDecision})
+		links = append(links, preparedTransactionLink{request: request, deletion: deletion, current: current, plan: plan, decision: decision, sourceDecision: sourceDecision, targetDecision: targetDecision})
 	}
 	schemas = make([]c.CurrentDefinition, 0, len(definitions))
 	for _, current := range definitions {
@@ -149,7 +174,11 @@ func transactionLinkGates(links []preparedTransactionLink) []c.CurrentDefinition
 func (h *handler) recheckTransactionLinks(ctx context.Context, p c.Principal, links []preparedTransactionLink) error {
 	checked := map[string]bool{}
 	for _, link := range links {
-		if err := h.recheckLink(ctx, p, "link.create", link.current.Definition.ID, link.decision); err != nil {
+		operation := "link.create"
+		if link.deletion != nil {
+			operation = "link.delete"
+		}
+		if err := h.recheckLink(ctx, p, operation, link.current.Definition.ID, link.decision); err != nil {
 			return err
 		}
 		for _, endpoint := range []struct {
@@ -197,6 +226,9 @@ func applyTransactionLinks(ctx context.Context, tx *sql.Tx, p c.Principal, links
 	}
 	results := make([]c.TransactionLinkResult, 0, len(links))
 	for _, link := range links {
+		if link.deletion != nil {
+			continue
+		}
 		sourceID, err := resolveTransactionEndpoint(link.request.Source, link.plan.source.Definition.ID, completed)
 		if err != nil {
 			return nil, err
@@ -232,7 +264,13 @@ func applyTransactionLinks(ctx context.Context, tx *sql.Tx, p c.Principal, links
 }
 
 func replayTransactionLinks(ctx context.Context, tx *sql.Tx, p c.Principal, links []preparedTransactionLink, saved transactionSaved) ([]c.TransactionLinkResult, error) {
-	if len(links) != len(saved.Links) {
+	creates := []preparedTransactionLink{}
+	for _, link := range links {
+		if link.deletion == nil {
+			creates = append(creates, link)
+		}
+	}
+	if len(creates) != len(saved.Links) {
 		return nil, problem(500, "idempotency_corrupt", "无法核对原事务关系结果")
 	}
 	results := make([]c.TransactionLinkResult, 0, len(links))
@@ -242,7 +280,7 @@ func replayTransactionLinks(ctx context.Context, tx *sql.Tx, p c.Principal, link
 			completed[mutation.Items[0].ClientKey] = mutation.Items[0].Instance
 		}
 	}
-	for i, link := range links {
+	for i, link := range creates {
 		history := saved.Links[i]
 		out := history.Result.Instance
 		sourceID, sourceErr := resolveTransactionEndpoint(link.request.Source, link.plan.source.Definition.ID, completed)

@@ -31,7 +31,7 @@
 
 平台关系接口为 `POST /data/links/{linkId}/instances`（`sourceId/targetId`）、`DELETE /data/links/{linkId}/instances/{id}`（If-Match），及按 `direction/instanceId/limit/cursor` 读取关系记录的 GET 集合。写入在本地事务中检查端点、重复、基数和当前权限，与 outbox 一起提交；删除关系不删除对象。外部映射只通过实体查询导航，不开放关系写入。
 
-2026-11-15新增[对象与managed Link同事务创建](../数据读写.md#对象与-managed-link-同事务创建2026-11-15已实现实库待验收)：公开事务可用links数组，将对应Schema的create/upsert结果或已有UUID作为端点，整笔校验link.create、两端读取/行权限、现有最大基数及端点约束，与对象/outbox/回执一起提交。支持原请求幂等恢复且重查历史/当前端点权限；关系删除/替换、序列/组合/树等复杂语义仍未进入事务入口。三语言SDK及OntoApp界面未接入，实库新场景待验收，协议与结果形状唯一维护在数据读写。
+2026-11-15新增[对象与managed Link同事务维护](../数据读写.md#6-对象和-link-一起保存)：links将对应Schema的create/upsert结果或已有UUID作为端点，linkDeletes按指定边UUID和强If-Match删除旧边；先删旧边再执行对象操作和建新边，支持1:1替换。逐项校验link.create/link.delete、两端读取/行权限、现有最大基数及端点约束，与对象/outbox/回执一起提交。原请求幂等恢复复核历史/当前端点权限；删除回执另核对授权摘要及边仍不存在。序列/组合/树仍拒绝，三语言SDK未提供关系构造；OntoApp已接入主从表单，实库新场景待验收，协议与结果形状唯一维护在数据读写。
 
 固定实例 `via` 导航仍限同库单跳；新增最多4条INNER Link关联行，支持反向、分支和自关联，各节点授权后统一分页，实际协议见[DataSet](../数据查询/DataSet.md#关联行查询增量2026-11-07)和[OntologySQL](../数据查询/OntologySQL.md#当前inner-link语法2026-11-07)。`both`、任意长度路径、跨数据源关系、关系属性、组合/拓扑/业务顺序、关系驱动的权限条件仍未开放。现有 Schema 跨源属性投影属于每来源最多一行的属性组合，不等同于跨源 Link 查询。下面各节继续维护这些扩展的候选设计与验收目标。
 

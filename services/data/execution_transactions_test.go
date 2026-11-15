@@ -137,4 +137,10 @@ func TestExecutionTransactionRejectsUndeclaredLinkPlans(t *testing.T) {
 	if !errors.As(err, &api) || api.status != 403 || api.code != "data_scope_denied" {
 		t.Fatal("Schema-only callable declaration admitted Link mutations")
 	}
+	body.Transaction.Links = nil
+	body.Transaction.LinkDeletes = []c.TransactionLinkDelete{{ClientKey: "edge"}}
+	err = (&handler{}).checkExecutionTransaction(context.Background(), c.Principal{TenantID: "tenant", Subject: "user"}, body)
+	if !errors.As(err, &api) || api.status != 403 {
+		t.Fatal("Schema-only declaration admitted Link deletion")
+	}
 }

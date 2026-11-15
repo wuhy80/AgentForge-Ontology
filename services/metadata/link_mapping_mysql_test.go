@@ -175,6 +175,7 @@ func TestMySQLLinkMappingLifecycleAndIsolation(t *testing.T) {
 		SourceSchemaID string `json:"sourceSchemaId"`
 		TargetSchemaID string `json:"targetSchemaId"`
 		Cardinality    string `json:"cardinality"`
+		StorageMode    string `json:"storageMode"`
 	}
 	directory := func(schemaID, tenantID, subject string, status int) []navigation {
 		t.Helper()
@@ -203,6 +204,9 @@ func TestMySQLLinkMappingLifecycleAndIsolation(t *testing.T) {
 			t.Fatalf("directory duplicated or reordered a Link: %+v", items)
 		}
 		seen[key] = true
+		if item.StorageMode != "managed" {
+			t.Fatal("directory lost logical Link storage mode")
+		}
 		if item.SourceSchemaID != source.Definition.ID {
 			t.Fatalf("navigation origin differs from requested Schema: %+v", item)
 		}

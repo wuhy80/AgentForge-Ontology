@@ -23,10 +23,11 @@ type preparedTransactionOperation struct {
 // Only complete terminal receipts are committed. A temporary claim stays in
 // the same transaction and is never independently visible or recoverable.
 type transactionSaved struct {
-	Status string                 `json:"status"`
-	Items  []mutationSaved        `json:"items,omitempty"`
-	Links  []transactionSavedLink `json:"links,omitempty"`
-	Error  *c.Error               `json:"error,omitempty"`
+	Status      string                 `json:"status"`
+	Items       []mutationSaved        `json:"items,omitempty"`
+	Links       []transactionSavedLink `json:"links,omitempty"`
+	LinkDeletes []transactionSavedLink `json:"linkDeletes,omitempty"`
+	Error       *c.Error               `json:"error,omitempty"`
 }
 
 func (h *handler) writeTransactionHTTP(lookup bool) http.HandlerFunc {
@@ -66,7 +67,7 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 	if p.TenantID == "" || len(p.TenantID) > 128 || p.Subject == "" || len(p.Subject) > 255 {
 		return c.WriteTransactionResult{}, problem(401, "unauthorized", "需要可信身份和租户")
 	}
-	if !validWriteKey(body.IdempotencyKey) || len(body.Operations)+len(body.Links) < 1 || len(body.Operations)+len(body.Links) > c.MaxBulkWriteItems {
+	if !validWriteKey(body.IdempotencyKey) || len(body.Operations)+len(body.Links)+len(body.LinkDeletes) < 1 || len(body.Operations)+len(body.Links)+len(body.LinkDeletes) > c.MaxBulkWriteItems {
 		return c.WriteTransactionResult{}, problem(422, "invalid_transaction", "事务需要整笔幂等键及 1..100 项操作")
 	}
 	budget := jsonBudget{remaining: c.MaxDataRequestBytes}
@@ -139,6 +140,9 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 				if txErr == nil && result.Committed {
 					result.LinkResults, txErr = replayTransactionLinks(ctx, tx, p, links, saved)
 				}
+				if txErr == nil && result.Committed {
+					result.LinkDeleteResults, txErr = replayTransactionLinkDeletes(ctx, tx, p, links, saved)
+				}
 				if txErr != nil {
 					return txErr
 				}
@@ -151,7 +155,12 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 				return txErr
 			}
 			saved := transactionSaved{Status: "committed", Items: make([]mutationSaved, len(operations))}
-			result, txErr = applyWriteTransaction(ctx, tx, p, operations, &saved)
+			deleted, deleteErr := applyTransactionLinkDeletes(ctx, tx, p, links, &saved)
+			txErr = deleteErr
+			if txErr == nil {
+				result, txErr = applyWriteTransaction(ctx, tx, p, operations, &saved)
+			}
+			result.LinkDeleteResults = deleted
 			if txErr == nil {
 				result.LinkResults, txErr = applyTransactionLinks(ctx, tx, p, links, &saved)
 			}
@@ -251,7 +260,7 @@ func (h *handler) recoverRejectedWriteTransaction(ctx context.Context, p c.Princ
 				// the success receipt and return that rejection, with no old data.
 				return cause
 			}
-			if saved.Status != "failed" || saved.Error == nil || len(saved.Items) != 0 || len(saved.Links) != 0 {
+			if saved.Status != "failed" || saved.Error == nil || len(saved.Items) != 0 || len(saved.Links) != 0 || len(saved.LinkDeletes) != 0 {
 				return problem(500, "idempotency_corrupt", "无法核对原事务结果")
 			}
 			result.Error, result.Replayed = saved.Error, true
@@ -455,7 +464,7 @@ func applyWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, opera
 
 func replayWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, operations []preparedTransactionOperation, saved transactionSaved) (c.WriteTransactionResult, error) {
 	result := c.WriteTransactionResult{Atomic: true, Replayed: true, Status: saved.Status, Results: []c.WriteResult{}}
-	if saved.Status == "failed" && saved.Error != nil && len(saved.Items) == 0 && len(saved.Links) == 0 {
+	if saved.Status == "failed" && saved.Error != nil && len(saved.Items) == 0 && len(saved.Links) == 0 && len(saved.LinkDeletes) == 0 {
 		result.Error = saved.Error
 		return result, nil
 	}
