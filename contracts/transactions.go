@@ -32,19 +32,42 @@ type TransactionResultReference struct {
 }
 
 type WriteTransactionRequest struct {
-	IdempotencyKey string                 `json:"idempotencyKey"`
-	Operations     []TransactionOperation `json:"operations"`
+	IdempotencyKey string                  `json:"idempotencyKey"`
+	Operations     []TransactionOperation  `json:"operations"`
+	Links          []TransactionLinkCreate `json:"links,omitempty"`
+}
+
+// TransactionEndpoint selects an existing UUID or a create/upsert result from
+// Operations. Exactly one selector is required, in the Link's declared Schema.
+type TransactionEndpoint struct {
+	ID        string `json:"id,omitempty"`
+	ClientKey string `json:"clientKey,omitempty"`
+}
+
+// TransactionLinkCreate creates a managed Link after all object mutations.
+// It cannot remove/replace relations or express mapped/complex graph commands.
+type TransactionLinkCreate struct {
+	LinkID    string              `json:"linkId"`
+	ClientKey string              `json:"clientKey"`
+	Source    TransactionEndpoint `json:"source"`
+	Target    TransactionEndpoint `json:"target"`
+}
+
+type TransactionLinkResult struct {
+	ClientKey string       `json:"clientKey"`
+	Instance  LinkInstance `json:"instance"`
 }
 
 // Status is committed or failed for durable receipts; not_found is only a
 // lookup response and never proves an earlier request cannot still commit.
 type WriteTransactionResult struct {
-	Atomic    bool          `json:"atomic"`
-	Committed bool          `json:"committed"`
-	Replayed  bool          `json:"replayed,omitempty"`
-	Status    string        `json:"status"`
-	Results   []WriteResult `json:"results"`
-	Error     *Error        `json:"error,omitempty"`
+	Atomic      bool                    `json:"atomic"`
+	Committed   bool                    `json:"committed"`
+	Replayed    bool                    `json:"replayed,omitempty"`
+	Status      string                  `json:"status"`
+	Results     []WriteResult           `json:"results"`
+	LinkResults []TransactionLinkResult `json:"linkResults,omitempty"`
+	Error       *Error                  `json:"error,omitempty"`
 }
 
 // ScriptExecutionResult is a private runner envelope. No credentials or live

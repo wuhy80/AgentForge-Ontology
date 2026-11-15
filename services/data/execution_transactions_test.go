@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -126,5 +127,14 @@ func TestExecutionTransactionGuardBindsDefinitionsInvokeAndDeclaredWrites(t *tes
 			}
 			denied = ""
 		})
+	}
+}
+
+func TestExecutionTransactionRejectsUndeclaredLinkPlans(t *testing.T) {
+	body := c.ExecutionTransactionRequest{Transaction: c.WriteTransactionRequest{Links: []c.TransactionLinkCreate{{ClientKey: "edge"}}}}
+	err := (&handler{}).checkExecutionTransaction(context.Background(), c.Principal{TenantID: "tenant", Subject: "user"}, body)
+	var api *apiError
+	if !errors.As(err, &api) || api.status != 403 || api.code != "data_scope_denied" {
+		t.Fatal("Schema-only callable declaration admitted Link mutations")
 	}
 }

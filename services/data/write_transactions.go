@@ -23,9 +23,10 @@ type preparedTransactionOperation struct {
 // Only complete terminal receipts are committed. A temporary claim stays in
 // the same transaction and is never independently visible or recoverable.
 type transactionSaved struct {
-	Status string          `json:"status"`
-	Items  []mutationSaved `json:"items,omitempty"`
-	Error  *c.Error        `json:"error,omitempty"`
+	Status string                 `json:"status"`
+	Items  []mutationSaved        `json:"items,omitempty"`
+	Links  []transactionSavedLink `json:"links,omitempty"`
+	Error  *c.Error               `json:"error,omitempty"`
 }
 
 func (h *handler) writeTransactionHTTP(lookup bool) http.HandlerFunc {
@@ -65,7 +66,7 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 	if p.TenantID == "" || len(p.TenantID) > 128 || p.Subject == "" || len(p.Subject) > 255 {
 		return c.WriteTransactionResult{}, problem(401, "unauthorized", "需要可信身份和租户")
 	}
-	if !validWriteKey(body.IdempotencyKey) || len(body.Operations) < 1 || len(body.Operations) > c.MaxBulkWriteItems {
+	if !validWriteKey(body.IdempotencyKey) || len(body.Operations)+len(body.Links) < 1 || len(body.Operations)+len(body.Links) > c.MaxBulkWriteItems {
 		return c.WriteTransactionResult{}, problem(422, "invalid_transaction", "事务需要整笔幂等键及 1..100 项操作")
 	}
 	budget := jsonBudget{remaining: c.MaxDataRequestBytes}
@@ -78,6 +79,10 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 		}
 	}
 	operations, schemas, err := h.prepareWriteTransaction(ctx, p, body)
+	var links []preparedTransactionLink
+	if err == nil {
+		links, schemas, err = h.prepareTransactionLinks(ctx, p, body, operations, schemas)
+	}
 	if err != nil {
 		if failure, safe := transactionFailure(err); safe {
 			return h.recoverRejectedWriteTransaction(ctx, p, body, failure, err, lookup)
@@ -86,6 +91,18 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 	}
 	if h.cfg.Engine == nil {
 		return c.WriteTransactionResult{}, problem(503, "storage_unavailable", "数据存储未配置")
+	}
+	recheck := func(ctx context.Context) error {
+		if err := h.recheckWriteTransaction(ctx, p, operations, nil); err != nil {
+			return err
+		}
+		if err := h.recheckTransactionLinks(ctx, p, links); err != nil {
+			return err
+		}
+		if guard != nil {
+			return guard(ctx)
+		}
+		return nil
 	}
 	hash := digest(body)
 	for attempt := 0; attempt < 3; attempt++ {
@@ -99,11 +116,16 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 			}
 			if lookup && !found {
 				result.Status = "not_found"
-				return h.recheckWriteTransaction(ctx, p, operations, guard)
+				return recheck(ctx)
 			}
 			// Every managed write already participates in these gates. Sorting
 			// across schemas gives mixed transactions the same admission order.
 			for _, current := range schemas {
+				if txErr = h.gate(ctx, tx, p, current); txErr != nil {
+					return txErr
+				}
+			}
+			for _, current := range transactionLinkGates(links) {
 				if txErr = h.gate(ctx, tx, p, current); txErr != nil {
 					return txErr
 				}
@@ -114,10 +136,16 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 					return problem(500, "idempotency_corrupt", "无法核对原事务结果")
 				}
 				result, txErr = replayWriteTransaction(ctx, tx, p, operations, saved)
+				if txErr == nil && result.Committed {
+					result.LinkResults, txErr = replayTransactionLinks(ctx, tx, p, links, saved)
+				}
 				if txErr != nil {
 					return txErr
 				}
-				return h.recheckWriteTransaction(ctx, p, operations, guard)
+				if _, txErr = encodeBudgetedJSON(result); txErr != nil {
+					return txErr
+				}
+				return recheck(ctx)
 			}
 			if _, txErr = tx.ExecContext(ctx, "SAVEPOINT af_transaction_writes"); txErr != nil {
 				return txErr
@@ -125,7 +153,13 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 			saved := transactionSaved{Status: "committed", Items: make([]mutationSaved, len(operations))}
 			result, txErr = applyWriteTransaction(ctx, tx, p, operations, &saved)
 			if txErr == nil {
-				txErr = h.recheckWriteTransaction(ctx, p, operations, guard)
+				result.LinkResults, txErr = applyTransactionLinks(ctx, tx, p, links, &saved)
+			}
+			if txErr == nil {
+				_, txErr = encodeBudgetedJSON(result)
+			}
+			if txErr == nil {
+				txErr = recheck(ctx)
 			}
 			if txErr != nil {
 				failure, safe := transactionFailure(txErr)
@@ -217,7 +251,7 @@ func (h *handler) recoverRejectedWriteTransaction(ctx context.Context, p c.Princ
 				// the success receipt and return that rejection, with no old data.
 				return cause
 			}
-			if saved.Status != "failed" || saved.Error == nil || len(saved.Items) != 0 {
+			if saved.Status != "failed" || saved.Error == nil || len(saved.Items) != 0 || len(saved.Links) != 0 {
 				return problem(500, "idempotency_corrupt", "无法核对原事务结果")
 			}
 			result.Error, result.Replayed = saved.Error, true
@@ -421,7 +455,7 @@ func applyWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, opera
 
 func replayWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, operations []preparedTransactionOperation, saved transactionSaved) (c.WriteTransactionResult, error) {
 	result := c.WriteTransactionResult{Atomic: true, Replayed: true, Status: saved.Status, Results: []c.WriteResult{}}
-	if saved.Status == "failed" && saved.Error != nil && len(saved.Items) == 0 {
+	if saved.Status == "failed" && saved.Error != nil && len(saved.Items) == 0 && len(saved.Links) == 0 {
 		result.Error = saved.Error
 		return result, nil
 	}

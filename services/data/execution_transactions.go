@@ -91,6 +91,11 @@ func transactionCallable(d c.Definition) *c.Callable {
 }
 
 func (h *handler) checkExecutionTransaction(ctx context.Context, p c.Principal, body c.ExecutionTransactionRequest) error {
+	// Callable dataWrite declarations only bound Schema mutations. Until Link
+	// capabilities have an explicit contract the internal bridge must reject them.
+	if len(body.Transaction.Links) != 0 {
+		return problem(403, "data_scope_denied", "调用定义尚不支持声明关系事务写入")
+	}
 	root, err := h.current(ctx, p.TenantID, body.DefinitionID)
 	if err != nil {
 		return err
