@@ -119,6 +119,39 @@ func TestDataWritePlanPersistsBeforeCommitAndRecoversLostResponseWithoutRerun(t 
 	}
 }
 
+func TestDataWriteReferencePlanPersistsAndRecoversOriginalIntent(t *testing.T) {
+	f, s, r := dataFixture()
+	r.result.Operations = append(r.result.Operations, c.TransactionOperation{SchemaID: "schema", Operation: "create", ClientKey: "detail", ValueRefs: map[string]c.TransactionResultReference{"parent-field": {ClientKey: "a"}}})
+	expected := digest(r.result.Operations)
+	calls := 0
+	client := dataClientFunc(func(ctx context.Context, body c.ExecutionTransactionRequest) (c.WriteTransactionResult, error) {
+		calls++
+		stored, err := s.FindID(ctx, "tenant", "user", body.InvocationID)
+		if err != nil || stored.Transaction == nil || digest(stored.Transaction.Operations) != expected || digest(body.Transaction.Operations) != expected {
+			t.Fatal("reference plan was lost or changed before persistence/delivery")
+		}
+		if calls == 1 {
+			return c.WriteTransactionResult{}, errors.New("response lost")
+		}
+		if !body.Lookup {
+			t.Fatal("status recovery retried writes")
+		}
+		return c.WriteTransactionResult{Atomic: true, Committed: true, Status: "committed", Replayed: true}, nil
+	})
+	setDataHandler(f, s, r, client)
+	pending := invocation(t, request(f.h, "POST", "/execution/invocations", "reference-write", validBody), 202)
+	if pending.Status != "committing" || len(pending.Output) != 0 {
+		t.Fatal("unknown reference commit exposed output")
+	}
+	// After restart the saved logical references, not a newly run plan, survive.
+	r.result.Operations = nil
+	setDataHandler(f, s, r, client)
+	got := invocation(t, request(f.h, "GET", "/execution/invocations/"+pending.ID, "", ""), 200)
+	if got.Status != "succeeded" || got.Transaction == nil || got.Transaction.OperationCount != 2 || r.calls.Load() != 1 || calls != 2 {
+		t.Fatal("reference recovery reran script or lost operation count")
+	}
+}
+
 func TestDataWriteMissingReceiptOnlyPostResumesAndFinishFailureRecovers(t *testing.T) {
 	f, s, r := dataFixture()
 	writes, lookups := 0, 0

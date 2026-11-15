@@ -62,6 +62,8 @@ POST 请求使用 `contracts.InvocationRequest`，例如：
 
 Execution在请求Data前持久保存计划及待交付输出，以`committing`表示尚未核对的提交。GET仅查Data回执，原键POST恢复原计划；响应丢失或存储失败不会触发脚本重跑、不会误报回滚。`committing`不按计算deadline中断。实际状态与恢复语义唯一见[执行与调度](../../docs/执行与调度.md#同步事务写入与恢复2026-11-08已实现)，Data存储范围、预算、终态及幂等见[数据读写](../../docs/数据读写.md#跨schema对象事务2026-11-08已实现)。
 
+2026-11-15 Data事务DTO新增可选valueRefs，Execution的持久计划与恢复保留原引用，不用解析后的UUID替换原意图；声明范围与原会话/CSRF校验继续适用。新增模拟Data客户端回归覆盖保存、响应丢失与重启后status核对，不代表真实MySQL或容器SDK集成。三语言SDK构造接口本批未扩展，直接HTTP引用的范围见Data主说明。
+
 Data内部桥接独立验证服务身份及原用户会话/CSRF、当前调用定义与声明，再复用逐项业务权限。容器不接收任何凭据或数据库句柄；不通过改写Origin调用公共Data接口。需显式Data迁移009和更新Go镜像，Execution记录沿既有JSON列保存，不增加自动迁移。能力`dataWriteTransactions`表示运行器、持久准备与Data客户端已配置；`dataWriteDraftInvocation=false`。
 
 ## 语言容器

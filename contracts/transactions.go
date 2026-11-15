@@ -11,15 +11,24 @@ type DataWriteCapability struct {
 
 // TransactionOperation is a logical mutation, never SQL. Conditions and values
 // follow the eight schema write interfaces. A transaction contains 1..100 items.
+// ValueRefs writes an earlier create/upsert result ID into a UUID property.
+// References are keyed by stable field ID and cannot overlap Values or Match.
 type TransactionOperation struct {
-	SchemaID       string                     `json:"schemaId"`
-	Operation      string                     `json:"operation"`
-	ClientKey      string                     `json:"clientKey"`
-	ID             string                     `json:"id,omitempty"`
-	IfMatch        string                     `json:"ifMatch,omitempty"`
-	Match          *WriteMatch                `json:"match,omitempty"`
-	Values         map[string]json.RawMessage `json:"values,omitempty"`
-	ConflictPolicy string                     `json:"conflictPolicy,omitempty"`
+	SchemaID       string                                `json:"schemaId"`
+	Operation      string                                `json:"operation"`
+	ClientKey      string                                `json:"clientKey"`
+	ID             string                                `json:"id,omitempty"`
+	IfMatch        string                                `json:"ifMatch,omitempty"`
+	Match          *WriteMatch                           `json:"match,omitempty"`
+	Values         map[string]json.RawMessage            `json:"values,omitempty"`
+	ValueRefs      map[string]TransactionResultReference `json:"valueRefs,omitempty"`
+	ConflictPolicy string                                `json:"conflictPolicy,omitempty"`
+}
+
+// TransactionResultReference exposes only the result ID, never row values,
+// ETags, expressions or data outside this transaction. Forward refs are invalid.
+type TransactionResultReference struct {
+	ClientKey string `json:"clientKey"`
 }
 
 type WriteTransactionRequest struct {

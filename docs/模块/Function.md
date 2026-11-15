@@ -28,6 +28,8 @@ Function及直接源码Action可以使用`sideEffects=dataWrite`，并在正文�
 
 SDK入口为Python的`def main(inputs, ctx)`、JavaScript的`function main(inputs, ctx)`、Go的`func Main(inputs map[string]any, ctx *OntologyContext) (map[string]any, error)`。Python/JavaScript通过`ctx.data`调用，Go通过`ctx.Data`调用下表方法；只暂存受控计划，不读取数据、不立即写入、不返回生成ID，也不向容器传入Cookie、数据库或服务凭据。输入输出仍使用中文参数键，SDK的Schema、字段及实例引用使用稳定ID。若后续操作需要新记录身份，由调用方预先提供ID并使用ID匹配upsert，不以create方法返回ID串联操作。
 
+2026-11-15 Data直接事务协议已增加有界`valueRefs`结果ID引用，范围唯一见[数据读写](../数据读写.md#事务内结果id引用2026-11-15已实现实库待验收)。本批未增加下表SDK的引用构造参数或方法，SDK仍按既有字面值调用；不能将Data协议扩展视为三语言容器SDK已支持主从保存。Execution共享DTO可保留原始引用计划并按原键核对，仍逐项受双方dataWrite声明及原用户授权约束。
+
 | Python / JavaScript 方法 | Go 方法与参数 |
 | --- | --- |
 | `create(schemaId, values, clientKey)` | `Create(schemaID, values, clientKey)` |

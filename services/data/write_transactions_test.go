@@ -27,6 +27,7 @@ func newTransactionFixture(t *testing.T) *transactionFixture {
 	f := &transactionFixture{mutationFixture: newMutationFixture(t)}
 	d := testDefinition()
 	d.ID, d.TenantID, d.Name = c.NewID(), f.p.TenantID, "事务次表"
+	d.Schema.Properties = append(d.Schema.Properties, c.Property{ID: testReferenceField, Name: "主记录", DataType: "uuid", Nullable: true})
 	d.Schema.Indexes = []c.Index{{ID: c.NewID(), Name: "编码唯一", Unique: true, FieldIDs: []string{testFieldCode}}}
 	f.second = c.CurrentDefinition{Definition: d, ETag: digest(d), Status: "active"}
 	f.defs = map[string]c.CurrentDefinition{f.current.Definition.ID: f.current, d.ID: f.second}
@@ -148,6 +149,111 @@ func TestMySQLWriteTransactionMixedSchemasAndRecovery(t *testing.T) {
 	isolated, err := f.core.executeWriteTransaction(context.Background(), other, body, true)
 	if err != nil || isolated.Status != "not_found" {
 		t.Fatal("transaction receipt leaked across subjects")
+	}
+}
+
+func TestMySQLWriteTransactionResultReferencesAndRecovery(t *testing.T) {
+	f := newTransactionFixture(t)
+	existing := f.create("EXISTING_MASTER")
+	newDetail := transactionCreate(f.second.Definition.ID, "detail-new", "DETAIL_NEW")
+	newDetail.ValueRefs = map[string]c.TransactionResultReference{testReferenceField: {ClientKey: "master-new"}}
+	newDetail.Values[testFieldPrice] = raw("900719925474099.123")
+	existingDetail := transactionCreate(f.second.Definition.ID, "detail-existing", "DETAIL_EXISTING")
+	existingDetail.ValueRefs = map[string]c.TransactionResultReference{testReferenceField: {ClientKey: "master-existing"}}
+	body := c.WriteTransactionRequest{IdempotencyKey: c.NewID(), Operations: []c.TransactionOperation{
+		transactionCreate(f.current.Definition.ID, "master-new", "NEW_MASTER"),
+		{SchemaID: f.current.Definition.ID, Operation: "upsert", ClientKey: "master-existing", Match: &c.WriteMatch{IndexID: f.current.Definition.Schema.Indexes[0].ID, Values: map[string]json.RawMessage{testFieldCode: raw("EXISTING_MASTER")}}, IfMatch: `"` + existing.ETag + `"`, Values: map[string]json.RawMessage{testFieldDept: raw("D2")}},
+		newDetail, existingDetail,
+	}}
+	before := f.transactionCounts()
+	result := f.transaction(body, false, 200)
+	if !result.Committed || len(result.Results) != 4 || result.Results[1].ID != existing.ID || result.Results[1].Outcome != "updated" {
+		t.Fatal("reference transaction did not commit or lost upsert target")
+	}
+	for child, parent := range map[int]int{2: 0, 3: 1} {
+		var id string
+		if json.Unmarshal(result.Results[child].Values[testReferenceField], &id) != nil || id != result.Results[parent].ID {
+			t.Fatal("detail did not receive the actual parent result ID")
+		}
+		var stored string
+		query := "SELECT " + quote(columnName(testReferenceField)) + " FROM " + quote(tableName(f.second.Definition.ID)) + " WHERE tenant_id=? AND id=?"
+		if err := f.engine.DB().QueryRow(query, f.p.TenantID, result.Results[child].ID).Scan(&stored); err != nil || stored != id {
+			t.Fatal("resolved reference was not persisted")
+		}
+	}
+	if string(result.Results[2].Values[testFieldPrice]) != `"900719925474099.123"` {
+		t.Fatal("reference transaction changed decimal precision")
+	}
+	after := f.transactionCounts()
+	if after != [4]int{before[0] + 1, before[1] + 2, before[2] + 4, before[3] + 1} {
+		t.Fatal("reference data, outbox or receipt count incorrect")
+	}
+	// Treat the first response as lost: both status and identical resubmission
+	// must return original IDs, without re-resolving newly generated IDs.
+	for _, lookup := range []bool{true, false} {
+		replayed := f.transaction(body, lookup, 200)
+		if !replayed.Replayed || !replayed.Committed || string(mustMutationJSON(t, replayed.Results)) != string(mustMutationJSON(t, result.Results)) || f.transactionCounts() != after {
+			t.Fatal("reference recovery changed the original effect")
+		}
+	}
+	changed := body
+	changed.Operations = append([]c.TransactionOperation(nil), body.Operations...)
+	changed.Operations[2].ValueRefs = map[string]c.TransactionResultReference{testReferenceField: {ClientKey: "master-existing"}}
+	f.transaction(changed, true, 409)
+	f.transaction(changed, false, 409)
+	// Revocation cannot disclose old referenced results or replace committed.
+	f.mu.Lock()
+	f.policy["instance.create"] = c.Decision{Allow: false, State: "mutation-policy-1"}
+	f.mu.Unlock()
+	f.transaction(body, true, 403)
+	f.mu.Lock()
+	delete(f.policy, "instance.create")
+	f.mu.Unlock()
+	if restored := f.transaction(body, true, 200); !restored.Committed || !restored.Replayed || f.transactionCounts() != after {
+		t.Fatal("revocation changed committed reference evidence")
+	}
+}
+
+func TestMySQLWriteTransactionReferencesRollbackOnFieldAndRowDenial(t *testing.T) {
+	for _, denial := range []string{"field", "row"} {
+		t.Run(denial, func(t *testing.T) {
+			f := newTransactionFixture(t)
+			// Source is an upsert-create so its chosen ID is known for the row
+			// policy test; normal create references also use generated IDs.
+			parentID := c.NewID()
+			detail := transactionCreate(f.second.Definition.ID, "detail", "DENIED_DETAIL")
+			detail.ValueRefs = map[string]c.TransactionResultReference{testReferenceField: {ClientKey: "master"}}
+			body := c.WriteTransactionRequest{IdempotencyKey: c.NewID(), Operations: []c.TransactionOperation{
+				{SchemaID: f.current.Definition.ID, Operation: "upsert", ClientKey: "master", Match: &c.WriteMatch{ID: parentID}, Values: mutationValues("ROLLBACK_MASTER")}, detail,
+			}}
+			f.core.cfg.Authorizer = authorizerFunc(func(_ context.Context, _ c.Principal, r c.AuthorizationRequest) (c.Decision, error) {
+				decision := c.Decision{Allow: true, ReadFields: []string{"*"}, WriteFields: []string{"*"}, State: "reference-denial"}
+				if r.ResourceID == f.second.Definition.ID && r.Operation == "instance.create" {
+					if denial == "field" {
+						decision.WriteFields = []string{testFieldCode, testFieldDept, testFieldPrice}
+					} else {
+						decision.NewRowFilter = &c.Expression{Op: "ne", Field: testReferenceField, Value: raw(parentID)}
+					}
+				}
+				return decision, nil
+			})
+			f.handler = NewHandler(f.core.cfg)
+			before := f.transactionCounts()
+			failed := f.transaction(body, false, 200)
+			if failed.Committed || failed.Status != "failed" || failed.Error == nil || len(failed.Results) != 0 {
+				t.Fatal("referenced detail denial retained a partial success")
+			}
+			after := f.transactionCounts()
+			if after != [4]int{before[0], before[1], before[2], before[3] + 1} {
+				t.Fatal("referenced detail denial retained parent, detail or outbox")
+			}
+			for _, lookup := range []bool{true, false} {
+				replayed := f.transaction(body, lookup, 200)
+				if !replayed.Replayed || replayed.Status != "failed" || replayed.Error == nil || len(replayed.Results) != 0 || f.transactionCounts() != after {
+					t.Fatal("failed reference recovery performed writes or leaked IDs")
+				}
+			}
+		})
 	}
 }
 

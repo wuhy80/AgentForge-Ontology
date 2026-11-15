@@ -17,6 +17,7 @@ type preparedTransactionOperation struct {
 	request   mutationRequest
 	decisions mutationDecisions
 	command   mutationCommand
+	valueRefs map[string]c.TransactionResultReference
 }
 
 // Only complete terminal receipts are committed. A temporary claim stays in
@@ -234,6 +235,7 @@ func (h *handler) prepareWriteTransaction(ctx context.Context, p c.Principal, bo
 	operations := make([]preparedTransactionOperation, 0, len(body.Operations))
 	schemaMap := map[string]c.CurrentDefinition{}
 	clients, targets := map[string]bool{}, map[string]bool{}
+	prior := map[string]string{}
 	state := ""
 	for _, item := range body.Operations {
 		if !validWriteKey(item.ClientKey) || clients[item.ClientKey] {
@@ -280,7 +282,11 @@ func (h *handler) prepareWriteTransaction(ctx context.Context, p c.Principal, bo
 			}
 			state = decision.State
 		}
-		command, err := normalizeMutationCommand(current, decisions, item.Operation, policy, c.BulkWriteItem{ClientKey: item.ClientKey, ID: item.ID, IfMatch: item.IfMatch, Match: item.Match, Values: item.Values})
+		values, err := transactionReferenceValues(current.Definition.Schema, item, prior)
+		if err != nil {
+			return nil, nil, err
+		}
+		command, err := normalizeMutationCommand(current, decisions, item.Operation, policy, c.BulkWriteItem{ClientKey: item.ClientKey, ID: item.ID, IfMatch: item.IfMatch, Match: item.Match, Values: values})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -289,7 +295,8 @@ func (h *handler) prepareWriteTransaction(ctx context.Context, p c.Principal, bo
 			return nil, nil, problem(422, "duplicate_target", "同一事务不能重复匹配同一目标")
 		}
 		targets[key] = true
-		operations = append(operations, preparedTransactionOperation{current: current, request: mutationRequest{Operation: item.Operation, ConflictPolicy: policy}, decisions: decisions, command: command})
+		operations = append(operations, preparedTransactionOperation{current: current, request: mutationRequest{Operation: item.Operation, ConflictPolicy: policy}, decisions: decisions, command: command, valueRefs: item.ValueRefs})
+		prior[item.ClientKey] = item.Operation
 	}
 	schemas := make([]c.CurrentDefinition, 0, len(schemaMap))
 	contextTargets := map[string]bool{}
@@ -332,7 +339,7 @@ func (h *handler) recheckWriteTransaction(ctx context.Context, p c.Principal, op
 	return nil
 }
 
-func transactionOperationOrder(operations []preparedTransactionOperation) []int {
+func transactionOperationOrder(operations []preparedTransactionOperation) ([]int, error) {
 	order := make([]int, len(operations))
 	for i := range order {
 		order[i] = i
@@ -344,23 +351,56 @@ func transactionOperationOrder(operations []preparedTransactionOperation) []int 
 		}
 		return mutationKey(left.command.Match) < mutationKey(right.command.Match)
 	})
-	return order
+	// Gates are already locked in Schema ID order. Among eligible operations,
+	// retain the old target order while honoring validated backward references.
+	resolved := map[string]bool{}
+	ordered := make([]int, 0, len(order))
+	for len(order) > 0 {
+		progress := false
+		for position, index := range order {
+			ready := true
+			for _, ref := range operations[index].valueRefs {
+				ready = ready && resolved[ref.ClientKey]
+			}
+			if ready {
+				ordered = append(ordered, index)
+				resolved[operations[index].command.ClientKey] = true
+				order = append(order[:position], order[position+1:]...)
+				progress = true
+				break
+			}
+		}
+		if !progress {
+			return nil, problem(500, "transaction_reference_unresolved", "无法核对事务内结果引用")
+		}
+	}
+	return ordered, nil
 }
 
 func applyWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, operations []preparedTransactionOperation, saved *transactionSaved) (c.WriteTransactionResult, error) {
+	order, err := transactionOperationOrder(operations)
+	if err != nil {
+		return c.WriteTransactionResult{}, err
+	}
 	result := c.WriteTransactionResult{Atomic: true, Committed: true, Status: "committed", Results: make([]c.WriteResult, len(operations))}
 	seen := map[string]map[string]bool{}
-	for _, i := range transactionOperationOrder(operations) {
+	completed := map[string]mutationSavedItem{}
+	for _, i := range order {
 		item := operations[i]
 		id := item.current.Definition.ID
 		if seen[id] == nil {
 			seen[id] = map[string]bool{}
 		}
 		store := &platformMutationStore{tx: tx, p: p, current: item.current}
-		out, err := applyMutation(ctx, store, item.current, item.request, item.decisions, item.command, seen[id])
+		command, err := resolveTransactionReferences(item, completed)
 		if err != nil {
 			return c.WriteTransactionResult{}, err
 		}
+		out, err := applyMutation(ctx, store, item.current, item.request, item.decisions, command, seen[id])
+		if err != nil {
+			return c.WriteTransactionResult{}, err
+		}
+		completed[out.ClientKey] = out
 		authorization := map[string]string{}
 		authorization["enumContext"] = c.EnumContextDigest(item.current.Definition)
 		for name, decision := range item.decisions {
@@ -389,7 +429,11 @@ func replayWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, oper
 		return c.WriteTransactionResult{}, problem(500, "idempotency_corrupt", "无法核对原事务结果")
 	}
 	result.Committed, result.Results = true, make([]c.WriteResult, len(operations))
-	for _, i := range transactionOperationOrder(operations) {
+	order, err := transactionOperationOrder(operations)
+	if err != nil {
+		return c.WriteTransactionResult{}, err
+	}
+	for _, i := range order {
 		operation, historical := operations[i], saved.Items[i]
 		if len(historical.Items) != 1 || historical.Items[0].ClientKey != operation.command.ClientKey || historical.Items[0].Instance.SchemaID != operation.current.Definition.ID {
 			return c.WriteTransactionResult{}, problem(500, "idempotency_corrupt", "无法核对原事务结果")
