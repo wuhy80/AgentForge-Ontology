@@ -319,7 +319,7 @@ func (h *handler) savedQueriesExecuteHTTP(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	if len(request.Cursor) > 4096 || len(request.Parameters) > c.MaxSavedQueryParameters {
+	if len(request.Cursor) > 8192 || len(request.Parameters) > c.MaxSavedQueryParameters {
 		writeError(w, problem(422, "saved_query_budget", "运行参数或游标超过预算"))
 		return
 	}
@@ -328,9 +328,13 @@ func (h *handler) savedQueriesExecuteHTTP(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	input, current, err := h.validateSavedInput(r.Context(), p, savedQueryInput(saved))
+	if saved.Query.Rows == nil && len(request.Cursor) > 4096 {
+		writeError(w, problem(422, "saved_query_budget", "运行游标超过预算"))
+		return
+	}
+	input, schema, err := h.validateSavedInput(r.Context(), p, savedQueryInput(saved))
 	if err == nil {
-		_, err = savedParameterFields(&input.Query, current.Definition.Schema, input.Parameters, request.Parameters, false)
+		_, err = savedParameterFields(&input.Query, schema, input.Parameters, request.Parameters, false)
 	}
 	if err != nil {
 		writeError(w, err)

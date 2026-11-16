@@ -17,7 +17,7 @@ LIMIT 25;
 
 该子集仅支持默认平台MySQL单Schema，JOIN LINK与聚合不能组合，HAVING、窗口、表达式计量和映射聚合仍明确拒绝。聚合下的普通字段插入接口拒绝改稿，避免破坏GROUP BY或输出粒度。SQL与可视化的统计转换必须完整保留同一QuerySpec。
 
-个人模板使用独立 `POST /data/saved-queries/compile`，输入仅text和可选defaultCategoryId，不携带当前运行实参。它按AST区分固定常量与命名占位，输出稳定ID计划及参数声明，不查询业务行。模板编译首批拒绝IN/NOT IN列表中的任何命名参数，临时SQL原有标量参数列表不受影响。加载、执行旧模板使用已保存ID计划，不重新解析source.text；其权限和生命周期唯一见[个人保存查询](DataSet.md#个人保存查询2026-11-08本批实现)。
+个人模板使用独立 `POST /data/saved-queries/compile`，输入仅text和可选defaultCategoryId，不携带当前运行实参。它按AST区分固定常量与命名占位，输出稳定ID计划及参数声明，不查询业务行；2026-11-16增加已有1～4条INNER JOIN LINK模板，按节点属性推导参数，保留别名、方向和稳定Link ID。模板编译拒绝关系聚合及IN/NOT IN列表中的任何命名参数，临时SQL原有标量参数列表不受影响。加载、执行旧模板使用已保存ID计划，不重新解析source.text；其权限和生命周期唯一见[个人保存查询](DataSet.md#个人保存查询2026-11-08本批实现)。
 
 ## 1. 方案选择
 

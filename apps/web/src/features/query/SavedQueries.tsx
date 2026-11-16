@@ -4,11 +4,12 @@ import { Dialog } from '../../components/Dialog';
 import { ApiClient, ApiError } from '../../lib/api';
 import type { Property, QueryResult, SavedQuery, SavedQueryInput, SavedQuerySummary, Values } from '../../lib/types';
 import { AggregateResults } from './AggregateResults';
+import { RowResults } from './RowResults';
 import { ValueInput } from './InstanceDialog';
 import { errorMessage, propertyValueText } from './query';
 import { savedParameterValue } from './saved-query-template';
 
-const denied = (cause: unknown) => cause instanceof ApiError && ([401, 403, 404].includes(cause.status) || ['saved_query_binding_changed', 'definition_changed', 'unsupported_authorization', 'source_unavailable', 'field_unavailable'].includes(cause.code));
+const denied = (cause: unknown) => cause instanceof ApiError && ([401, 403, 404].includes(cause.status) || ['saved_query_binding_changed', 'definition_changed', 'authorization_changed', 'unsupported_authorization', 'source_unavailable', 'field_unavailable', 'link_unavailable'].includes(cause.code));
 const summary = ({ id, name, etag, createdAt, updatedAt }: SavedQuerySummary): SavedQuerySummary => ({ id, name, etag, createdAt, updatedAt });
 type Capture = (signal: AbortSignal) => Promise<Omit<SavedQueryInput, 'name'>>;
 
@@ -119,13 +120,18 @@ function SavedQueryRunner({ api, record, onDenied }: { api: ApiClient; record: S
   const [executed, setExecuted] = useState<{ values: Values; page: number }>();
   const [stale, setStale] = useState(false), [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [ready, setReady] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined), sequence = useRef(0);
   const deniedCallback = useRef(onDenied); deniedCallback.current = onDenied;
   useEffect(() => {
     const request = new AbortController();
-    api.queryContext({ schemaId: record.query.from.schemaId, limit: 1 }, request.signal).then((context) => { if (!request.signal.aborted) {
-      const model = context.models.find((item) => item.schemaId === record.query.from.schemaId);
-      if (!model) deniedCallback.current('查询模型或字段已不可用，请重新检查授权。'); else setFields(model.fields);
+    const schemaIds = [...new Set(record.query.rows?.nodes.map((node) => node.schemaId) ?? [record.query.from.schemaId!])];
+    Promise.all(schemaIds.map(async (schemaId) => {
+      const context = await api.queryContext({ schemaId, limit: 1 }, request.signal);
+      return context.models.find((item) => item.schemaId === schemaId);
+    })).then((models) => { if (!request.signal.aborted) {
+      if (models.some((model) => !model)) deniedCallback.current('查询模型或字段已不可用，请重新检查授权。');
+      else { setFields(models.flatMap((model) => model!.fields)); setReady(true); }
     } }).catch((cause: unknown) => { if (!request.signal.aborted) { if (denied(cause)) deniedCallback.current(errorMessage(cause)); else setError(errorMessage(cause)); } });
     return () => { request.abort(); sequence.current++; controller.current?.abort(); };
   }, [api, record]);
@@ -134,6 +140,7 @@ function SavedQueryRunner({ api, record, onDenied }: { api: ApiClient; record: S
     setDrafts((previous) => ({ ...previous, [name]: { ...(previous[name] ?? { mode: 'missing', text: '' }), ...patch } }));
   }
   async function run(next = false) {
+    if (!ready || busy) return;
     try {
       const values: Values = {};
       if (next) Object.assign(values, executed?.values);
@@ -148,16 +155,16 @@ function SavedQueryRunner({ api, record, onDenied }: { api: ApiClient; record: S
       try {
         const response = await api.executeSavedQuery(record.id, values, next ? result?.nextCursor : undefined, request.signal);
         if (request.signal.aborted || current !== sequence.current) return;
-        if (!!record.query.aggregate !== !!response.aggregateMode || response.rowMode) throw new Error('查询结果形态与模板不一致');
+        if (!!record.query.aggregate !== !!response.aggregateMode || !!record.query.rows !== !!response.rowMode) throw new Error('查询结果形态与模板不一致');
         setResult(response); setExecuted({ values, page: next ? (executed?.page ?? 1) + 1 : 1 }); setStale(false);
       } catch (cause) { if (!request.signal.aborted && current === sequence.current) { if (denied(cause)) { setDrafts({}); setResult(undefined); setExecuted(undefined); deniedCallback.current(errorMessage(cause)); } else setError(errorMessage(cause)); } }
       finally { if (!request.signal.aborted && current === sequence.current) setBusy(false); }
     } catch (cause) { setError(errorMessage(cause)); }
   }
-  const count = result?.aggregateMode ? result.aggregateRows?.length ?? 0 : result?.data.length ?? 0;
-  return <section className="card query-saved-runner" aria-label="已保存查询"><div className="query-section-heading"><div><FolderOpen size={17} /><h2>{record.name}</h2></div><span className="muted">按已保存的对象与字段运行</span></div><div className="query-saved-body"><p className="muted">{record.query.aggregate ? '分组汇总' : '明细查询'} · 每页 {record.query.page.limit} 条</p>{record.source.text && <details><summary>查看编写来源</summary><pre className="query-saved-source">{record.source.text}</pre></details>}{record.parameters.map((parameter) => {
+  const count = result?.rowMode ? result.rows?.length ?? 0 : result?.aggregateMode ? result.aggregateRows?.length ?? 0 : result?.data.length ?? 0;
+  return <section className="card query-saved-runner" aria-label="已保存查询"><div className="query-section-heading"><div><FolderOpen size={17} /><h2>{record.name}</h2></div><span className="muted">按已保存的对象与字段运行</span></div><div className="query-saved-body"><p className="muted">{record.query.rows ? '关联行查询（只读，每行是一组对象匹配）' : record.query.aggregate ? '分组汇总' : '明细查询'} · 每页 {record.query.page.limit} 条</p>{record.source.text && <details><summary>查看编写来源</summary><pre className="query-saved-source">{record.source.text}</pre></details>}{record.parameters.map((parameter) => {
     const draft = drafts[parameter.name] ?? { mode: 'missing' as const, text: '' };
     const source = fields.find((field) => field.enumId && field.enumId === parameter.enumId);
     return <div className="ontology-parameter" key={parameter.name}><label htmlFor={`saved-${parameter.name}`}>{parameter.name}<small className="muted">{parameter.dataType}{parameter.array ? ' 集合' : ''}</small></label><select aria-label={`${parameter.name}参数方式`} value={draft.mode} onChange={(event) => change(parameter.name, { mode: event.target.value as typeof draft.mode })}><option value="missing">待填写</option><option value="value">填写值</option>{parameter.nullable && !parameter.array && <option value="null">显式 NULL</option>}</select><div className="ontology-parameter-value">{parameter.array ? <textarea aria-label={`${parameter.name}参数值，每行一个`} id={`saved-${parameter.name}`} disabled={draft.mode !== 'value'} value={draft.text} onChange={(event) => change(parameter.name, { text: event.target.value })} placeholder="每行一个稳定业务值，最多 100 个" /> : <ValueInput property={{ ...parameter, id: parameter.name, ...(source ? { enumValues: source.enumValues } : {}) }} allowDeprecated id={`saved-${parameter.name}`} disabled={draft.mode !== 'value'} value={draft.text} onChange={(text) => change(parameter.name, { text })} />}</div></div>;
-  })}{!record.parameters.length && <p className="muted">此查询没有运行参数。</p>}</div><div className="query-run-bar"><span className="muted">每次运行按当前权限校验</span><div className="query-actions">{busy && <button type="button" className="button" onClick={() => { sequence.current++; controller.current?.abort(); setBusy(false); }}>取消查询</button>}<button type="button" className="button primary" disabled={busy} onClick={() => void run()}>{busy ? <LoaderCircle size={15} className="query-spin" /> : <Play size={15} />}运行保存查询</button></div></div>{error && <div className="notice notice-error" role="alert">{error}</div>}{stale && result && <div className="query-stale" role="status">参数已改变或查询待确认，请重新运行。续页已停用。</div>}{result && <section className="query-saved-results" aria-label="保存查询结果"><p className="muted">本页 {count} 条</p>{!count ? <p className="muted">没有匹配的数据。</p> : result.aggregateMode ? <AggregateResults result={result} /> : <div className="table-wrap"><table className="query-data-table"><thead><tr>{result.fields.map((field) => <th key={field.id}>{field.name}</th>)}</tr></thead><tbody>{result.data.map((row) => <tr key={row.id}>{result.fields.map((field) => <td key={field.id}>{propertyValueText(field, row.values[field.id])}</td>)}</tr>)}</tbody></table></div>}<div className="query-result-footer"><span className="muted">第 {executed?.page} 页</span><button type="button" className="button" disabled={busy || stale || !result.hasMore || !result.nextCursor} onClick={() => void run(true)}>保存查询下一页<ArrowRight size={14} /></button></div></section>}</section>;
+  })}{!record.parameters.length && <p className="muted">此查询没有运行参数。</p>}</div><div className="query-run-bar"><span className="muted">每次运行按当前权限校验</span><div className="query-actions">{busy && <button type="button" className="button" onClick={() => { sequence.current++; controller.current?.abort(); setBusy(false); }}>取消查询</button>}<button type="button" className="button primary" disabled={busy || !ready} onClick={() => void run()}>{busy ? <LoaderCircle size={15} className="query-spin" /> : <Play size={15} />}运行保存查询</button></div></div>{error && <div className="notice notice-error" role="alert">{error}</div>}{stale && result && <div className="query-stale" role="status">参数已改变或查询待确认，请重新运行。续页已停用。</div>}{result && <section className="query-saved-results" aria-label="保存查询结果"><p className="muted">本页 {count} 条</p>{!count ? <p className="muted">没有匹配的数据。</p> : result.rowMode ? <RowResults result={result} query={record.query} /> : result.aggregateMode ? <AggregateResults result={result} /> : <div className="table-wrap"><table className="query-data-table"><thead><tr>{result.fields.map((field) => <th key={field.id}>{field.name}</th>)}</tr></thead><tbody>{result.data.map((row) => <tr key={row.id}>{result.fields.map((field) => <td key={field.id}>{propertyValueText(field, row.values[field.id])}</td>)}</tr>)}</tbody></table></div>}<div className="query-result-footer"><span className="muted">第 {executed?.page} 页</span><button type="button" className="button" disabled={busy || !ready || stale || !result.hasMore || !result.nextCursor} onClick={() => void run(true)}>保存查询下一页<ArrowRight size={14} /></button></div></section>}</section>;
 }

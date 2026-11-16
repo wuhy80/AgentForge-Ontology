@@ -14,6 +14,33 @@ import (
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 )
 
+func TestSavedQuerySQLCompileInnerRowsKeepsScopedASTParameters(t *testing.T) {
+	base := rowSQLTestHandler(t, rowSQLDefinitions(), "") // No business Engine.
+	app := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		base.ServeHTTP(w, r.WithContext(platform.WithSessionUser(r.Context(), c.User{TenantID: "tenant-a", ID: "reader", Enabled: true})))
+	})
+	text := `SELECT "e"."设备编码", "w"."金额", "l"."计数" FROM "生产管理"."设备" AS "e" JOIN LINK "e"."工单" AS "w" JOIN LINK "w"."产线" AS "l" WHERE "w"."金额" >= :下限 AND "w"."编号" = '固定文本' ORDER BY "l"."计数" DESC LIMIT 1;`
+	w := callOntologySQL(t, app, "POST", "/data/saved-queries/compile", c.SavedQueryCompileRequest{Text: text})
+	var out c.SavedQueryTemplate
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+		t.Fatalf("row SQL template: %d %s", w.Code, w.Body)
+	}
+	if out.Query.Rows == nil || len(out.Query.Rows.Joins) != 2 || len(out.Parameters) != 1 || out.Parameters[0].DataType != "decimal" || out.Query.Where.Args[0].Field != "n1."+testFieldPrice || out.Query.Where.Args[0].Parameter != "下限" || len(out.Query.Where.Args[0].Value) != 0 || string(out.Query.Where.Args[1].Value) != `"固定文本"` || out.Query.OrderBy[0].Field != "n2."+testFieldPrice {
+		t.Fatalf("row AST parameter identity/type lost: %+v", out)
+	}
+	for _, invalid := range []string{
+		`SELECT "e"."设备编码", COUNT(*) FROM "生产管理"."设备" AS "e" JOIN LINK "e"."工单" AS "w" GROUP BY "e"."设备编码" LIMIT 1`,
+		strings.Replace(text, `"工单" AS "w"`, `"不存在" AS "w"`, 1),
+		strings.Replace(text, `"w"."编号" = '固定文本'`, `"l"."计数" = :下限`, 1),
+		strings.Replace(text, `"w"."金额" >= :下限`, `"w"."金额" IN (:下限)`, 1),
+	} {
+		w := callOntologySQL(t, app, "POST", "/data/saved-queries/compile", c.SavedQueryCompileRequest{Text: invalid})
+		if w.Code != 422 || strings.Contains(w.Body.String(), `"query"`) {
+			t.Fatalf("invalid row SQL template accepted: %d %s", w.Code, w.Body)
+		}
+	}
+}
+
 func TestSavedQuerySQLCompileKeepsASTParametersAndSupportsAggregate(t *testing.T) {
 	definition := ontologySQLTestDefinition()
 	definition.ID, definition.TenantID = c.NewID(), "saved-query-compiler"

@@ -15,6 +15,31 @@ function fixture() {
 async function load() { fireEvent.click(await screen.findByRole('button', { name: /我的查询/ })); fireEvent.click(await screen.findByRole('button', { name: '订单筛选' })); await screen.findByRole('button', { name: '运行保存查询' }); }
 
 describe('保存查询目录与稳定模板运行', () => {
+  it('关联模板读取各模型枚举，按匹配行展示来源、续页并在目标撤权时清除', async () => {
+    const { api, onDenied } = fixture();
+    const joined: SavedQuery = { ...record, query: { ...record.query, rows: { nodes: [{ id: 'n0', schemaId: 'stable-orders', alias: '订单' }, { id: 'n1', schemaId: 'details', alias: '明细' }], joins: [{ from: 'n0', to: 'n1', linkId: 'relation', direction: 'out' }] }, select: ['n1.amount'], where: { op: 'gte', field: 'n1.amount', parameter: '最低金额' } } };
+    api.getSavedQuery.mockResolvedValue(joined);
+    api.queryContext.mockImplementation(async ({ schemaId }) => ({ models: [{ schemaId, fields: [{ id: 'amount', name: '金额', dataType: 'decimal', precision: 24, scale: 6 }] }] }));
+    api.executeSavedQuery.mockResolvedValue({ rowMode: true, data: [], fields: [{ id: 'n1.amount', name: '明细.金额', dataType: 'decimal' }], rows: [{ id: 'tuple', values: { 'n1.amount': '9007199254740993.000001' }, entities: [{ nodeId: 'n0', schemaId: 'stable-orders', instanceId: 'order-1' }, { nodeId: 'n1', schemaId: 'details', instanceId: 'detail-2' }] }], hasMore: true, nextCursor: 'row-cursor' });
+    await load();
+    await waitFor(() => expect(api.queryContext).toHaveBeenCalledTimes(2));
+    expect(api.executeSavedQuery).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('最低金额参数方式'), { target: { value: 'value' } });
+    fireEvent.change(screen.getByLabelText(/最低金额decimal/), { target: { value: '9007199254740993.000001' } });
+    fireEvent.click(screen.getByRole('button', { name: '运行保存查询' }));
+    const table = await screen.findByRole('table', { name: '关联行查询结果' });
+    expect(within(table).getByText('detail-2')).toBeTruthy();
+    expect(screen.getByText('本页 1 条')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /编辑实例|删除实例/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '保存查询下一页' }));
+    await waitFor(() => expect(api.executeSavedQuery).toHaveBeenCalledTimes(2));
+    expect(api.executeSavedQuery.mock.calls[1].slice(0, 3)).toEqual(['saved', { 最低金额: '9007199254740993.000001' }, 'row-cursor']);
+    api.executeSavedQuery.mockRejectedValue(new ApiError(403, 'forbidden', '明细查询权限已撤销'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '运行保存查询' }).matches(':disabled')).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: '运行保存查询' }));
+    await waitFor(() => expect(onDenied).toHaveBeenCalledWith('明细查询权限已撤销'));
+    expect(screen.queryByRole('table', { name: '关联行查询结果' })).toBeNull();
+  });
   it('旧后端没有声明保存查询能力时只显示原编写区', async () => {
     const api = { dataCapabilities: vi.fn().mockResolvedValue({}) } as unknown as ApiClient;
     render(<SavedQueries api={api} capture={vi.fn()} onDenied={vi.fn()}><p>原查询草稿</p></SavedQueries>);

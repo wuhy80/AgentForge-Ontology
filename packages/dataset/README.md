@@ -33,7 +33,7 @@ const second = await first.nextPage();
 if (second) render(second.result);
 ```
 
-`from/fromSpec/select/where/orderBy/limit/aggregate`只构造新的查询对象，不读取业务数据。where追加AND，select和orderBy替换对应配置；派生对象、输入表达式及导出的toQuery快照相互独立。绑定后的投影、条件或排序变更需要重新bind，已绑定源Schema仍保留原ID；改名或同名新建不接管原绑定。
+`from/fromSpec/select/where/orderBy/limit/aggregate/rows`只构造新的查询对象，不读取业务数据。where追加AND，select和orderBy替换对应配置；派生对象、输入表达式及导出的toQuery快照相互独立。绑定后的投影、条件、排序或关联作用域变更需要重新bind，已绑定源Schema仍保留原ID；改名或同名新建不接管原绑定。
 
 bind调用 `POST /data/query/bind`，由服务端将名称解析成稳定Schema/field ID，并返回安全输出字段；只读取元数据和当前授权，不扫描业务行，也不创建持久定义。它不保证物理表就绪或以后执行成功。execute要求先bind，再调用原 `POST /data/query`；每页继续由后端校验当前权限、定义及来源，绑定计划不是授权令牌。`fromSpec`导入普通无游标QuerySpec后也须绑定，不能用导入标记绕过服务校验。
 
@@ -62,7 +62,28 @@ render((await totals.execute()).result);
 
 应用退出或替换账号时调用 `transport.invalidate()`，丢弃在途请求，并为新会话重新创建transport；不能把旧transport复用于新账号。
 
-首批只构造单Schema实体及默认平台MySQL聚合，rows/via关系计划明确拒绝。实体映射仍由后端实际能力决定；SDK不额外开放关系聚合、HAVING、单位换算、全文、任意SQL、写入、团队保存、无界all或离线全集计算。三语言Function/Action隔离运行器不因此获得网络或数据SDK。
+2026-11-16增加已有INNER Link关联计划，使用授权目录或SQL编译得到的稳定Schema、Link及属性ID。下面的变量代表调用方已有的稳定ID，不是业务名称：
+
+```typescript
+const linked = await DataSet.from(transport, { schemaId: orderSchemaId })
+  .rows({
+    nodes: [
+      { id: 'n0', schemaId: orderSchemaId, alias: '订单' },
+      { id: 'n1', schemaId: lineSchemaId, alias: '明细' },
+    ],
+    joins: [{ from: 'n0', to: 'n1', linkId: orderLineLinkId, direction: 'out' }],
+  })
+  .select(`n0.${orderCodeFieldId}`, `n1.${lineAmountFieldId}`)
+  .limit(10)
+  .bind();
+const page = await linked.execute();
+// rowMode:true，data:[]；每行保留values和全部节点的entities来源。
+render(page.result.rows);
+```
+
+节点依次n0..n4，每条INNER Link从已有节点接入一个新节点，支持分支和自关联。绑定同时检查各对象的definition.read/instance.query及各Link的definition.read/link.query；单模型绑定原权限条件保持不变。只读结果保留投影相同的不同对象匹配，行ID不能当实例ID使用，没有对象ETag；详情规则由[INNER Link查询复用](../../docs/数据查询/DataSet.md#inner-link查询复用2026-11-16已实现)维护。
+
+via固定实例导航、LEFT、EXISTS及关系聚合仍拒绝。实体和关联映射仍由后端实际能力决定；SDK不额外开放HAVING、单位换算、全文、任意SQL、写入、团队保存、无界all或离线全集计算。三语言Function/Action隔离运行器不因此获得网络或业务查询能力。
 
 `createBrowserTransport`仅接受同源路径basePath，默认 `/api/data`；固定POST、Cookie、CSRF、禁止重定向、不缓存。默认20秒超时，可配置1～60000毫秒，响应8MiB预算在流读取时执行；401使该transport及其在途输出失效，应用退出时须显式invalidate。403保留服务端受控错误，不自动登录或更换身份。Node等其他环境可注入 `QueryTransport={bind,query}`，认证仍须遵守公开接口，SDK不代管密码、Cookie容器、OAuth或服务账号。
 

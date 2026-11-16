@@ -10,7 +10,7 @@ import type { VisualDraft } from './VisualQueryPage';
 import { OntologySQLWorkspace } from './OntologySQLWorkspace';
 import type { SQLDraftMemory, SQLWorkspaceHandle, VisualConversion } from './OntologySQLWorkspace';
 import { SavedQueries } from './SavedQueries';
-import { visualSavedTemplate } from './saved-query-template';
+import { visualRowSavedTemplate, visualSavedTemplate } from './saved-query-template';
 import './query.css';
 
 type Props = { api: ApiClient; categoryId: string; schemas: DefinitionRecord[]; categories?: Organization[]; initialSchemaId?: string; selectionRequest?: number; onModel: () => void };
@@ -57,7 +57,11 @@ function QueryModes({ initialDraft, remember, ...props }: Props & { initialDraft
     }
     const current = visualDraft.current;
     if (!current) throw new Error('请先配置可视化查询');
-    if (current.association) throw new Error('保存查询首批支持单模型，暂不支持 Link 关联');
+    if (current.association) {
+      const context = await loadRowContext(props.api, current.association.rows, props.categories ?? [], signal);
+      if (visualDraft.current !== current) throw new Error('查询配置已改变，请重新保存');
+      return { ...visualRowSavedTemplate(current.association.rows, context, current.editor), source: { kind: 'visual', defaultCategoryId: props.categoryId } };
+    }
     const context = await props.api.queryContext({ schemaId: current.schema.definition.id, limit: 1 }, signal);
     const model = context.models.find((item) => item.schemaId === current.schema.definition.id);
     if (!model) throw new Error('模型当前不可查询，请检查授权');

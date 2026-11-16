@@ -2,6 +2,7 @@ package data
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
 
@@ -40,25 +41,38 @@ func (h *handler) compileSavedQuery(r *http.Request, p c.Principal, request c.Sa
 		}
 		return out, problem(422, "invalid_saved_query_sql", message)
 	}
+	binder := ontologySQLBinder{statement: statement, analysis: c.OntologySQLAnalysis{Diagnostics: []c.SQLDiagnostic{}}}
+	var err error
 	if len(statement.Joins) != 0 {
-		return out, problem(422, "unsupported_saved_query", "保存查询首批仅支持单模型模板，不支持JOIN LINK")
+		if len(statement.Measures) != 0 || len(statement.GroupBy) != 0 {
+			return out, problem(422, "aggregate_unsupported", "聚合不支持JOIN LINK")
+		}
+		binder.rowScope, err = h.rowSQLScope(r, p, statement, request.DefaultCategoryID)
+		if err != nil {
+			var binding *ontologySQLBindingError
+			if errors.As(err, &binding) {
+				return out, problem(422, "invalid_saved_query_sql", binding.Diagnostic.Message)
+			}
+			return out, err
+		}
+	} else {
+		current, err := h.resolveOntologySQLSource(r, p, statement.SourceCategory, statement.SourceSchema, request.DefaultCategoryID)
+		if err != nil {
+			return out, err
+		}
+		if err := validateSchema(current.Definition); err != nil {
+			return out, err
+		}
+		decision, err := h.authorize(r.Context(), p, "instance.query", current.Definition.ID)
+		if err != nil {
+			return out, err
+		}
+		filtered := current.Definition
+		schema := *filtered.Schema
+		schema.Properties = projection(filtered.Schema, decision.ReadFields)
+		filtered.Schema = &schema
+		binder.definition = filtered
 	}
-	current, err := h.resolveOntologySQLSource(r, p, statement.SourceCategory, statement.SourceSchema, request.DefaultCategoryID)
-	if err != nil {
-		return out, err
-	}
-	if err := validateSchema(current.Definition); err != nil {
-		return out, err
-	}
-	decision, err := h.authorize(r.Context(), p, "instance.query", current.Definition.ID)
-	if err != nil {
-		return out, err
-	}
-	filtered := current.Definition
-	schema := *filtered.Schema
-	schema.Properties = projection(filtered.Schema, decision.ReadFields)
-	filtered.Schema = &schema
-	binder := ontologySQLBinder{statement: statement, definition: filtered, analysis: c.OntologySQLAnalysis{Diagnostics: []c.SQLDiagnostic{}}}
 	declarations := map[string]c.SavedQueryParameter{}
 	samples := map[string]json.RawMessage{}
 	var visit func(*ontologySQLExpression) error
@@ -100,7 +114,12 @@ func (h *handler) compileSavedQuery(r *http.Request, p c.Principal, request c.Sa
 	if len(declarations) > c.MaxSavedQueryParameters {
 		return out, problem(422, "saved_query_budget", "SQL模板最多64个参数")
 	}
-	analysis := bindOntologySQL(statement, filtered, samples)
+	var analysis c.OntologySQLAnalysis
+	if binder.rowScope != nil {
+		analysis = bindRowOntologySQL(statement, binder.rowScope, samples)
+	} else {
+		analysis = bindOntologySQL(statement, binder.definition, samples)
+	}
 	if !analysis.Ready || analysis.Query == nil || len(analysis.Diagnostics) != 0 {
 		message := "SQL模板绑定检查未通过"
 		if len(analysis.Diagnostics) != 0 {

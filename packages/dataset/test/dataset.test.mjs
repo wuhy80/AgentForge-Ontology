@@ -58,7 +58,8 @@ test('runtime rejects imprecise/non-JSON values, unsupported combinations and ma
   for (const value of [[['nested']], [1], [undefined], [], new Array(1)]) assert.throws(() => dataset.where({ op: 'in', field: '金额', value }), DataSetError);
   const getter = []; Object.defineProperty(getter, '0', { get() { throw new Error('getter must not run'); }, enumerable: true });
   assert.throws(() => dataset.where({ op: 'in', field: '金额', value: getter }), DataSetError);
-  for (const key of ['rows', 'via', 'execute', 'unknown']) assert.throws(() => DataSet.fromSpec(transport, { ...dataset.toQuery(), [key]: {} }), errorCode('unsupported_query'));
+  for (const key of ['via', 'execute', 'unknown']) assert.throws(() => DataSet.fromSpec(transport, { ...dataset.toQuery(), [key]: {} }), errorCode('unsupported_query'));
+  assert.throws(() => DataSet.fromSpec(transport, { ...dataset.toQuery(), rows: {} }), DataSetError);
   for (const extra of [{ parameter: '金额' }, { valueRef: { source: 'user' } }]) assert.throws(() => dataset.where({ op: 'eq', field: '金额', value: '1', ...extra }), errorCode('unsupported_query'));
   assert.throws(() => DataSet.fromSpec(transport, { ...dataset.toQuery(), page: { limit: 25, cursor: 'external-cursor' } }), DataSetError);
   assert.throws(() => DataSet.from(transport, { ...source, schemaId: 'mixed' }), DataSetError);

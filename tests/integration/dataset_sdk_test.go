@@ -162,7 +162,7 @@ func (process *dataSetSDKProcess) stage(stage string, payload map[string]any) {
 	case ack := <-process.acks:
 		if ack.Stage != stage || !ack.OK {
 			checkpoint := "unknown"
-			for _, safe := range []string{"initial-plan", "initial-bind", "initial-entity", "entity-pages", "summary-bind", "summary-result", "group-pages", "descriptor-copy", "renamed-existing", "renamed-fresh", "reader-page", "reader-hidden", "revoked-page", "revoked-execute"} {
+			for _, safe := range []string{"initial-plan", "initial-bind", "initial-entity", "entity-pages", "summary-bind", "summary-result", "group-pages", "descriptor-copy", "renamed-existing", "renamed-fresh", "reader-page", "reader-hidden", "revoked-page", "revoked-execute", "rows-bind", "rows-pages", "rows-renamed"} {
 				if ack.Checkpoint == safe {
 					checkpoint = safe
 				}

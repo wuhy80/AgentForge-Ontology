@@ -1,6 +1,6 @@
 # DataSet：数据查询、关系导航与多跳执行
 
-状态：完整查询设计与当前实现并行维护；已实现中文结构化查询、同库 Link 单跳正反导航、最多4条INNER Link关联行，以及默认平台MySQL单模型聚合和个人保存查询；OntologySQL与JSON共用QuerySpec和执行器。本批继续落实TypeScript SDK及公共只读绑定，复杂聚合和性能验收尚未完成。当前范围及验证见[项目总览](../项目总览.md#当前实现与验证2026-11-06)。本文继续是各入口公共查询语义的唯一主要说明；文本语法见[OntologySQL](OntologySQL.md)，实例保存见[数据读写](../数据读写.md)，类型/单位见[Schema](../模块/Schema.md)，关系语义见[Link](../模块/Link.md)。
+状态：完整查询设计与当前实现并行维护；已实现中文结构化查询、同库 Link 单跳正反导航、最多4条INNER Link关联行，以及默认平台MySQL单模型聚合和个人保存查询；OntologySQL与JSON共用QuerySpec和执行器。2026-11-16补齐INNER Link计划的保存、公共绑定和TypeScript SDK执行/分页，复杂聚合和性能验收尚未完成。当前范围及验证见[项目总览](../项目总览.md#当前实现与验证2026-11-06)。本文继续是各入口公共查询语义的唯一主要说明；文本语法见[OntologySQL](OntologySQL.md)，实例保存见[数据读写](../数据读写.md)，类型/单位见[Schema](../模块/Schema.md)，关系语义见[Link](../模块/Link.md)。
 
 ## 当前实现协议（2026-11-06）
 
@@ -34,7 +34,7 @@ HAVING、关系聚合、分层汇总、映射/跨源聚合、单位换算、物�
 
 实际契约见[saved_queries.go](../../contracts/saved_queries.go)。保存查询归Data的个人配置，按权威会话的租户和用户隔离，不参与五类本体定义的名称登记，不设置发布草稿或业务version；每用户最多100份、每份128KiB、最多64个参数，名称在本人目录内规范化唯一。并发创建按owner guard串行检查配额。平台控制表须通过显式 `011_saved_query_owners` 与 `012_saved_queries` 迁移创建，不在请求或普通启动时建表。
 
-保存内容为name、`source:{kind,text?,defaultCategoryId?}`、已绑定QuerySpec及参数声明；kind为visual或ontology-sql。source只用于说明编辑来源，保存、加载和运行不根据其中中文文本重新绑定。计划必须使用稳定Schema/field ID、无旧游标；首批不保存rows/via关系查询。模型或属性改名保留绑定，同名重建不能接管旧ID。显式固定常量属于用户主动保存的规则；运行实参、密码、会话、业务结果及游标不随模板持久保存，也不默认写入浏览器存储。
+保存内容为name、`source:{kind,text?,defaultCategoryId?}`、已绑定QuerySpec及参数声明；kind为visual或ontology-sql。source只用于说明编辑来源，保存、加载和运行不根据其中中文文本重新绑定。计划必须使用稳定Schema/field ID、无旧游标；2026-11-16增加rows关联模板，via固定实例导航仍拒绝。模型、属性或Link改名保留绑定，同名重建不能接管旧ID。显式固定常量属于用户主动保存的规则；运行实参、密码、会话、业务结果及游标不随模板持久保存，也不默认写入浏览器存储。
 
 模板条件通过 `Expression.parameter` 引用声明，不能同时提交value。声明包含name、dataType、nullable及必要precision/scale、enumId、array；不允许default或value字段。服务端按引用字段和操作符交叉核对类型，同名参数用在不兼容位置时拒绝；IN/NOT IN可使用整组数组参数。普通QuerySpec不接受尚未绑定的parameter，运行先完整验证并绑定实参，再交给同一公共查询执行器。缺参数、多余参数、非法类型、失效Enum及不支持的组合明确拒绝，不执行近似查询。
 
@@ -50,7 +50,7 @@ HAVING、关系聚合、分层汇总、映射/跨源聚合、单位换算、物�
 
 SQL编译根据语法树保留参数身份，不按值相同或字符范围猜测；模板编译首批拒绝SQL IN集合中的任何命名参数，不把标量参数悄悄变为数组，原临时SQL的标量IN参数列表不受影响。该编译是显式的新名称绑定，加载旧模板和运行都不会调用编译接口。保存校验只读取元数据并编译计划，不默认扫描样例或执行聚合。加载仅恢复模板和空实参区，不自动运行；用户显式运行后才查询。未知创建结果先核对本人目录，不盲目重发创建。
 
-拥有模板不授予数据权限；当前保存、详情、编译及执行要求目标模型的definition.read与instance.query，并校验完整字段及条件权限，不能将业务目录仅需instance.query的资格推广到模板正文。详情或执行在当前权限失效时拒绝返回规则正文和结果，提交后也复核授权；目录仅保留本人标题便于清理。团队分享、发布、跨用户管理、自动执行、缓存/物化、定时报表、MCP个人查询管理和DataSet SDK均未因本节开放；后续按各自协议扩展。
+拥有模板不授予数据权限；当前保存、详情、编译及执行要求目标模型的definition.read与instance.query，并校验完整字段及条件权限，关联模板还核对全部节点及Link的授权，不能将业务目录仅需instance.query的资格推广到模板正文。详情或执行在当前权限失效时拒绝返回规则正文和结果，提交后也复核授权；目录仅保留本人标题便于清理。团队分享、发布、跨用户管理、自动执行、缓存/物化、定时报表及MCP个人查询管理仍未开放；DataSet SDK的独立查询范围见下节，不提供个人模板管理接口。
 
 ### 关联行查询增量（2026-11-07）
 
@@ -66,17 +66,27 @@ SQL编译根据语法树保留参数身份，不按值相同或字符范围猜�
 
 ### TypeScript SDK与公共绑定（2026-11-08本批实现）
 
-首批独立SDK见[packages/dataset](../../packages/dataset/README.md)，包名 `@agentforge/ontology-dataset`，运行时无第三方依赖，当前仓库内构建，未发布npm。它只构造首批单Schema实体和默认平台聚合；关系查询、写入、SDK执行于Function/Action容器及其他语言客户端仍未开放。SDK不依赖工作台组件，也不自行读取或拼接数据库表。
+独立SDK见[packages/dataset](../../packages/dataset/README.md)，包名 `@agentforge/ontology-dataset`，运行时无第三方依赖，当前仓库内构建，未发布npm。它构造单Schema实体、默认平台聚合及下节INNER Link关联行；写入、SDK执行于Function/Action容器及其他语言客户端仍未开放。SDK不依赖工作台组件，也不自行读取或拼接数据库表。
 
-`DataSet.from(transport,source)`、`fromSpec`及链式select/where/orderBy/limit/aggregate均生成独立查询对象，不执行请求；where追加AND，select和orderBy替换对应配置，toQuery返回独立快照。Schema、字段可按中文名称编写，普通实体必须显式投影，统计则使用空select。精确int64、decimal和时间继续为字符串，SDK拒绝查询值中的JavaScript number/BigInt及不支持的结构，不允许JSON编码静默改值。具体调用签名、构建及示例由包README维护，不重复定义公共查询操作符。
+`DataSet.from(transport,source)`、`fromSpec`及链式select/where/orderBy/limit/aggregate/rows均生成独立查询对象，不执行请求；where追加AND，select和orderBy替换对应配置，toQuery返回独立快照。单模型的Schema、字段可按中文名称编写，关联构造使用稳定作用域ID；普通实体与关联行必须显式投影，统计则使用空select。精确int64、decimal和时间继续为字符串，SDK拒绝查询值中的JavaScript number/BigInt及不支持的结构，不允许JSON编码静默改值。具体调用签名、构建及示例由包README维护，不重复定义公共查询操作符。
 
-新增 `POST /data/query/bind` 直接接受无游标QuerySpec，返回[QueryBinding](../../contracts/query_binding.go) `{query,fields}`；能力目录增加 `queryBinding:true`。入口复用原resolve、instance.query及同一逻辑编译，绑定源、条件、投影、排序、分组和计量字段为稳定ID，仅返回安全输出字段，不返回行授权条件、完整定义、物理映射或SQL。当前只绑定单Schema实体及默认平台聚合，rows/via、任何显式page.cursor（含空字符串/null）和未知协议字段均拒绝。它只读取元数据及授权，不访问业务表或数据源物理目录、不取样、不获得发布gate；定义、Enum及完整授权决策在交付前复核。绑定成功不承诺物理表就绪、游标可用或未来执行成功，既有来源与执行限制仍在实际查询时检查。
+`POST /data/query/bind` 直接接受无游标QuerySpec，返回[QueryBinding](../../contracts/query_binding.go) `{query,fields}`；能力目录提供 `queryBinding:true`。入口复用原resolve、instance.query及逻辑编译，绑定源、条件、投影、排序、分组和计量字段为稳定ID，仅返回安全输出字段，不返回行授权条件、完整定义、物理映射或SQL。当前支持单Schema实体、默认平台聚合及INNER Link关联行；via、任何显式page.cursor（含空字符串/null）和未知协议字段均拒绝。它只读取元数据及授权，不访问业务表或数据源物理目录、不取样、不获得发布gate；定义、Enum及完整授权决策在交付前复核。绑定成功不承诺物理表就绪、游标可用或未来执行成功，既有来源与执行限制仍在实际查询时检查。
 
 SDK的bind返回新的已绑定DataSet，execute要求先绑定，执行及续页仍调用原 `POST /data/query`。后续修改投影、条件、排序或统计需重新bind，已绑定的源SchemaID保留；limit可派生但产生新执行，旧页续页保持原页大小及计划。bind返回值不是授权令牌，QuerySpec导入也必须绑定，实际运行每页重新授权。模型改名不触发重绑，字段类型或权限失效直接报错；不能按旧中文源文自动寻找同名新模型。
 
 页对象提供result与nextPage；下一页只使用私有保存的同一ID计划和签名游标，修改已返回结果不会改变其执行上下文。重复游标、缺失续页凭据、错误结果模式明确拒绝。`pages({maxPages,signal?})`要求显式1～100页预算，到预算停止且保留服务端hasMore，不把已读取页冒充完整全集；没有无界all或隐式客户端聚合。AbortSignal可取消绑定、执行和分页，客户端无自动重试、重绑定、缓存及持久结果。跨页一致性仍沿原实体/聚合规则，不提供历史快照。
 
 默认浏览器transport复用现有同源Cookie与内存CSRF，禁止外部URL、重定向和响应缓存；退出或替换会话须invalidate，401使在途及未来请求失效。当前仅提供查询传输，SDK不创建账号、恢复登录或代管密码。Node等环境可注入公共HTTP传输，仍须独立落实合法认证和TLS；不能将内部服务凭据当作当前用户权限。构建、模拟传输测试、真实公开HTTP验证和文档检查分别记录在项目总览。
+
+### INNER Link查询复用（2026-11-16，已实现）
+
+个人保存查询、SQL模板编译、公共绑定及TypeScript SDK已复用既有 `rows={nodes,joins}` 计划；结构、结果粒度及执行限制继续沿上节[关联行查询](#关联行查询增量2026-11-07)。不新增查询执行器、路由或平台迁移，不开放LEFT、EXISTS、关系聚合、跨源JOIN或固定实例via。
+
+关联绑定和模板要求每个节点的 `definition.read/instance.query` 及每条Link的 `definition.read/link.query`，保留各自完整决策和定义/Enum快照并在交付前复核。字段必须使用 `nX.稳定属性ID`，筛选和排序也不回退为业务名称。主表属性及同源关系兼容性先按元数据校验；来源网络、版本、物理目录、发布gate及业务数据只在真实执行时检查，绑定成功不代表这些条件已就绪。
+
+模板参数按各节点字段分别推导，重复使用同一Schema或属性ID不会混淆作用域；同名参数用于不兼容类型或枚举时拒绝。保存/详情只作元数据和授权检查；样例值仅临时验证类型，不进入存储。执行时绑定本次参数再进入原关联行执行器，运行值、权限或定义改变会使旧游标失效。关联执行游标最多8192字节，其余保存查询运行游标仍为4096字节；目录摘要分页保持原限制。
+
+SDK通过 `rows(scope)` 或fromSpec接受稳定节点/Link计划，关联字段使用作用域ID；不提供Link名称链式解析。所有构造、派生及导出快照仍无I/O且相互独立，修改关联作用域需重新绑定。绑定响应不能改变原节点、别名、Link或方向；行结果要求空data、完整匹配的输出values及各节点的 `{nodeId,schemaId,instanceId}`。保留相同投影的不同匹配行，不把行ID或来源元组伪装成可编辑实体/ETag；分页、取消、响应预算及禁止自动重绑规则沿用原协议。
 
 ## 1. DataSet 的定位
 
@@ -242,4 +252,4 @@ DataSet.从("生产管理", "设备")
 | DATA-11 | 多跳按完整计划执行且限制中间成本 | 同库候选使用受控 SQL/批量计划而非逐实体远程访问；同库/分表/跨源分别验证结果及读取契约，优化不忽略层级过滤、上下文、权限及去重；小结果页遇高扇出仍有扫描/内存/时间上限，超限不返回完整成功 |
 | DATA-12 | 中文编写绑定当前 ID 且改名不误查 | 按中文分类/Schema/属性/Link 及方向构造相同底层计划；跨分类同名、字段/方向歧义及名称-ID 矛盾拒绝；改名后已绑定查询身份不变，同名新建不接管，输出中文别名不覆盖，解析不逐行回源 |
 
-待定：后续关系节点、复杂聚合、精确总数成本、查询计划预览、团队模板、多跳预算与三库/跨源能力认证。当前单模型、个人模板、公共绑定及TypeScript SDK协议以上节实际契约为准；完整目标中的示例继续标明候选，不代表已实现。
+待定：后续关系节点、复杂聚合、精确总数成本、查询计划预览、团队模板、多跳预算与三库/跨源能力认证。当前单模型/有界INNER Link、个人模板、公共绑定及TypeScript SDK协议以上节实际契约为准；完整目标中的示例继续标明候选，不代表已实现。

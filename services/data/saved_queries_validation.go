@@ -38,8 +38,8 @@ func savedInputFields(input c.SavedQueryInput) error {
 	if input.Source.Kind == "visual" && input.Source.Text != "" {
 		return problem(422, "invalid_saved_query_source", "可视化查询不能携带SQL编辑文本")
 	}
-	if !uuidPattern.MatchString(input.Query.From.SchemaID) || input.Query.From.Schema != "" || input.Query.From.Category != "" || input.Query.Rows != nil || input.Query.Via != nil || input.Query.Page.Cursor != "" {
-		return problem(422, "unsupported_saved_query", "保存查询仅支持稳定Schema ID的单模型模板，不能保存关联模式、名称绑定或运行游标")
+	if !uuidPattern.MatchString(input.Query.From.SchemaID) || input.Query.From.Schema != "" || input.Query.From.Category != "" || input.Query.Via != nil || input.Query.Page.Cursor != "" {
+		return problem(422, "unsupported_saved_query", "保存查询需要稳定Schema ID，不能保存固定实例导航、名称绑定或运行游标")
 	}
 	if len(input.Parameters) > c.MaxSavedQueryParameters {
 		return problem(422, "saved_query_budget", "保存查询最多64个参数")
@@ -226,37 +226,40 @@ func validateSavedParameterValue(property c.Property, raw json.RawMessage, array
 	return nil
 }
 
-func (h *handler) validateSavedInput(ctx context.Context, p c.Principal, input c.SavedQueryInput) (c.SavedQueryInput, c.CurrentDefinition, error) {
+func (h *handler) validateSavedInput(ctx context.Context, p c.Principal, input c.SavedQueryInput) (c.SavedQueryInput, *c.Schema, error) {
 	input.Name = norm.NFC.String(strings.TrimSpace(input.Name))
 	if err := savedInputFields(input); err != nil {
-		return input, c.CurrentDefinition{}, err
+		return input, nil, err
 	}
 	input, err := cloneSavedInput(input)
 	if err != nil {
-		return input, c.CurrentDefinition{}, err
+		return input, nil, err
+	}
+	if input.Query.Rows != nil {
+		return h.validateSavedRowInput(ctx, p, input)
 	}
 	current, err := h.current(ctx, p.TenantID, input.Query.From.SchemaID)
 	if err != nil {
-		return input, current, err
+		return input, nil, err
 	}
 	if err := validateSchema(current.Definition); err != nil {
-		return input, current, err
+		return input, nil, err
 	}
 	discovery, err := h.authorize(ctx, p, "definition.read", current.Definition.ID)
 	if err != nil {
-		return input, current, err
+		return input, nil, err
 	}
 	if discovery.RowFilter != nil || discovery.NewRowFilter != nil {
-		return input, current, problem(422, "unsupported_authorization", "保存查询定义发现不支持行条件授权")
+		return input, nil, problem(422, "unsupported_authorization", "保存查询定义发现不支持行条件授权")
 	}
 	sample, _ := cloneSavedInput(input)
 	declarations, err := savedParameterFields(&sample.Query, current.Definition.Schema, input.Parameters, nil, true)
 	if err != nil {
-		return input, current, err
+		return input, nil, err
 	}
 	bound, err := h.validateBoundQuery(ctx, p, sample.Query)
 	if err != nil {
-		return input, current, err
+		return input, nil, err
 	}
 	// Stable references have already been checked above. Retain the shared
 	// compiler's canonical order/measure labels while restoring placeholders;
@@ -264,19 +267,48 @@ func (h *handler) validateSavedInput(ctx context.Context, p c.Principal, input c
 	bound.Where = input.Query.Where
 	input.Query = bound
 	if err := h.recheck(ctx, p, "definition.read", current.Definition.ID, discovery); err != nil {
-		return input, current, err
+		return input, nil, err
 	}
 	latest, err := h.current(ctx, p.TenantID, current.Definition.ID)
 	if err != nil {
-		return input, current, err
+		return input, nil, err
 	}
 	if latest.ETag != current.ETag || c.EnumContextDigest(latest.Definition) != c.EnumContextDigest(current.Definition) {
-		return input, current, problem(409, "definition_changed", "模型或枚举已改变，请重新检查保存查询")
+		return input, nil, problem(409, "definition_changed", "模型或枚举已改变，请重新检查保存查询")
 	}
 	input.Parameters = declarations
 	encoded, _ := json.Marshal(input)
 	if len(encoded) > c.MaxSavedQueryBytes {
-		return input, current, problem(422, "saved_query_budget", "规范化后的保存查询模板不能超过128KiB")
+		return input, nil, problem(422, "saved_query_budget", "规范化后的保存查询模板不能超过128KiB")
 	}
-	return input, current, nil
+	return input, current.Definition.Schema, nil
+}
+
+func (h *handler) validateSavedRowInput(ctx context.Context, p c.Principal, input c.SavedQueryInput) (c.SavedQueryInput, *c.Schema, error) {
+	plan, err := h.resolveRowBinding(ctx, p, input.Query)
+	if err != nil {
+		return input, nil, err
+	}
+	schema := rowBindingSchema(plan)
+	sample, _ := cloneSavedInput(input)
+	declarations, err := savedParameterFields(&sample.Query, schema, input.Parameters, nil, true)
+	if err != nil {
+		return input, nil, err
+	}
+	for i := range input.Query.OrderBy {
+		input.Query.OrderBy[i].Direction = strings.ToLower(input.Query.OrderBy[i].Direction)
+	}
+	sample.Query.OrderBy = input.Query.OrderBy
+	if _, err := validateRowBinding(plan, sample.Query); err != nil {
+		return input, nil, err
+	}
+	if err := h.recheckRowQuery(ctx, p, plan); err != nil {
+		return input, nil, err
+	}
+	input.Parameters = declarations
+	encoded, _ := json.Marshal(input)
+	if len(encoded) > c.MaxSavedQueryBytes {
+		return input, nil, problem(422, "saved_query_budget", "规范化后的保存查询模板不能超过128KiB")
+	}
+	return input, schema, nil
 }

@@ -168,7 +168,7 @@ func TestQueryBindingRejectsHiddenFieldsAndUnsupportedCombinations(t *testing.T)
 			q.OrderBy = []c.Order{{Field: "采购价", Direction: "asc"}}
 		}},
 		{"hidden aggregate", 403, "forbidden_field", func(q *c.QuerySpec, _ *c.Definition, _ *c.Decision) { *q = aggregateTestQuery() }},
-		{"rows", 422, "query_binding_unsupported", func(q *c.QuerySpec, _ *c.Definition, _ *c.Decision) { q.Rows = &c.RowQuery{} }},
+		{"rows", 422, "invalid_row_query", func(q *c.QuerySpec, _ *c.Definition, _ *c.Decision) { q.Rows = &c.RowQuery{} }},
 		{"via", 422, "query_binding_unsupported", func(q *c.QuerySpec, _ *c.Definition, _ *c.Decision) { q.Via = &c.LinkTraversal{} }},
 		{"mixed aggregate", 422, "invalid_aggregate", func(q *c.QuerySpec, _ *c.Definition, d *c.Decision) {
 			q.Aggregate = aggregateTestQuery().Aggregate

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { test, expect, type Page } from '@playwright/test'
-import type { DefinitionRecord, OntologySQLRequest, QueryContextModel, QueryPathsRequest, QuerySpec, RowQueryNode } from '../src/lib/types'
+import type { DefinitionRecord, OntologySQLRequest, QueryContextModel, QueryPathsRequest, QuerySpec, RowQueryNode, SavedQuery, SavedQueryInput } from '../src/lib/types'
 
 // Browser interaction and CodeMirror are real; all service responses are isolated.
 const categoryId = 'business', tenantId = 'visual-query-fixture'
@@ -45,7 +45,8 @@ function resultFor(query: QuerySpec) {
 }
 async function fixture(page: Page) {
   const definitions: DefinitionRecord[] = models.map((model) => ({ etag: model.schemaId, status: 'active', definition: { id: model.schemaId, tenantId, categoryId, groupId: 'group', kind: 'schema', name: model.name, schema: { mode: 'schema_2_db', storageLayout: 'single', properties: model.fields } } }))
-  const state = { queries: [] as QuerySpec[], paths: [] as QueryPathsRequest[], errors: [] as string[], unexpected: [] as string[], deny: false, denyContext: false }
+  const records = new Map<string, SavedQuery>()
+  const state = { queries: [] as QuerySpec[], paths: [] as QueryPathsRequest[], creates: [] as SavedQueryInput[], executes: [] as { parameters: Record<string, unknown>; cursor?: string }[], errors: [] as string[], unexpected: [] as string[], deny: false, denyContext: false }
   page.on('pageerror', (error) => state.errors.push(error.message))
   await page.route('**/api/**', async (route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method()
@@ -53,8 +54,10 @@ async function fixture(page: Page) {
     if (method === 'GET') {
       if (path === '/api/metadata/auth/session') return reply({ user: { id: 'reader', tenantId, username: 'reader', displayName: '查询用户', administrator: false, enabled: true, roleIds: [], etag: 'user' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture' })
       if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
-      if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'], rowQueries: true, maxRowJoins: 4 })
+      if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'], rowQueries: true, maxRowJoins: 4, savedQueries: true })
       if (path === '/api/data/sources') return reply({ data: [], hasMore: false })
+      if (path === '/api/metadata/auth/connections') return reply({ data: [], hasMore: false })
+      if (/^\/api\/data\/schemas\/[^/]+\/write-capabilities$/.test(path)) return reply({ schemaId: path.split('/')[4], operations: [] })
       if (path === '/api/metadata/categories') return reply({ data: [{ id: categoryId, tenantId, name: '业务' }], hasMore: false })
       if (path === '/api/metadata/groups') return reply({ data: [{ id: 'group', categoryId, tenantId, name: '业务模型' }], hasMore: false })
       if (path === '/api/metadata/definitions') return reply({ data: url.searchParams.get('view') === 'draft' ? [] : definitions, hasMore: false })
@@ -63,6 +66,19 @@ async function fixture(page: Page) {
         if (link) return reply({ etag: link.id, status: 'active', definition: { id: link.id, tenantId, categoryId, groupId: 'group', kind: 'link', name: link.name, link } })
       }
       if (path === '/api/data/query/context') return state.denyContext ? reply({ error: { code: 'forbidden', message: '模型查询权限已撤销' } }, 403) : reply({ models: models.filter((model) => !url.searchParams.get('schemaId') || model.schemaId === url.searchParams.get('schemaId')) })
+    }
+    if (path === '/api/data/saved-queries') {
+      if (method === 'GET') return reply({ data: [...records.values()].map(({ id, name, etag, createdAt, updatedAt }) => ({ id, name, etag, createdAt, updatedAt })), hasMore: false })
+      const input = request.postDataJSON() as SavedQueryInput; state.creates.push(input)
+      const record = { ...input, id: 'saved-rows', etag: 'created', createdAt: '2026-11-16T00:00:00Z', updatedAt: '2026-11-16T00:00:00Z' }
+      records.set(record.id, record); return reply(record, 201)
+    }
+    if (path === '/api/data/saved-queries/saved-rows') return reply(records.get('saved-rows'))
+    if (path === '/api/data/saved-queries/saved-rows/execute') {
+      if (state.deny) return reply({ code: 'forbidden', message: '关联查询权限已撤销' }, 403)
+      const body = request.postDataJSON(); state.executes.push(body)
+      const query = records.get('saved-rows')!.query
+      return reply(resultFor({ ...query, page: { ...query.page, ...(body.cursor ? { cursor: body.cursor } : {}) } }))
     }
     if (method === 'POST' && path === '/api/data/query') {
       if (state.deny) return reply({ error: { code: 'forbidden', message: '关联查询权限已撤销' } }, 403)
@@ -108,6 +124,37 @@ async function addCustomer(page: Page) {
 const isolated = (state: Awaited<ReturnType<typeof fixture>>) => { expect(state.errors).toEqual([]); expect(state.unexpected).toEqual([]) }
 async function setSQL(page: Page, text: string) { await page.getByLabel('OntologySQL 编辑器', { exact: true }).click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.insertText(text) }
 async function editorText(page: Page) { return (await page.getByLabel('OntologySQL 编辑器', { exact: true }).locator('.cm-line').allTextContents()).join('\n') }
+
+for (const width of [1440, 390]) {
+  test(`关联查询保存不含实参，按行展示和续页，撤权清除 ${width}px`, async ({ page }) => {
+    const state = await fixture(page); await page.setViewportSize({ width, height: 1000 }); await page.goto('/#query'); await addCustomer(page)
+    await page.getByRole('checkbox', { name: '客户.名称', exact: true }).check()
+    await page.getByRole('button', { name: '添加条件', exact: true }).click()
+    await page.getByRole('combobox', { name: '筛选字段', exact: true }).selectOption('n0.amount')
+    await page.getByRole('combobox', { name: '筛选运算符', exact: true }).selectOption('gte')
+    await page.getByLabel('比较值', { exact: true }).fill('123456789012345678.000001')
+    await page.getByRole('button', { name: '保存当前查询', exact: true }).click()
+    await page.getByRole('dialog').getByRole('textbox', { name: '查询名称', exact: true }).fill('订单客户关联')
+    await page.getByRole('dialog').getByRole('button', { name: '确认保存', exact: true }).click()
+    const runner = page.getByRole('region', { name: '已保存查询', exact: true })
+    await expect(runner).toBeVisible(); expect(state.executes).toHaveLength(0); expect(state.queries).toHaveLength(0)
+    expect(JSON.stringify(state.creates[0])).not.toContain('123456789012345678')
+    expect(state.creates[0].query.rows?.joins[0].linkId).toBe('order-customer')
+    expect(state.creates[0].query.where?.args?.[0]).toEqual({ op: 'gte', field: 'n0.amount', parameter: '条件1' })
+    await runner.getByRole('combobox', { name: '条件1参数方式', exact: true }).selectOption('value')
+    await runner.locator('#saved-条件1').fill('1.000001')
+    await runner.getByRole('button', { name: '运行保存查询', exact: true }).click()
+    await expect(runner.getByRole('table', { name: '关联行查询结果', exact: true }).locator('tbody tr')).toHaveCount(2)
+    await runner.getByText('查看来源', { exact: true }).first().click(); await expect(runner.getByText('same-root', { exact: true }).first()).toBeVisible()
+    await runner.getByRole('button', { name: '保存查询下一页', exact: true }).click()
+    await expect.poll(() => state.executes.length).toBe(2)
+    expect(state.executes[1]).toEqual({ parameters: { 条件1: '1.000001' }, cursor: 'row-cursor' })
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    state.deny = true; await runner.getByRole('button', { name: '运行保存查询', exact: true }).click()
+    await expect(runner).toHaveCount(0); await expect(page.getByRole('table')).toHaveCount(0)
+    isolated(state)
+  })
+}
 
 test('从空白可视化添加两条Link，按角色筛选，精确数值与绑定在两种模式间完整保留', async ({ page }) => {
   const state = await fixture(page); await page.goto('/#query'); await addCustomer(page)

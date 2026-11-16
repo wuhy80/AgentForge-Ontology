@@ -26,12 +26,17 @@ export type AggregateOperation = 'count' | 'countDistinct' | 'sum' | 'avg' | 'mi
 export interface AggregateMeasure { readonly id: string; readonly op: AggregateOperation; readonly field?: string; readonly name?: string }
 export interface AggregateQuery { readonly groupBy?: readonly string[]; readonly measures: readonly AggregateMeasure[] }
 export interface Order { readonly field: string; readonly direction: 'asc' | 'desc' }
+export interface RowQueryNode { readonly id: string; readonly schemaId: string; readonly alias: string }
+export interface RowQueryJoin { readonly from: string; readonly to: string; readonly linkId: string; readonly direction: 'out' | 'in' }
+/** Each INNER Link introduces one new object occurrence, including self/branch joins. */
+export interface RowQuery { readonly nodes: readonly RowQueryNode[]; readonly joins: readonly RowQueryJoin[] }
 export interface QuerySpec {
   readonly from: Source;
   readonly where?: Expression;
   readonly select: readonly string[];
   readonly orderBy?: readonly Order[];
   readonly aggregate?: AggregateQuery;
+  readonly rows?: RowQuery;
   readonly page: { readonly limit: number; readonly cursor?: string };
 }
 export interface QueryBinding { readonly query: QuerySpec; readonly fields: readonly Property[] }
@@ -40,11 +45,15 @@ export interface QueryTransport {
   query(query: QuerySpec, signal?: AbortSignal): Promise<QueryResult>;
 }
 export interface Instance { readonly id: string; readonly schemaId: string; readonly values: Values; readonly etag: string }
+export interface QueryRowEntity { readonly nodeId: string; readonly schemaId: string; readonly instanceId: string }
+export interface QueryRow { readonly id: string; readonly values: Values; readonly entities: readonly QueryRowEntity[] }
 export interface QueryResult {
   readonly data: readonly Instance[];
   readonly fields: readonly Property[];
   readonly aggregateMode?: boolean;
   readonly aggregateRows?: readonly { readonly values: Values }[];
+  readonly rowMode?: boolean;
+  readonly rows?: readonly QueryRow[];
   readonly hasMore: boolean;
   readonly nextCursor?: string;
 }

@@ -1,12 +1,22 @@
-import type { Expression, JsonValue, Property, SavedQueryTemplate } from '../../lib/types';
+import type { Expression, JsonValue, Property, QuerySpec, RowQuery, SavedQueryTemplate } from '../../lib/types';
 import { compileQuery, parseFieldValue, type FilterNode, type QueryEditor } from './query';
+import { compileRowQuery, rowQueryModel, type RowQueryContext } from './ontologySql';
 
 // Visual comparison inputs become named parameters. Their runtime values never
 // enter the persisted request, including values typed before opening Save.
 export function visualSavedTemplate(schemaId: string, properties: Property[], editor: QueryEditor): SavedQueryTemplate {
-  const safeText = (property?: Property) => property?.dataType === 'boolean' ? 'true' : ['int64', 'decimal'].includes(property?.dataType ?? '') ? '0' : property?.dataType === 'uuid' ? '00000000-0000-0000-0000-000000000000' : property?.dataType === 'timestamp' ? '2026-01-01T00:00:00Z' : '';
+  return visualTemplate(properties, editor, (safe) => compileQuery(schemaId, properties, safe));
+}
+
+export function visualRowSavedTemplate(rows: RowQuery, context: RowQueryContext, editor: QueryEditor): SavedQueryTemplate {
+  const model = rowQueryModel(rows, context);
+  return visualTemplate(model.fields, editor, (safe) => compileRowQuery(rows, context, safe));
+}
+
+function visualTemplate(properties: Property[], editor: QueryEditor, compile: (safe: QueryEditor) => QuerySpec): SavedQueryTemplate {
+  const safeText = (property?: Property) => property?.enumValues?.[0]?.code ?? (property?.dataType === 'boolean' ? 'true' : ['int64', 'decimal'].includes(property?.dataType ?? '') ? '0' : property?.dataType === 'uuid' ? '00000000-0000-0000-0000-000000000000' : property?.dataType === 'timestamp' ? '2026-01-01T00:00:00Z' : '');
   const visit = (node: FilterNode): FilterNode => node.kind === 'group' ? { ...node, children: node.children.map(visit) } : { ...node, raw: safeText(properties.find((field) => field.id === node.field)) };
-  const query = compileQuery(schemaId, properties, { ...editor, filter: { ...editor.filter, children: editor.filter.children.map(visit) } });
+  const query = compile({ ...editor, filter: { ...editor.filter, children: editor.filter.children.map(visit) } });
   const parameters: SavedQueryTemplate['parameters'] = [];
   function parameterize(node: Expression): Expression {
     if (node.args) return { ...node, args: node.args.map(parameterize) };

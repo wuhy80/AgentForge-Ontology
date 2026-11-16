@@ -1,5 +1,5 @@
 import { DataSetError } from './errors.js';
-import type { AggregateMeasure, AggregateOperation, AggregateQuery, DataSetPage, Expression, Instance, Property, QueryResult, QuerySpec, QueryTransport, Source, Value, Values } from './types.js';
+import type { AggregateMeasure, AggregateOperation, AggregateQuery, DataSetPage, Expression, Instance, Property, QueryResult, QuerySpec, QueryTransport, RowQuery, Source, Value, Values } from './types.js';
 
 type RecordValue = Record<string, unknown>;
 const own = (value: object, key: string) => Object.hasOwn(value, key);
@@ -88,9 +88,30 @@ function aggregate(input: unknown): AggregateQuery {
   });
   return { ...(groupBy ? { groupBy } : {}), measures };
 }
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function rowScope(input: unknown): RowQuery {
+  const value = record(input); keys(value, ['nodes', 'joins']);
+  const entries = array(value.nodes), edges = array(value.joins);
+  if (edges.length < 1 || edges.length > 4 || entries.length !== edges.length + 1) fail('关联查询需要1..4条INNER Link和对应对象节点');
+  const aliases = new Set<string>();
+  const nodes = entries.map((input, index) => {
+    const node = record(input); keys(node, ['id', 'schemaId', 'alias']);
+    const id = text(node.id, '节点标识'), schemaId = text(node.schemaId, 'Schema标识'), alias = text(node.alias, '对象别名');
+    const normalized = alias.trim().normalize('NFC').toLowerCase();
+    if (id !== `n${index}` || !uuid.test(schemaId) || [...alias].length > 128 || /[\u0000-\u001f\u007f-\u009f]/u.test(alias) || aliases.has(normalized)) fail('关联对象须按n0..n4排列，使用稳定ID和不同别名');
+    aliases.add(normalized); return { id, schemaId, alias };
+  });
+  const joins = edges.map((input, index) => {
+    const edge = record(input); keys(edge, ['from', 'to', 'linkId', 'direction']);
+    const from = text(edge.from, '关联起点'), to = text(edge.to, '关联终点'), linkId = text(edge.linkId, 'Link标识');
+    if (!nodes.slice(0, index + 1).some((node) => node.id === from) || to !== nodes[index + 1].id || !uuid.test(linkId) || edge.direction !== 'out' && edge.direction !== 'in') fail('每条INNER Link须按明确方向关联一个新节点');
+    return { from, to, linkId, direction: edge.direction as 'out' | 'in' };
+  });
+  return { nodes, joins };
+}
 function plan(input: unknown, allowCursor = false): QuerySpec {
   const value = record(input);
-  keys(value, ['from', 'where', 'select', 'orderBy', 'aggregate', 'page']);
+  keys(value, ['from', 'where', 'select', 'orderBy', 'aggregate', 'rows', 'page']);
   const from = source(value.from);
   const select = array(value.select).map((field) => text(field, '返回字段'));
   if (select.length > 100 || new Set(select).size !== select.length) fail('返回字段最多100项且不能重复');
@@ -100,6 +121,8 @@ function plan(input: unknown, allowCursor = false): QuerySpec {
   if (page.cursor !== undefined && !allowCursor) fail('构造或绑定查询不能携带游标');
   const cursor = page.cursor === undefined ? undefined : text(page.cursor, '分页游标');
   const grouped = value.aggregate === undefined ? undefined : aggregate(value.aggregate);
+  const rows = value.rows === undefined ? undefined : rowScope(value.rows);
+  if (rows && (grouped || from.schemaId !== rows.nodes[0].schemaId)) fail('关联查询需要根节点稳定ID，且不能混用聚合', 'unsupported_query');
   if (grouped && select.length) fail('汇总查询select必须为空');
   const where = value.where === undefined ? undefined : expression(value.where);
   const orderBy = value.orderBy === undefined ? undefined : array(value.orderBy).map((input) => {
@@ -109,7 +132,13 @@ function plan(input: unknown, allowCursor = false): QuerySpec {
     return { field: text(order.field, '排序字段'), direction: order.direction as 'asc' | 'desc' };
   });
   if (orderBy && orderBy.length > 1) fail('当前最多支持一个排序字段');
-  return { from, select, ...(where ? { where } : {}), ...(orderBy?.length ? { orderBy } : {}), ...(grouped ? { aggregate: grouped } : {}), page: { limit: page.limit, ...(cursor ? { cursor } : {}) } };
+  if (rows) {
+    const field = (id: string) => { const [node, property, ...rest] = id.split('.'); if (rest.length || !rows.nodes.some((entry) => entry.id === node) || !uuid.test(property ?? '')) fail('关联字段须使用节点与稳定属性ID'); };
+    select.forEach(field); orderBy?.forEach((order) => field(order.field));
+    const visit = (e: Expression) => { if (e.field !== undefined) field(e.field); e.args?.forEach(visit); };
+    if (where) visit(where);
+  }
+  return { from, select, ...(where ? { where } : {}), ...(orderBy?.length ? { orderBy } : {}), ...(grouped ? { aggregate: grouped } : {}), ...(rows ? { rows } : {}), page: { limit: page.limit, ...(cursor ? { cursor } : {}) } };
 }
 function properties(input: unknown): Property[] {
   const fields = array(input, 'invalid_response');
@@ -142,7 +171,7 @@ function sameFields(fields: readonly Property[], query: QuerySpec) {
 }
 function result(input: unknown, query: QuerySpec): QueryResult {
   const value = record(input, 'invalid_response');
-  if (value.rowMode !== undefined && value.rowMode !== false || value.rows !== undefined) fail('SDK暂不支持关联行结果', 'invalid_response');
+  if (value.rowMode !== undefined && typeof value.rowMode !== 'boolean' || !!value.rowMode !== !!query.rows || !query.rows && value.rows !== undefined) fail('关联查询结果模式与请求不一致', 'invalid_response');
   if (value.aggregateMode !== undefined && typeof value.aggregateMode !== 'boolean' || !!value.aggregateMode !== !!query.aggregate) fail('查询结果模式与请求不一致', 'invalid_response');
   if (typeof value.hasMore !== 'boolean') fail('查询结果缺少分页状态', 'invalid_response');
   const fields = properties(value.fields);
@@ -158,12 +187,24 @@ function result(input: unknown, query: QuerySpec): QueryResult {
     if (entity.schemaId !== query.from.schemaId) fail('查询实例来源与绑定模型不一致', 'invalid_response');
     return { id: text(entity.id, '实例标识', 'invalid_response'), schemaId: entity.schemaId as string, etag: text(entity.etag, '实例凭证', 'invalid_response'), values: values(entity.values) };
   });
-  if (query.aggregate && data.length || !query.aggregate && value.aggregateRows !== undefined) fail('查询返回了不一致的结果形态', 'invalid_response');
+  if ((query.aggregate || query.rows) && data.length || !query.aggregate && value.aggregateRows !== undefined) fail('查询返回了不一致的结果形态', 'invalid_response');
   const aggregateRows = query.aggregate ? array(value.aggregateRows === undefined ? [] : value.aggregateRows, 'invalid_response').map((input) => ({ values: values(record(input, 'invalid_response').values) })) : undefined;
-  if ((aggregateRows?.length ?? data.length) > query.page.limit) fail('查询结果超过每页预算', 'invalid_response');
+  const rows = query.rows ? array(value.rows, 'invalid_response').map((input) => {
+    const row = record(input, 'invalid_response'); keys(row, ['id', 'values', 'entities'], 'invalid_response');
+    const entries = array(row.entities, 'invalid_response');
+    if (entries.length !== query.rows!.nodes.length) fail('关联行必须包含所有对象来源', 'invalid_response');
+    const entities = entries.map((input, index) => {
+      const entity = record(input, 'invalid_response'); keys(entity, ['nodeId', 'schemaId', 'instanceId'], 'invalid_response');
+      const node = query.rows!.nodes[index];
+      if (entity.nodeId !== node.id || entity.schemaId !== node.schemaId) fail('关联行对象来源与绑定节点不一致', 'invalid_response');
+      return { nodeId: node.id, schemaId: node.schemaId, instanceId: text(entity.instanceId, '对象标识', 'invalid_response') };
+    });
+    return { id: text(row.id, '关联行标识', 'invalid_response'), values: values(row.values), entities };
+  }) : undefined;
+  if ((rows?.length ?? aggregateRows?.length ?? data.length) > query.page.limit) fail('查询结果超过每页预算', 'invalid_response');
   const cursor = value.nextCursor === undefined ? undefined : text(value.nextCursor, '分页游标', 'invalid_response');
   if (value.hasMore && !cursor || !value.hasMore && cursor) fail('分页状态与游标不一致', 'invalid_response');
-  return { data, fields, ...(query.aggregate ? { aggregateMode: true, aggregateRows } : {}), hasMore: value.hasMore, ...(cursor ? { nextCursor: cursor } : {}) };
+  return { data, fields, ...(query.aggregate ? { aggregateMode: true, aggregateRows } : {}), ...(query.rows ? { rowMode: true, rows } : {}), hasMore: value.hasMore, ...(cursor ? { nextCursor: cursor } : {}) };
 }
 function transport(input: QueryTransport): QueryTransport {
   if (!input || typeof input.bind !== 'function' || typeof input.query !== 'function') fail('需要有效的查询传输');
@@ -206,12 +247,13 @@ export class DataSet {
   orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): DataSet { return new DataSet(this.#transport, { ...this.#plan, orderBy: [{ field, direction }] }); }
   limit(limit: number): DataSet { return new DataSet(this.#transport, { ...this.#plan, page: { limit } }, this.#fields); }
   aggregate(grouped: AggregateQuery): DataSet { return new DataSet(this.#transport, { ...this.#plan, select: [], aggregate: grouped }); }
+  rows(scope: RowQuery): DataSet { return new DataSet(this.#transport, { ...this.#plan, rows: scope }); }
   async bind(signal?: AbortSignal): Promise<DataSet> {
     const request = this.toQuery();
     const binding: unknown = await invoke(() => this.#transport.bind(request, signal), signal);
     const response = record(binding, 'invalid_binding');
     const query = plan(response.query);
-    if (!query.from.schemaId || this.#plan.from.schemaId && this.#plan.from.schemaId !== query.from.schemaId || !!query.aggregate !== !!this.#plan.aggregate || query.page.limit !== this.#plan.page.limit) fail('绑定响应改变了查询来源、模式或预算', 'invalid_binding');
+    if (!query.from.schemaId || this.#plan.from.schemaId && this.#plan.from.schemaId !== query.from.schemaId || !!query.aggregate !== !!this.#plan.aggregate || JSON.stringify(query.rows) !== JSON.stringify(this.#plan.rows) || query.page.limit !== this.#plan.page.limit) fail('绑定响应改变了查询来源、关联结构、模式或预算', 'invalid_binding');
     const fields = properties(response.fields);
     sameFields(fields, query);
     return new DataSet(this.#transport, query, fields);

@@ -8,6 +8,7 @@ import { DataSet, DataSetError } from '../dist/index.js';
 
 let fixture;
 let stable;
+let stableRows;
 let originalID;
 let readerPage;
 let readerTransport;
@@ -89,7 +90,7 @@ async function comparePages(bound, currentTransport, aggregate, expectedRows) {
   for (let i = 0; i < 10; i++) {
     const direct = await currentTransport.query(spec);
     compareResult(page.result, direct);
-    const rows = aggregate ? page.result.aggregateRows : page.result.data;
+    const rows = page.result.rowMode ? page.result.rows : aggregate ? page.result.aggregateRows : page.result.data;
     assert.equal(rows.length, 1);
     const key = aggregate ? JSON.stringify(rows[0].values) : rows[0].id;
     assert.equal(seen.has(key), false);
@@ -175,6 +176,25 @@ async function renamed() {
   assert.notEqual(fresh.result.data[0].id, originalID);
   const freshPriority = newName.fields.find(field => field.name === '优先级').id;
   assert.equal(fresh.result.data[0].values[freshPriority], '1');
+  if (stableRows) {
+    checkpoint = 'rows-renamed';
+    await comparePages(stableRows, adminTransport, false, 2);
+    assert.equal(stableRows.toQuery().rows.nodes[1].schemaId, fixture.schemaId);
+  }
+}
+
+async function rows(message) {
+  checkpoint = 'rows-bind';
+  const scope = { nodes: [{ id: 'n0', schemaId: fixture.schemaId, alias: '父' }, { id: 'n1', schemaId: fixture.schemaId, alias: '子' }], joins: [{ from: 'n0', to: 'n1', linkId: message.linkId, direction: 'out' }] };
+  stableRows = await DataSet.from(adminTransport, { schemaId: fixture.schemaId }).rows(scope)
+    .select(`n0.${fixture.code}`, `n1.${fixture.priority}`)
+    .where({ op: 'gte', field: `n1.${fixture.priority}`, value: '9007199254740993' }).limit(1).bind();
+  checkpoint = 'rows-pages';
+  await comparePages(stableRows, adminTransport, false, 2);
+  const first = await stableRows.execute();
+  assert.equal(first.result.data.length, 0);
+  assert.equal(first.result.rows[0].entities.length, 2);
+  assert.equal(first.result.rows[0].values[`n1.${fixture.priority}`], '9007199254740993');
 }
 
 async function reader(message) {
@@ -206,6 +226,7 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
     stage = message.stage;
     if (stage === 'stop') break;
     if (stage === 'initial') await initial(message);
+    else if (stage === 'rows') await rows(message);
     else if (stage === 'renamed') await renamed();
     else if (stage === 'reader') await reader(message);
     else if (stage === 'revoked') await revoked();

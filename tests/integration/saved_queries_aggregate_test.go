@@ -17,6 +17,7 @@ func verifySavedQueriesAndAggregatesHTTP(t *testing.T, admin, foreign *publicSec
 	queryURL, savedURL := dataURL+"/data/query", dataURL+"/data/saved-queries"
 	definitionURL := metadataURL + "/metadata/definitions/" + schemaID
 	sdk := startDataSetSDKHTTP(t, admin, client, dataURL, schemaID, code, state, priority)
+	verifySavedRowsAfterRename := verifySavedInnerRowsHTTP(t, admin, foreign, sdk, metadataURL, dataURL, category, group, schemaID, code, priority)
 	query := c.QuerySpec{From: c.Source{SchemaID: schemaID}, Select: []string{}, Aggregate: &c.AggregateQuery{Measures: []c.AggregateMeasure{{ID: "mCount", Op: "count", Name: "数量"}, {ID: "mSum", Op: "sum", Field: priority, Name: "合计"}, {ID: "mAvg", Op: "avg", Field: priority, Name: "平均"}}}, Page: c.Page{Limit: 10}}
 	var result c.QueryResult
 	admin.request("POST", queryURL, query, nil, 200, &result)
@@ -123,6 +124,7 @@ func verifySavedQueriesAndAggregatesHTTP(t *testing.T, admin, foreign *publicSec
 		t.Fatal("saved query rebound an old Chinese name to a different schema")
 	}
 	sdk.stage("renamed", nil)
+	verifySavedRowsAfterRename()
 	input.Name = "改名后的查询"
 	admin.request("PUT", itemURL, input, map[string]string{"If-Match": `"` + saved.ETag + `"`}, 200, &reloaded)
 	admin.request("PUT", itemURL, input, map[string]string{"If-Match": `"` + saved.ETag + `"`}, 412, nil)

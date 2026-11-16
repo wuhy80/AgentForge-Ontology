@@ -13,6 +13,7 @@ type logicalQueryBinding struct {
 	c.QueryBinding
 	current  c.CurrentDefinition
 	decision c.Decision
+	rows     *rowQueryPlan
 }
 
 func (h *handler) bindQueryHTTP(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +56,12 @@ func (h *handler) bindQuery(ctx context.Context, p c.Principal, q c.QuerySpec) (
 	if err != nil {
 		return c.QueryBinding{}, err
 	}
+	if bound.rows != nil {
+		if err := h.recheckRowQuery(ctx, p, bound.rows); err != nil {
+			return c.QueryBinding{}, err
+		}
+		return bound.QueryBinding, nil
+	}
 	// Binding holds no publication gate and scans no business data. Re-read the
 	// authoritative definition and its hydrated Enum context before delivery.
 	latest, err := h.current(ctx, p.TenantID, bound.current.Definition.ID)
@@ -87,8 +94,11 @@ func (h *handler) compileBoundQuery(ctx context.Context, p c.Principal, q c.Quer
 		return out, err
 	}
 	q = detached
-	if q.Rows != nil || q.Via != nil {
-		return out, problem(422, "query_binding_unsupported", "查询绑定首批仅支持单Schema实体或默认平台聚合查询")
+	if q.Via != nil {
+		return out, problem(422, "query_binding_unsupported", "查询绑定不支持固定实例导航")
+	}
+	if q.Rows != nil {
+		return h.compileRowBinding(ctx, p, q)
 	}
 	current, err := h.resolve(ctx, p, q.From)
 	if err != nil {

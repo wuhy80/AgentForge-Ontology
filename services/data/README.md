@@ -8,6 +8,8 @@
 
 随后新增[个人保存查询](../../docs/数据查询/DataSet.md#个人保存查询2026-11-08本批实现)与[公共单模型聚合](../../docs/数据查询/DataSet.md#公共单模型聚合2026-11-08本批实现)。保存目录需显式执行Data迁移 `011_saved_query_owners`、`012_saved_queries`，普通请求和启动不补表。实际契约为[aggregate_query.go](../../contracts/aggregate_query.go)、[saved_queries.go](../../contracts/saved_queries.go)，预算由capabilities声明；源码尚未部署，不自动迁移现有业务库。
 
+2026-11-16补齐[INNER Link查询复用](../../docs/数据查询/DataSet.md#inner-link查询复用2026-11-16已实现)：公共query/bind、私有模板、SQL模板编译及TypeScript SDK复用既有rows执行器。关联逻辑绑定只读定义和当前授权，不打开业务源/物理目录；执行仍逐节点及逐Link重新检查。复用原保存表和路由，无新增迁移，源码未部署。
+
 Schema字符串属性可引用同租户当前Enum；业务目录、表单及查询结果只为可见字段提供 `enumId/enumValues/enumEtag`。新写/默认值、旧废弃值保留、分页依赖及来源边界见[Enum实际协议](../../docs/模块/Enum.md#当前实现协议2026-11-08)，不把平台Enum支持推断为任意来源或任意类型写入已经认证。
 
 本模块是独立 Go module；在 `GOWORK=off` 下构建。配置环境变量后，先显式执行平台迁移，再启动服务：

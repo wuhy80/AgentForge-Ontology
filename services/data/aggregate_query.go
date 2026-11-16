@@ -356,13 +356,16 @@ func (h *handler) queryAggregate(ctx context.Context, p c.Principal, current c.C
 // It deliberately does not call query executors, publication gates or SELECT
 // over business tables. Parameters must already have typed validation samples.
 func (h *handler) validateBoundQuery(ctx context.Context, p c.Principal, q c.QuerySpec) (c.QuerySpec, error) {
-	if q.Rows != nil || q.Via != nil {
-		return q, problem(422, "saved_query_unsupported", "保存查询首批仅支持单Schema实体或聚合查询")
+	if q.Via != nil {
+		return q, problem(422, "saved_query_unsupported", "保存查询不支持固定实例导航")
 	}
 	q.Page.Cursor = ""
 	bound, err := h.compileBoundQuery(ctx, p, q)
 	if err != nil {
 		return q, err
+	}
+	if bound.rows != nil {
+		return bound.Query, h.recheckRowQuery(ctx, p, bound.rows)
 	}
 	if err = h.recheck(ctx, p, "instance.query", bound.current.Definition.ID, bound.decision); err != nil {
 		return bound.Query, err
