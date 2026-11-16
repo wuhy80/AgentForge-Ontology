@@ -31,9 +31,10 @@ func (l *lostTransactionResponse) Execute(ctx context.Context, request c.Executi
 
 func verifyTransactionRecoveryHTTP(t *testing.T, admin *executionHTTP, cfg execution.Config, roots *x509.CertPool, dataURL string, publish func(c.Definition) c.CurrentDefinition) {
 	t.Helper()
-	schema := publish(c.Definition{Kind: c.KindSchema, Name: "事务恢复对象", Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{Name: "代码", DataType: "string", Required: true}}}}).Definition
+	schema := publish(c.Definition{Kind: c.KindSchema, Name: "事务恢复对象", Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{Name: "代码", DataType: "string", Required: true}, {Name: "主记录", DataType: "uuid", Nullable: true}}}}).Definition
 	field := schema.Schema.Properties[0].ID
-	fn := publish(c.Definition{Kind: c.KindFunction, Name: "丢失响应事务恢复", Function: &c.Callable{SideEffects: "dataWrite", DataWrite: []c.DataWriteCapability{{SchemaID: schema.ID, Operations: []string{"create"}}}, Output: []c.Property{{Name: "完成", DataType: "boolean", Required: true}}, Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 10, Source: fmt.Sprintf("def main(inputs,ctx):\n    ctx.data.create(%q,{%q:'only-once'},'once')\n    return {'完成':True}\n", schema.ID, field)}}}).Definition
+	parentField := schema.Schema.Properties[1].ID
+	fn := publish(c.Definition{Kind: c.KindFunction, Name: "丢失响应事务恢复", Function: &c.Callable{SideEffects: "dataWrite", DataWrite: []c.DataWriteCapability{{SchemaID: schema.ID, Operations: []string{"create"}}}, Output: []c.Property{{Name: "完成", DataType: "boolean", Required: true}}, Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 10, Source: fmt.Sprintf("def main(inputs,ctx):\n    ctx.data.create(%q,{%q:'master'},'master')\n    ctx.data.create(%q,{%q:'child'},'child',value_refs={%q:{'clientKey':'master'}})\n    return {'完成':True}\n", schema.ID, field, schema.ID, field, parentField)}}}).Definition
 	loss := &lostTransactionResponse{inner: cfg.DataTransactions}
 	cfg.DataTransactions = loss
 	start := func() *httptest.Server {
@@ -60,9 +61,20 @@ func verifyTransactionRecoveryHTTP(t *testing.T, admin *executionHTTP, cfg execu
 	}
 	admin.request("POST", second.URL+"/execution/invocations", intent, map[string]string{"Idempotency-Key": key}, 200, &result)
 	var page c.QueryResult
-	admin.request("POST", dataURL+"/data/query", c.QuerySpec{From: c.Source{SchemaID: schema.ID}, Select: []string{field}, Page: c.Page{Limit: 10}}, nil, 200, &page)
-	if len(page.Data) != 1 {
+	admin.request("POST", dataURL+"/data/query", c.QuerySpec{From: c.Source{SchemaID: schema.ID}, Select: []string{field, parentField}, Page: c.Page{Limit: 10}}, nil, 200, &page)
+	if len(page.Data) != 2 {
 		t.Fatal("recovery duplicated a committed write")
+	}
+	var masterID, referencedID string
+	for _, row := range page.Data {
+		if string(row.Values[field]) == `"master"` {
+			masterID = row.ID
+		} else if string(row.Values[field]) == `"child"` {
+			_ = json.Unmarshal(row.Values[parentField], &referencedID)
+		}
+	}
+	if masterID == "" || referencedID != masterID {
+		t.Fatal("recovery changed the SDK result ID reference")
 	}
 }
 
@@ -73,21 +85,23 @@ func verifyDataWriteTransactionsHTTP(t *testing.T, admin, other *executionHTTP, 
 	schemas := []c.CurrentDefinition{}
 	for _, name := range []string{"事务来源甲", "事务来源乙"} {
 		field := c.NewID()
-		schemas = append(schemas, publish(c.Definition{Kind: c.KindSchema, Name: name, Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: field, Name: "代码", DataType: "string", Required: true}}, Indexes: []c.Index{{ID: c.NewID(), Name: "代码唯一", Unique: true, FieldIDs: []string{field}}}}}))
+		schemas = append(schemas, publish(c.Definition{Kind: c.KindSchema, Name: name, Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: field, Name: "代码", DataType: "string", Required: true}, {Name: "主记录", DataType: "uuid", Nullable: true}}, Indexes: []c.Index{{ID: c.NewID(), Name: "代码唯一", Unique: true, FieldIDs: []string{field}}}}}))
 	}
 	sort.Slice(schemas, func(i, j int) bool { return schemas[i].Definition.ID < schemas[j].Definition.ID })
 	a, b := schemas[0].Definition, schemas[1].Definition
 	af, bf := a.Schema.Properties[0].ID, b.Schema.Properties[0].ID
+	parentField := b.Schema.Properties[1].ID
 	values := func(field, code string) map[string]json.RawMessage {
 		return map[string]json.RawMessage{field: raw(code)}
 	}
 	var seed c.Instance
 	admin.request("POST", dataURL+"/data/schemas/"+b.ID+"/instances", c.WriteRequest{Values: values(bf, "collision"), IdempotencyKey: c.NewID()}, nil, 201, &seed)
-	count := func(schema c.Definition, field, code string) int {
+	rows := func(schema c.Definition, field, code string) []c.Instance {
 		var page c.QueryResult
-		admin.request("POST", dataURL+"/data/query", c.QuerySpec{From: c.Source{SchemaID: schema.ID}, Select: []string{field}, Where: &c.Expression{Op: "eq", Field: field, Value: raw(code)}, Page: c.Page{Limit: 10}}, nil, 200, &page)
-		return len(page.Data)
+		admin.request("POST", dataURL+"/data/query", c.QuerySpec{From: c.Source{SchemaID: schema.ID}, Select: []string{field, schema.Schema.Properties[1].ID}, Where: &c.Expression{Op: "eq", Field: field, Value: raw(code)}, Page: c.Page{Limit: 10}}, nil, 200, &page)
+		return page.Data
 	}
+	count := func(schema c.Definition, field, code string) int { return len(rows(schema, field, code)) }
 	// Public mixed transaction and status share the same receipt and rights.
 	direct := c.WriteTransactionRequest{IdempotencyKey: c.NewID(), Operations: []c.TransactionOperation{{SchemaID: a.ID, Operation: "create", ClientKey: "a", Values: values(af, "direct")}, {SchemaID: b.ID, Operation: "create", ClientKey: "b", Values: values(bf, "direct")}}}
 	var transaction c.WriteTransactionResult
@@ -112,12 +126,12 @@ func verifyDataWriteTransactionsHTTP(t *testing.T, admin, other *executionHTTP, 
 		entry, source := "main", ""
 		switch language {
 		case "python":
-			source = fmt.Sprintf("def main(inputs, ctx):\n    ctx.data.create(%q, {%q: inputs['代码']}, 'a')\n    ctx.data.create(%q, {%q: 'collision' if inputs['碰撞'] else inputs['代码']}, 'b')\n    return {'完成': True}\n", a.ID, af, b.ID, bf)
+			source = fmt.Sprintf("def main(inputs, ctx):\n    ctx.data.create(%q, {%q: inputs['代码']}, 'a')\n    ctx.data.create(%q, {%q: 'collision' if inputs['碰撞'] else inputs['代码']}, 'b', value_refs={%q: {'clientKey': 'a'}})\n    return {'完成': True}\n", a.ID, af, b.ID, bf, parentField)
 		case "javascript":
-			source = fmt.Sprintf("function main(inputs, ctx) { ctx.data.create(%q, {[%q]: inputs['代码']}, 'a'); ctx.data.create(%q, {[%q]: inputs['碰撞'] ? 'collision' : inputs['代码']}, 'b'); return {完成: true}; }", a.ID, af, b.ID, bf)
+			source = fmt.Sprintf("function main(inputs, ctx) { ctx.data.create(%q, {[%q]: inputs['代码']}, 'a'); ctx.data.create(%q, {[%q]: inputs['碰撞'] ? 'collision' : inputs['代码']}, 'b', {[%q]: {clientKey:'a'}}); return {完成: true}; }", a.ID, af, b.ID, bf, parentField)
 		case "go":
 			entry = "Main"
-			source = fmt.Sprintf("package main\nfunc Main(inputs map[string]any, ctx *OntologyContext) map[string]any { ctx.Data.Create(%q,map[string]any{%q:inputs[\"代码\"]},\"a\");code:=inputs[\"代码\"];if inputs[\"碰撞\"]==true{code=\"collision\"};ctx.Data.Create(%q,map[string]any{%q:code},\"b\");return map[string]any{\"完成\":true} }", a.ID, af, b.ID, bf)
+			source = fmt.Sprintf("package main\nfunc Main(inputs map[string]any, ctx *OntologyContext) map[string]any { ctx.Data.Create(%q,map[string]any{%q:inputs[\"代码\"]},\"a\");code:=inputs[\"代码\"];if inputs[\"碰撞\"]==true{code=\"collision\"};ctx.Data.Create(%q,map[string]any{%q:code},\"b\",map[string]OntologyResultReference{%q:{ClientKey:\"a\"}});return map[string]any{\"完成\":true} }", a.ID, af, b.ID, bf, parentField)
 		}
 		newCallable := func() *c.Callable {
 			return &c.Callable{SideEffects: "dataWrite", DataWrite: []c.DataWriteCapability{{SchemaID: a.ID, Operations: []string{"create"}}, {SchemaID: b.ID, Operations: []string{"create"}}}, Input: []c.Property{{Name: "代码", DataType: "string", Required: true}, {Name: "碰撞", DataType: "boolean", Required: true}}, Output: []c.Property{{Name: "完成", DataType: "boolean", Required: true}}, Runtime: &c.ScriptRuntime{Language: language, Source: source, Entrypoint: entry, TimeoutSeconds: 30}}
@@ -148,6 +162,12 @@ func verifyDataWriteTransactionsHTTP(t *testing.T, admin, other *executionHTTP, 
 					}
 				} else if invocation.Status != "succeeded" || !invocation.Transaction.Committed || count(a, af, code) != 1 || count(b, bf, code) != 1 {
 					t.Fatal("callable transaction failed")
+				}
+				if !fail {
+					master, detail := rows(a, af, code)[0], rows(b, bf, code)[0]
+					if string(detail.Values[parentField]) != string(raw(master.ID)) {
+						t.Fatal("SDK reference did not resolve to the actual created master ID")
+					}
 				}
 				var replay c.Invocation
 				admin.request("POST", execURL+"/execution/invocations", intent, map[string]string{"Idempotency-Key": key}, 200, &replay)

@@ -106,7 +106,7 @@ bulk正文为`{atomic?, items, conflictPolicy?, idempotencyKey}`，仅支持默�
 
 正文为`WriteTransactionRequest{idempotencyKey,operations}`，每项`{schemaId,operation,clientKey,id?,ifMatch?,match?,values?,valueRefs?,conflictPolicy?}`；DTO见[transactions.go](../../contracts/transactions.go)。只接受当前用户租户内默认平台存储的已生效Schema，映射Schema和跨来源事务以`transaction_storage_unsupported`明确拒绝。总项数1～100，clientKey在整笔内唯一，逐项复用八写接口的字段、旧/新行权限、强ETag和upsert规则；同一实际对象不能重复修改。`conflictPolicy`仅upsert可填，覆盖仍须额外授权。
 
-2026-11-15增加`valueRefs:{UUID属性ID:{clientKey:"前项"}}`，只引用本事务前面create/upsert的实际结果ID，支持create/update/upsert目标及仅引用值的正文。字段名称、非UUID、前向/自身/循环/未知引用、update/delete来源、字段值/ETag选择器、与字面值或match.values同字段均拒绝。按依赖调整目标执行顺序，Schema gate仍稳定排序，响应仍为请求顺序；解析后复用普通写授权及类型校验。原始引用进入幂等摘要，status/重试保持完整原文，重放只交付原回执，不重建引用。能力返回`transactionValueRefs=true`、`transactionValueRefTargetTypes=["uuid"]`及`transactionValueRefSourceOperations=["create","upsert"]`；旧请求不变，无新增迁移。引用不是Link事实，真实关系使用下文独立links数组。完整协议及示例唯一见[数据读写](../../docs/数据读写.md#事务内结果id引用2026-11-15已实现实库待验收)。
+2026-11-15增加`valueRefs:{UUID属性ID:{clientKey:"前项"}}`，只引用本事务前面create/upsert的实际结果ID，支持create/update/upsert目标及仅引用值的正文。字段名称、非UUID、前向/自身/循环/未知引用、update/delete来源、字段值/ETag选择器、与字面值或match.values同字段均拒绝。按依赖调整目标执行顺序，Schema gate仍稳定排序，响应仍为请求顺序；解析后复用普通写授权及类型校验。原始引用进入幂等摘要，status/重试保持完整原文，重放只交付原回执，不重建引用。能力返回`transactionValueRefs=true`、`transactionValueRefTargetTypes=["uuid"]`及`transactionValueRefSourceOperations=["create","upsert"]`；旧请求不变，无新增迁移。引用不是Link事实，真实关系使用下文独立links数组。完整协议及示例唯一见[数据读写](../../docs/数据读写.md#事务内结果id引用2026-11-15已实现2026-11-16实库通过)。
 
 所有Schema按稳定ID排序获取发布gate，在同一个`*sql.Tx`内执行类型化SQL、实例写入和outbox；结果按输入顺序返回。事务共用15秒及8MiB请求、响应和保留证据预算，不按项重置总预算。提交前复核当前授权和Schema摘要；内部执行桥另通过guard复核原会话及Action/Function身份，其服务身份不能代替业务权限。该机制不承诺跨服务原子撤权。
 

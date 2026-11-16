@@ -6,7 +6,7 @@ package execution
 // catches the exception. Execution and Data still validate the entire plan.
 const pythonDataSDK = `def __ontology_data_context():
     import math, re, types
-    plan, keys = [], set()
+    plan, keys = [], {}
     poisoned = False
     uuid = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
     def require(condition):
@@ -36,19 +36,31 @@ const pythonDataSDK = `def __ontology_data_context():
             return {"id": identifier(match["id"])}
         require(set(match) == {"indexId", "values"} and len(match["values"]) > 0)
         return {"indexId": identifier(match["indexId"]), "values": values_copy(match["values"])}
+    def refs_copy(refs, values, match):
+        require(type(refs) is dict)
+        result = {}
+        for field, ref in refs.items():
+            identifier(field)
+            require(field not in values and field not in match.get("values", {}))
+            require(type(ref) is dict and set(ref) == {"clientKey"})
+            key = ref["clientKey"]
+            require(type(key) is str and keys.get(key) in ("create", "upsert"))
+            result[field] = {"clientKey": key}
+        return result
     def stage(operation, schema, item, policy="check"):
         nonlocal poisoned
         try:
             require(not poisoned and len(plan) < 100)
             identifier(schema)
             require(type(item) is dict)
-            allowed = {"create": {"clientKey", "values"}, "update": {"clientKey", "id", "values", "ifMatch"}, "delete": {"clientKey", "id", "ifMatch"}, "upsert": {"clientKey", "match", "values", "ifMatch"}}[operation]
+            allowed = {"create": {"clientKey", "values", "valueRefs"}, "update": {"clientKey", "id", "values", "valueRefs", "ifMatch"}, "delete": {"clientKey", "id", "ifMatch"}, "upsert": {"clientKey", "match", "values", "valueRefs", "ifMatch"}}[operation]
             require(set(item).issubset(allowed))
             key = item.get("clientKey")
             require(type(key) is str and 0 < len(key.encode("utf-8")) <= 128 and all(ord(ch) >= 32 and not 127 <= ord(ch) <= 159 for ch in key) and key not in keys)
             out = {"schemaId": schema, "operation": operation, "clientKey": key}
             if operation != "delete":
-                out["values"] = values_copy(item["values"])
+                require("values" in item or bool(item.get("valueRefs")))
+                out["values"] = values_copy(item.get("values", {}))
             if operation in ("update", "delete"):
                 out["id"] = identifier(item["id"])
                 out["ifMatch"] = etag(item["ifMatch"], True)
@@ -59,8 +71,12 @@ const pythonDataSDK = `def __ontology_data_context():
                 token = etag(item.get("ifMatch", ""), False)
                 if token:
                     out["ifMatch"] = token
+            if "valueRefs" in item:
+                refs = refs_copy(item["valueRefs"], out["values"], out.get("match", {}))
+                if refs:
+                    out["valueRefs"] = refs
             plan.append(out)
-            keys.add(key)
+            keys[key] = operation
         except BaseException:
             poisoned = True
             raise
@@ -78,14 +94,14 @@ const pythonDataSDK = `def __ontology_data_context():
             nonlocal poisoned
             poisoned = True
             raise AttributeError("unsupported data operation")
-        def create(self, schema_id, values, client_key):
-            stage("create", schema_id, {"values": values, "clientKey": client_key})
-        def update(self, schema_id, id, values, if_match, client_key):
-            stage("update", schema_id, {"id": id, "values": values, "ifMatch": if_match, "clientKey": client_key})
+        def create(self, schema_id, values, client_key, value_refs=None):
+            stage("create", schema_id, {"values": values, "clientKey": client_key, **({"valueRefs": value_refs} if value_refs is not None else {})})
+        def update(self, schema_id, id, values, if_match, client_key, value_refs=None):
+            stage("update", schema_id, {"id": id, "values": values, "ifMatch": if_match, "clientKey": client_key, **({"valueRefs": value_refs} if value_refs is not None else {})})
         def delete(self, schema_id, id, if_match, client_key):
             stage("delete", schema_id, {"id": id, "ifMatch": if_match, "clientKey": client_key})
-        def upsert(self, schema_id, match, values, if_match, client_key, conflict_policy="check"):
-            stage("upsert", schema_id, {"match": match, "values": values, "ifMatch": if_match, "clientKey": client_key}, conflict_policy)
+        def upsert(self, schema_id, match, values, if_match, client_key, conflict_policy="check", value_refs=None):
+            stage("upsert", schema_id, {"match": match, "values": values, "ifMatch": if_match, "clientKey": client_key, **({"valueRefs": value_refs} if value_refs is not None else {})}, conflict_policy)
         def bulk_create(self, schema_id, items):
             bulk("create", schema_id, items)
         def bulk_update(self, schema_id, items):
@@ -119,7 +135,7 @@ const pythonDataSDK = `def __ontology_data_context():
 const javascriptDataSDK = `
 const __ontologyWriteState = (() => {
   let poisoned = false;
-  const plan = [], keys = new Set();
+  const plan = [], keys = new Map();
   const require = value => { if (!value) throw new Error('invalid data write plan'); };
   const identifier = value => { require(typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)); return value; };
   const object = value => {
@@ -149,17 +165,29 @@ const __ontologyWriteState = (() => {
     const copied = values(v.values); require(Object.keys(copied).length > 0);
     return {indexId:identifier(v.indexId),values:copied};
   };
+  const refs = (value,literals,selector) => {
+    const out = Object.create(null);
+    for (const [field,valueRef] of Object.entries(object(value))) {
+      identifier(field);
+      require(!Object.hasOwn(literals,field) && !Object.hasOwn(selector.values ?? {},field));
+      const ref = object(valueRef);
+      require(Object.keys(ref).length === 1 && Object.hasOwn(ref,'clientKey') && typeof ref.clientKey === 'string' && ['create','upsert'].includes(keys.get(ref.clientKey)));
+      out[field] = {clientKey:ref.clientKey};
+    }
+    return out;
+  };
   const stage = (operation,schema,item,policy='check') => {
     try {
       require(!poisoned && plan.length < 100); identifier(schema);
-      const v = object(item), allowed = {create:['clientKey','values'],update:['clientKey','id','values','ifMatch'],delete:['clientKey','id','ifMatch'],upsert:['clientKey','match','values','ifMatch']}[operation];
+      const v = object(item), allowed = {create:['clientKey','values','valueRefs'],update:['clientKey','id','values','valueRefs','ifMatch'],delete:['clientKey','id','ifMatch'],upsert:['clientKey','match','values','valueRefs','ifMatch']}[operation];
       require(Object.keys(v).every(key => allowed.includes(key)));
       require(typeof v.clientKey === 'string' && v.clientKey.length > 0 && !/[\x00-\x1f\x7f-\x9f]/.test(v.clientKey) && encodeURIComponent(v.clientKey).replace(/%[A-F\d]{2}/gi,'x').length <= 128 && !keys.has(v.clientKey));
       const out = {schemaId:schema,operation,clientKey:v.clientKey};
-      if (operation !== 'delete') out.values = values(v.values);
+      if (operation !== 'delete') { require(Object.hasOwn(v,'values') || Object.keys(object(v.valueRefs)).length > 0); out.values = values(Object.hasOwn(v,'values') ? v.values : {}); }
       if (operation === 'update' || operation === 'delete') { out.id=identifier(v.id); out.ifMatch=etag(v.ifMatch,true); }
       if (operation === 'upsert') { require(policy === 'check' || policy === 'overwrite'); out.match=match(v.match); out.conflictPolicy=policy; const token=etag(v.ifMatch ?? '',false); if(token) out.ifMatch=token; }
-      plan.push(out); keys.add(v.clientKey);
+      if (Object.hasOwn(v,'valueRefs')) { const copied=refs(v.valueRefs,out.values,out.match ?? {}); if(Object.keys(copied).length > 0) out.valueRefs=copied; }
+      plan.push(out); keys.set(v.clientKey,operation);
     } catch (failure) { poisoned=true; throw failure; }
   };
   const bulk = (operation,schema,items,policy='check') => {
@@ -167,10 +195,10 @@ const __ontologyWriteState = (() => {
     catch(failure) { poisoned=true; throw failure; }
   };
   const data = Object.freeze({
-    create(schema,values,clientKey) { stage('create',schema,{values,clientKey}); },
-    update(schema,id,values,ifMatch,clientKey) { stage('update',schema,{id,values,ifMatch,clientKey}); },
+    create(schema,values,clientKey,valueRefs={}) { stage('create',schema,{values,clientKey,valueRefs}); },
+    update(schema,id,values,ifMatch,clientKey,valueRefs={}) { stage('update',schema,{id,values,ifMatch,clientKey,valueRefs}); },
     delete(schema,id,ifMatch,clientKey) { stage('delete',schema,{id,ifMatch,clientKey}); },
-    upsert(schema,match,values,ifMatch,clientKey,conflictPolicy='check') { stage('upsert',schema,{match,values,ifMatch,clientKey},conflictPolicy); },
+    upsert(schema,match,values,ifMatch,clientKey,conflictPolicy='check',valueRefs={}) { stage('upsert',schema,{match,values,ifMatch,clientKey,valueRefs},conflictPolicy); },
     bulk_create(schema,items) { bulk('create',schema,items); },
     bulk_update(schema,items) { bulk('update',schema,items); },
     bulk_delete(schema,items) { bulk('delete',schema,items); },

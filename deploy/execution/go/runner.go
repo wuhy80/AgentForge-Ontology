@@ -274,7 +274,7 @@ func main() {
     if __ontologyDecoder.Decode(&__ontologyInput) != nil { __ontologyFail(0) }
     __ontologyEntry := any(%s)
     __ontologyDataMode, __ontologyEntryLine := %t, %d
-    __ontologyData := &OntologyData{__ontologyOperations:make([]__ontologyOperation,0),__ontologyKeys:make(map[string]bool)}
+    __ontologyData := &OntologyData{__ontologyOperations:make([]__ontologyOperation,0),__ontologyKeys:make(map[string]string)}
     __ontologyContext := &OntologyContext{Data:__ontologyData}
     var __ontologyOutput map[string]any
     var __ontologyCallError error
@@ -303,12 +303,14 @@ type OntologyMatch struct {
     IndexID string ` + "`json:\"indexId,omitempty\"`" + `
     Values map[string]any ` + "`json:\"values,omitempty\"`" + `
 }
+type OntologyResultReference struct { ClientKey string ` + "`json:\"clientKey\"`" + ` }
 type OntologyWriteItem struct {
     ClientKey string
     ID string
     IfMatch string
     Match *OntologyMatch
     Values map[string]any
+    ValueRefs map[string]OntologyResultReference
 }
 type __ontologyOperation struct {
     SchemaID string ` + "`json:\"schemaId\"`" + `
@@ -318,11 +320,12 @@ type __ontologyOperation struct {
     IfMatch string ` + "`json:\"ifMatch,omitempty\"`" + `
     Match *OntologyMatch ` + "`json:\"match,omitempty\"`" + `
     Values map[string]any ` + "`json:\"values,omitempty\"`" + `
+    ValueRefs map[string]OntologyResultReference ` + "`json:\"valueRefs,omitempty\"`" + `
     ConflictPolicy string ` + "`json:\"conflictPolicy,omitempty\"`" + `
 }
 type OntologyData struct {
     __ontologyOperations []__ontologyOperation
-    __ontologyKeys map[string]bool
+    __ontologyKeys map[string]string
     __ontologyPoisoned bool
 }
 func __ontologyRequire(ok bool) { if !ok { panic("invalid data write plan") } }
@@ -356,6 +359,21 @@ func __ontologyMatchCopy(match *OntologyMatch) *OntologyMatch {
     __ontologyRequire(len(match.Values)>0)
     return &OntologyMatch{IndexID:__ontologyID(match.IndexID),Values:__ontologyValues(match.Values)}
 }
+func (data *OntologyData) __ontologyRefsCopy(refs map[string]OntologyResultReference,values map[string]any,match *OntologyMatch) map[string]OntologyResultReference {
+    copied:=make(map[string]OntologyResultReference,len(refs))
+    for field,ref:=range refs {
+        __ontologyID(field)
+        _,literal:=values[field];__ontologyRequire(!literal)
+        if match!=nil {_,selected:=match.Values[field];__ontologyRequire(!selected)}
+        operation:=data.__ontologyKeys[ref.ClientKey];__ontologyRequire(operation=="create"||operation=="upsert")
+        copied[field]=OntologyResultReference{ClientKey:ref.ClientKey}
+    }
+    return copied
+}
+func (data *OntologyData) __ontologyRefArgument(refs []map[string]OntologyResultReference) map[string]OntologyResultReference {
+    if len(refs)>1 {data.__ontologyPoisoned=true;panic("invalid data write plan")}
+    if len(refs)==1 {return refs[0]};return nil
+}
 func (data *OntologyData) __ontologyStage(operation,schema string,item OntologyWriteItem,policy string) {
     defer func(){if failure:=recover();failure!=nil {data.__ontologyPoisoned=true;panic(failure)}}()
     __ontologyRequire(!data.__ontologyPoisoned && len(data.__ontologyOperations)<100)
@@ -363,26 +381,30 @@ func (data *OntologyData) __ontologyStage(operation,schema string,item OntologyW
     switch operation {
     case "create": __ontologyRequire(item.ID=="" && item.IfMatch=="" && item.Match==nil)
     case "update": __ontologyRequire(item.Match==nil)
-    case "delete": __ontologyRequire(item.Match==nil && item.Values==nil)
+    case "delete": __ontologyRequire(item.Match==nil && item.Values==nil && item.ValueRefs==nil)
     case "upsert": __ontologyRequire(item.ID=="")
     default: __ontologyRequire(false)
     }
-    __ontologyRequire(len(item.ClientKey)>0 && len(item.ClientKey)<=128 && !data.__ontologyKeys[item.ClientKey])
+    __ontologyRequire(len(item.ClientKey)>0 && len(item.ClientKey)<=128 && data.__ontologyKeys[item.ClientKey]=="")
     for _,ch:=range item.ClientKey { __ontologyRequire(ch>=32 && (ch<127||ch>159)) }
     out:=__ontologyOperation{SchemaID:schema,Operation:operation,ClientKey:item.ClientKey}
-    if operation!="delete" {out.Values=__ontologyValues(item.Values)}
+    if operation!="delete" {
+        values:=item.Values;if values==nil && len(item.ValueRefs)>0 {values=map[string]any{}}
+        out.Values=__ontologyValues(values)
+    }
     if operation=="update" || operation=="delete" {out.ID=__ontologyID(item.ID);out.IfMatch=__ontologyETag(item.IfMatch,true)}
     if operation=="upsert" {
         if policy=="" {policy="check"};__ontologyRequire(policy=="check"||policy=="overwrite")
         out.Match=__ontologyMatchCopy(item.Match);out.IfMatch=__ontologyETag(item.IfMatch,false);out.ConflictPolicy=policy
     }
-    if data.__ontologyKeys==nil {data.__ontologyKeys=make(map[string]bool)}
-    data.__ontologyOperations=append(data.__ontologyOperations,out);data.__ontologyKeys[item.ClientKey]=true
+    out.ValueRefs=data.__ontologyRefsCopy(item.ValueRefs,out.Values,out.Match)
+    if data.__ontologyKeys==nil {data.__ontologyKeys=make(map[string]string)}
+    data.__ontologyOperations=append(data.__ontologyOperations,out);data.__ontologyKeys[item.ClientKey]=operation
 }
-func (data *OntologyData) Create(schema string,values map[string]any,clientKey string) {data.__ontologyStage("create",schema,OntologyWriteItem{Values:values,ClientKey:clientKey},"")}
-func (data *OntologyData) Update(schema,id string,values map[string]any,ifMatch,clientKey string) {data.__ontologyStage("update",schema,OntologyWriteItem{ID:id,Values:values,IfMatch:ifMatch,ClientKey:clientKey},"")}
+func (data *OntologyData) Create(schema string,values map[string]any,clientKey string,valueRefs ...map[string]OntologyResultReference) {data.__ontologyStage("create",schema,OntologyWriteItem{Values:values,ClientKey:clientKey,ValueRefs:data.__ontologyRefArgument(valueRefs)},"")}
+func (data *OntologyData) Update(schema,id string,values map[string]any,ifMatch,clientKey string,valueRefs ...map[string]OntologyResultReference) {data.__ontologyStage("update",schema,OntologyWriteItem{ID:id,Values:values,IfMatch:ifMatch,ClientKey:clientKey,ValueRefs:data.__ontologyRefArgument(valueRefs)},"")}
 func (data *OntologyData) Delete(schema,id,ifMatch,clientKey string) {data.__ontologyStage("delete",schema,OntologyWriteItem{ID:id,IfMatch:ifMatch,ClientKey:clientKey},"")}
-func (data *OntologyData) Upsert(schema string,match OntologyMatch,values map[string]any,ifMatch,clientKey,conflictPolicy string) {data.__ontologyStage("upsert",schema,OntologyWriteItem{Match:&match,Values:values,IfMatch:ifMatch,ClientKey:clientKey},conflictPolicy)}
+func (data *OntologyData) Upsert(schema string,match OntologyMatch,values map[string]any,ifMatch,clientKey,conflictPolicy string,valueRefs ...map[string]OntologyResultReference) {data.__ontologyStage("upsert",schema,OntologyWriteItem{Match:&match,Values:values,IfMatch:ifMatch,ClientKey:clientKey,ValueRefs:data.__ontologyRefArgument(valueRefs)},conflictPolicy)}
 func (data *OntologyData) __ontologyBulk(operation,schema string,items []OntologyWriteItem,policy string) {
     defer func(){if failure:=recover();failure!=nil {data.__ontologyPoisoned=true;panic(failure)}}()
     __ontologyRequire(len(items)>0 && len(items)<=100 && len(data.__ontologyOperations)+len(items)<=100)

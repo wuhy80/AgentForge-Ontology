@@ -26,26 +26,47 @@ Function及直接源码Action可以使用`sideEffects=dataWrite`，并在正文�
 
 工作台“实现声明”可选择副作用，并按中文对象名称配置写入范围和四种操作，保存稳定Schema ID。切换回纯计算会清除写入声明；默认模板同时切换入口参数，自编源码保留原文，由作者调整签名。已生效定义继续锁定输入输出结构、副作用及写入范围，可通过草稿更新源码、语言、入口和超时；改变能力范围须新建定义，不借源码更新扩大权限。数据写入草稿的试运行按钮禁用，后端同样拒绝；纯计算草稿行为保持原规则。
 
-SDK入口为Python的`def main(inputs, ctx)`、JavaScript的`function main(inputs, ctx)`、Go的`func Main(inputs map[string]any, ctx *OntologyContext) (map[string]any, error)`。Python/JavaScript通过`ctx.data`调用，Go通过`ctx.Data`调用下表方法；只暂存受控计划，不读取数据、不立即写入、不返回生成ID，也不向容器传入Cookie、数据库或服务凭据。输入输出仍使用中文参数键，SDK的Schema、字段及实例引用使用稳定ID。若后续操作需要新记录身份，由调用方预先提供ID并使用ID匹配upsert，不以create方法返回ID串联操作。
+SDK入口为Python的`def main(inputs, ctx)`、JavaScript的`function main(inputs, ctx)`、Go的`func Main(inputs map[string]any, ctx *OntologyContext) (map[string]any, error)`。Python/JavaScript通过`ctx.data`调用，Go通过`ctx.Data`调用下表方法；只暂存受控计划，不读取数据、不立即写入、不返回生成ID，也不向容器传入Cookie、数据库或服务凭据。输入输出仍使用中文参数键，SDK的Schema、字段及实例引用使用稳定ID。后续操作需要前项实际结果ID时可使用下述结果引用，不以create方法返回ID串联操作。
 
-2026-11-15 Data直接事务协议已增加有界`valueRefs`结果ID引用，范围唯一见[数据读写](../数据读写.md#事务内结果id引用2026-11-15已实现实库待验收)。本批未增加下表SDK的引用构造参数或方法，SDK仍按既有字面值调用；不能将Data协议扩展视为三语言容器SDK已支持主从保存。Execution共享DTO可保留原始引用计划并按原键核对，仍逐项受双方dataWrite声明及原用户授权约束。
+2026-11-16按用户确认的建议补齐三语言SDK的结果ID引用构造，复用Data已有的有界`valueRefs`协议，实际引用约束唯一见[数据读写](../数据读写.md#事务内结果id引用2026-11-15已实现2026-11-16实库通过)。Execution共享DTO保留原始引用计划并按原键核对，仍逐项受双方dataWrite声明及原用户授权约束；无需新增数据库迁移。
 
 | Python / JavaScript 方法 | Go 方法与参数 |
 | --- | --- |
-| `create(schemaId, values, clientKey)` | `Create(schemaID, values, clientKey)` |
-| `update(schemaId, id, values, ifMatch, clientKey)` | `Update(schemaID, id, values, ifMatch, clientKey)` |
+| `create(schemaId, values, clientKey, value_refs=None)` / JS `valueRefs={}` | `Create(schemaID, values, clientKey, valueRefs ...map[string]OntologyResultReference)` |
+| `update(schemaId, id, values, ifMatch, clientKey, value_refs=None)` / JS `valueRefs={}` | `Update(schemaID, id, values, ifMatch, clientKey, valueRefs ...map[string]OntologyResultReference)` |
 | `delete(schemaId, id, ifMatch, clientKey)` | `Delete(schemaID, id, ifMatch, clientKey)` |
-| `upsert(schemaId, match, values, ifMatch, clientKey, conflictPolicy="check")` | `Upsert(schemaID, match, values, ifMatch, clientKey, conflictPolicy)` |
+| Python `upsert(schemaId, match, values, ifMatch, clientKey, conflict_policy="check", value_refs=None)` / JS `upsert(schemaId, match, values, ifMatch, clientKey, conflictPolicy="check", valueRefs={})` | `Upsert(schemaID, match, values, ifMatch, clientKey, conflictPolicy, valueRefs ...map[string]OntologyResultReference)` |
 | `bulk_create(schemaId, items)` | `BulkCreate(schemaID, items)` |
 | `bulk_update(schemaId, items)` | `BulkUpdate(schemaID, items)` |
 | `bulk_delete(schemaId, items)` | `BulkDelete(schemaID, items)` |
-| `bulk_upsert(schemaId, items, conflictPolicy="check")` | `BulkUpsert(schemaID, items, conflictPolicy)` |
+| Python `bulk_upsert(schemaId, items, conflict_policy="check")` / JS `bulk_upsert(schemaId, items, conflictPolicy="check")` | `BulkUpsert(schemaID, items, conflictPolicy)` |
 
 `values`以字段ID为键；`match`为`{id}`或`{indexId,values}`。批量`items`使用`clientKey`及对应的`values/id/ifMatch/match`，不产生独立事务。Go使用`OntologyMatch{ID,IndexID,Values}`和`[]OntologyWriteItem`，其中Match为`*OntologyMatch`，Values为`map[string]any`；Go策略空字符串等同`check`。`ifMatch`必须是带双引号的强ETag，覆盖仍要求额外授权；int64/decimal继续保持字符串。SDK无返回值；任一SDK计划错误都会使调用失败，即使业务源码捕获异常也不能提交剩余计划。
+
+新增末尾引用参数可省略，旧调用保持兼容。Python单项用`value_refs`、JavaScript用`valueRefs`，内容均为`{UUID字段ID: {clientKey: "前项"}}`（Python的`clientKey`须为字符串键）；批量条目统一使用`valueRefs`，支持引用同一批量数组中更早的create/upsert项。Go为`map[string]OntologyResultReference{字段ID: {ClientKey: "前项"}}`，批量条目用`OntologyWriteItem.ValueRefs`；可变参数只接受零或一个map，多传会使整次调用失败。单项可传空`values`（Go可传nil）只构造引用，批量非空引用时可省略values。
+
+SDK复制引用以免暂存后原map修改影响计划，并拒绝未知、自身、前向及update/delete来源、字段名称绑定、额外选择器，以及与values/match.values的同字段冲突。SDK不知道字段真实类型或当前权限，Data仍在提交处校验UUID类型、字段/行授权及并发条件。下面是Python构造示例，`订单SchemaID`等须由作者替换为真实稳定ID，不能直接运行这些占位值：
+
+```python
+ctx.data.create(订单SchemaID, {订单代码字段ID: inputs["代码"]}, "master")
+ctx.data.create(明细SchemaID, {数量字段ID: "1"}, "detail",
+                value_refs={主记录UUID字段ID: {"clientKey": "master"}})
+```
+
+该引用只赋值UUID属性，不建立Link事实。真实容器、Data事务及丢失响应恢复的分项实测见[项目总览](../项目总览.md#当前实现与验证2026-11-06)。Go运行器须显式重建并部署可信镜像后才具备新SDK；普通启动和请求不自动构建镜像。
 
 执行先运行脚本并校验输出，再将最多100条展开操作交给Data在单事务内提交，任一操作失败回滚整批；不在数据库事务内运行脚本。没有暂存任何写项时仍可正常完成计算。实际支持的存储与事务范围见[数据读写](../数据读写.md)，不支持的组合明确拒绝，不拆成多次非原子调用。
 
 执行状态`committing`表示事务结果尚未确认，不能展示为成功，也不交付函数输出。页面冻结原参数，允许核对状态或使用原幂等键POST恢复同一次提交；恢复不重新运行脚本。请求派发后遇到定义变化、403或网络错误仍保留原键、输入及未确认状态，隐藏业务输出与诊断；只有服务端权威终态释放参数，不提供换键重新起跑。恢复现场仅保存在当前页面内存，离开页面或整页刷新后不会自动恢复，也不将输入、会话或CSRF写入浏览器存储；未确认事务必须先核对，不能刷新后以新键重复提交。公开`transaction`仅含`status/committed/operationCount`状态摘要，不包含历史业务行值。服务端能力接口`dataWriteTransactions`为真时才允许打开写入正式调用；容器、Data事务或持久准备记录未就绪时明确不可用。恢复、提交不确定性及结果授权以[执行与调度](../执行与调度.md)为主。
+
+### 受控数据能力扩展（2026-11-16，候选）
+
+用户已确认按独立能力评估继续开发，本批先实现上述三语言结果ID引用并补事务实库验证。当前外部TypeScript DataSet SDK已经可以查询，但隔离运行器SDK仍只收集对象写计划；两者不是同一运行环境。以下继续作为后续候选，尚无新增接口：
+
+1. 关系计划须先设计独立的Link能力声明、根Action与实现Function的兼容校验、保存/发布依赖及当前调用授权，再开放SDK构造。现有仅Schema的dataWrite声明和内部桥继续拒绝非空关系计划，不因直接Data事务支持关系就自动扩权；普通边实际范围引用[Link](Link.md#当前关系数据库实现2026-11-07)。
+2. 业务读取首批可评估由Execution按显式声明和本次输入预取有界只读数据，再作为隔离调用上下文提供给代码；复用公共DataSet语义，以稳定Schema/字段ID绑定，不向容器传凭据或开放网络。任意执行中动态查询、跨来源读取和客户端自报身份不随首批开放，读取声明、预算和具体格式仍待设计。
+
+读取涉及的当前会话、行列授权、声明范围、结果交付和撤权由[权限设计](../权限/权限设计.md)统一确定，不能仅在SDK方法中检查。预取数据是读取时的值，不保证提交时仍有效；读取后写入须沿Data并发凭证及明确的前置条件检查，不把预取、脚本和写计划提交描述为一笔数据库快照事务。对应跨服务身份及隔离协议由[执行与调度](../执行与调度.md)维护。验收需分别覆盖三语言真实容器、真实Data事务、越权/撤权、并发变化和未知提交恢复，不能只以生成JSON计划通过视为完成。
 
 ### 首批Python运行协议（2026-11-07已实现）
 

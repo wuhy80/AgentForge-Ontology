@@ -62,7 +62,7 @@ POST 请求使用 `contracts.InvocationRequest`，例如：
 
 Execution在请求Data前持久保存计划及待交付输出，以`committing`表示尚未核对的提交。GET仅查Data回执，原键POST恢复原计划；响应丢失或存储失败不会触发脚本重跑、不会误报回滚。`committing`不按计算deadline中断。实际状态与恢复语义唯一见[执行与调度](../../docs/执行与调度.md#同步事务写入与恢复2026-11-08已实现)，Data存储范围、预算、终态及幂等见[数据读写](../../docs/数据读写.md#跨schema对象事务2026-11-08已实现)。
 
-2026-11-15 Data事务DTO新增可选valueRefs，Execution的持久计划与恢复保留原引用，不用解析后的UUID替换原意图；声明范围与原会话/CSRF校验继续适用。新增模拟Data客户端回归覆盖保存、响应丢失与重启后status核对，不代表真实MySQL或容器SDK集成。三语言SDK构造接口本批未扩展，直接HTTP引用的范围见Data主说明。
+2026-11-16补齐三语言SDK的可选结果ID引用参数及批量条目valueRefs（Go为ValueRefs），旧调用可省略；完整签名与构造示例唯一见[Function](../../docs/模块/Function.md#声明范围的事务写入2026-11-08)。复用2026-11-15的Data事务DTO，Execution持久计划与恢复保留原引用，不用解析后的UUID替换原意图；声明范围与原会话/CSRF校验继续适用。真实容器、隔离MySQL事务及完整会话/OPA恢复测试分项见[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)。Go须显式重建可信启动器镜像后使用，不在服务启动或请求时构建。
 
 同日Data直接HTTP事务增加managed Link创建数组links及删除数组linkDeletes；现有Callable.dataWrite未声明Link能力，Data内部执行桥明确拒绝非空links/linkDeletes（含恢复核对），不能借共享DTO扩大执行授权。运行器信封及三语言SDK仍只构造Schema操作，本批不扩展Action/Function业务范围。
 
