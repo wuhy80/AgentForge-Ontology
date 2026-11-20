@@ -461,7 +461,11 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
             {group.items.filter((item) => !item.administrator || session.account.user.administrator).map((item) => (
             <a
               href={`#${item.route}`}
-              onClick={(event) => { event.preventDefault(); navigate(item.route) }}
+              onClick={(event) => {
+                if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                event.preventDefault()
+                navigate(item.route)
+              }}
               key={item.route}
               className={`nav-item ${isCurrentNav(item) ? 'active' : ''}`}
               aria-label={item.name}

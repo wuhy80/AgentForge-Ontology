@@ -65,6 +65,7 @@ const dependencyEdges=[
 ]
 function renderDirectory(){
   const list=document.getElementById('directory-list')
+  document.querySelector('.directory .quiet-number').textContent = models.filter(model => (!filter || model.kind === filter) && (!search || (model.name + model.description).includes(search))).length
   list.innerHTML=Object.entries(kindNames).map(([kind,label])=>{
     const rows=models.filter(m=>m.kind===kind&&(!filter||filter===kind)&&(!search||(m.name+m.description).includes(search)))
     if(!rows.length)return ''
@@ -98,9 +99,67 @@ function renderDetail(){
   document.querySelector('.type-label').innerHTML=icon(kindIcons[record.kind])+kindNames[record.kind]
   document.querySelector('.detail-symbol').innerHTML=icon(kindIcons[record.kind])
   const rows=record.id==='notes'?properties:record.kind==='enum'?[['◇','未整理','待处理'],['◇','已整理','可使用'],['◇','已归档','已完成']]:[['T','名称','文本'],['≡','说明','长文本'],['◷','创建时间','时间'],['◷','更新时间','时间']].slice(0,record.count)
-  document.getElementById('detail-content').innerHTML=detailTab==='properties'?rows.map(([symbol,name,type])=>'<div class="property-row"><span>'+symbol+'</span>'+name+(type==='笔记状态'?'<span class="enum-value">'+type+' ↗</span>':'<code>'+type+'</code>')+'</div>').join(''):[['所属知识库','由知识库收录笔记'],['标记标签','连接主题与内容'],['产生引用','记录内容之间的关联'],['包含附件','关联文件与资料']].map(([name,hint])=>'<div class="relation-row">'+name+'<span>'+hint+'</span></div>').join('')
+  const relationships = (mode === 'relations' ? edges : dependencyEdges).filter(([from,to]) => from === selected || to === selected)
+  document.getElementById('relation-count').textContent = relationships.length
+  document.getElementById('detail-content').innerHTML=detailTab==='properties'?rows.map(([symbol,name,type])=>'<div class="property-row"><span>'+symbol+'</span>'+name+(type==='笔记状态'?'<span class="enum-value">'+type+' ↗</span>':'<code>'+type+'</code>')+'</div>').join(''):relationships.map(([from,to,,name]) => {
+    const source = models.find(model => model.id === from)
+    const target = models.find(model => model.id === to)
+    return '<div class="relation-row">'+name+'<span>'+source.name+' → '+target.name+'</span></div>'
+  }).join('') || '<p class="detail-description">当前视图没有此定义的关联。</p>'
 }
-function select(id){selected=id;const record=models.find(m=>m.id===id);if(['enum','action','function'].includes(record.kind)){mode='dependencies';document.querySelectorAll('[data-mode]').forEach(el=>el.setAttribute('aria-selected',el.dataset.mode===mode))}renderDirectory();renderGraph();renderDetail()}
+function select(id) {
+  const focused = document.activeElement
+  const origin = focused?.closest('.graph-world, .directory-list')
+  selected = id
+  const record = models.find(model => model.id === id)
+  if (['enum', 'action', 'function'].includes(record.kind)) mode = 'dependencies'
+  renderDirectory()
+  renderGraph()
+  renderDetail()
+  syncTabs('[data-mode]', 'mode', mode, 'preview-graph-panel')
+  if (origin && focused.dataset.select === id) origin.querySelector('[data-select="'+id+'"]')?.focus({ preventScroll: true })
+}
+function setPane(pane) {
+  document.getElementById('ontology-workbench').dataset.pane = pane
+  document.querySelectorAll('#preview-panes button').forEach(button => button.setAttribute('aria-pressed', button.dataset.pane === pane))
+}
+document.querySelectorAll('#preview-panes button').forEach(button => {
+  button.onclick = () => setPane(button.dataset.pane)
+})
+function syncTabs(selector, key, value, panelId) {
+  const panel = document.getElementById(panelId)
+  panel.setAttribute('role', 'tabpanel')
+  panel.tabIndex = 0
+  document.querySelectorAll(selector).forEach(tab => {
+    const active = tab.dataset[key] === value
+    tab.id = panelId + '-' + tab.dataset[key]
+    tab.tabIndex = active ? 0 : -1
+    tab.setAttribute('aria-controls', panelId)
+    tab.setAttribute('aria-selected', active)
+    if (active) panel.setAttribute('aria-labelledby', tab.id)
+  })
+}
+function bindTabs(selector, key, panelId, initial, activate) {
+  const tabs = Array.from(document.querySelectorAll(selector))
+  syncTabs(selector, key, initial, panelId)
+  tabs.forEach((tab, index) => {
+    tab.onclick = () => {
+      activate(tab.dataset[key])
+      syncTabs(selector, key, tab.dataset[key], panelId)
+    }
+    tab.onkeydown = event => {
+      const destination = { ArrowLeft: (index + tabs.length - 1) % tabs.length, ArrowRight: (index + 1) % tabs.length, Home: 0, End: tabs.length - 1 }[event.key]
+      if (destination === undefined) return
+      event.preventDefault()
+      tabs[destination].click()
+      tabs[destination].focus()
+    }
+  })
+}
+function syncFilters() {
+  document.querySelectorAll('[data-filter]').forEach(button => button.setAttribute('aria-pressed', button.dataset.filter === filter))
+}
+
 function showPage(target){
   if(target==='overview'){toast('本轮先预览本体全景和数据探索两个典型工作区');return}
   page=target
@@ -108,9 +167,10 @@ function showPage(target){
   document.getElementById('ontology-workbench').hidden=isQuery
   document.getElementById('query-workbench').hidden=!isQuery
   document.querySelector('.metrics').hidden=isQuery
+  document.getElementById('preview-panes').hidden=isQuery
   document.getElementById('page-title').textContent=isQuery?'数据探索':'本体全景'
   document.getElementById('breadcrumb-current').textContent=isQuery?'数据探索':'本体全景'
-  document.getElementById('page-description').textContent=isQuery?'用业务语言提问，让知识之间的联系成为答案。':'理解对象、关系与能力，连接你的知识世界。'
+  document.getElementById('page-description').textContent=isQuery?'用业务语言提问，让知识之间的联系成为答案。':'浏览当前分类的对象关系与定义依赖。'
   document.getElementById('refresh').lastElementChild.textContent=isQuery?'刷新目录':'刷新本体'
   document.querySelectorAll('[data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===page))
   updateAddress()
@@ -121,13 +181,20 @@ function setTheme(theme){document.documentElement.dataset.theme=theme;document.q
 function updateAddress(){const url=new URL(location.href);url.searchParams.set('theme',document.documentElement.dataset.theme);url.searchParams.set('page',page);history.replaceState(null,'',url)}
 document.querySelectorAll('[data-theme-option]').forEach(el=>el.onclick=()=>setTheme(el.dataset.themeOption))
 document.querySelectorAll('[data-page]').forEach(el=>el.onclick=()=>showPage(el.dataset.page))
-document.querySelectorAll('[data-filter]').forEach(el=>el.onclick=()=>{showPage('ontology');filter=filter===el.dataset.filter?'':el.dataset.filter;document.querySelectorAll('.metric').forEach(m=>m.classList.toggle('selected',m.dataset.filter===filter));renderDirectory();const first=models.find(m=>m.kind===filter);if(first)select(first.id)})
-document.querySelectorAll('[data-mode]').forEach(el=>el.onclick=()=>{mode=el.dataset.mode;document.querySelectorAll('[data-mode]').forEach(tab=>tab.setAttribute('aria-selected',tab===el));renderGraph()})
-document.querySelectorAll('[data-detail-tab]').forEach(el=>el.onclick=()=>{detailTab=el.dataset.detailTab;document.querySelectorAll('[data-detail-tab]').forEach(tab=>tab.setAttribute('aria-selected',tab===el));renderDetail()})
+document.querySelectorAll('[data-filter]').forEach(button => {
+  button.onclick = () => {
+    filter = filter === button.dataset.filter ? '' : button.dataset.filter
+    syncFilters()
+    renderDirectory()
+    setPane('directory')
+  }
+})
+bindTabs('[data-mode]', 'mode', 'preview-graph-panel', mode, view => { mode = view; renderGraph(); renderDetail() })
+bindTabs('[data-detail-tab]', 'detailTab', 'detail-content', detailTab, view => { detailTab = view; renderDetail() })
 document.querySelectorAll('[data-demo]').forEach(el=>el.onclick=()=>toast(el.dataset.demo))
 document.getElementById('directory-search').oninput=el=>{search=el.target.value.trim();renderDirectory()}
-document.getElementById('clear-filter').onclick=()=>{filter='';search='';document.getElementById('directory-search').value='';renderDirectory();toast('已显示全部示例定义')}
-document.getElementById('global-search').onclick=()=>{showPage('ontology');document.getElementById('directory-search').focus()}
+document.getElementById('clear-filter').onclick=()=>{filter='';search='';document.getElementById('directory-search').value='';syncFilters();renderDirectory();toast('已显示全部示例定义')}
+document.getElementById('global-search').onclick=()=>{showPage('ontology');setPane('directory');document.getElementById('directory-search').focus()}
 document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();document.getElementById('global-search').click()}})
 function setZoom(value){zoom=Math.min(1.4,Math.max(.6,value));document.getElementById('graph-world').style.setProperty('--zoom',zoom);document.getElementById('zoom-value').textContent=Math.round(zoom*100)+'%'}
 document.getElementById('zoom-in').onclick=()=>setZoom(zoom+.1)

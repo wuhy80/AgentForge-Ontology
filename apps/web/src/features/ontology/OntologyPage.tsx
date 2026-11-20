@@ -104,6 +104,11 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
   const inspector = <OntologyInspector record={selected} records={records} categories={categories} groups={catalog?.groups ?? []} categoryId={categoryId} onSelect={select}
     onOpenDefinition={(id) => visit(id, onOpenDefinition)} onQuery={(id) => visit(id, onQuery)} />
 
+  function changeCanvasMode(next: typeof mode) {
+    setMode(next)
+    setFocusId(undefined)
+  }
+
   return <div className="ontology-explorer" aria-label="本体全景">
     <header className="ontology-page-heading">
       <div><span className="eyebrow">ONTOLOGY EXPLORER</span><h1>本体全景</h1><p>以对象为中心，发现业务关系与定义之间的联系。</p></div>
@@ -136,10 +141,22 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
             <p className="ontology-directory-footnote">只展示当前生效定义；查看定义后可继续维护草稿。</p>
           </aside>
           <section className="ontology-canvas-panel" aria-label="本体画布">
-            <div className="ontology-canvas-heading"><div role="tablist" aria-label="本体画布视图"><button type="button" role="tab" aria-selected={mode === 'relations'} onClick={() => { setMode('relations'); setFocusId(undefined) }}><GitBranch size={15} />对象关系图</button><button type="button" role="tab" aria-selected={mode === 'dependencies'} onClick={() => { setMode('dependencies'); setFocusId(undefined) }}><Network size={15} />定义依赖图</button></div>
+            <div className="ontology-canvas-heading"><div role="tablist" aria-label="本体画布视图" onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+              event.preventDefault()
+              const next = event.key === 'Home' ? 'relations' : event.key === 'End' ? 'dependencies' : mode === 'relations' ? 'dependencies' : 'relations'
+              changeCanvasMode(next)
+              event.currentTarget.querySelector<HTMLButtonElement>(`#ontology-tab-${next}`)?.focus()
+            }}>{(['relations', 'dependencies'] as const).map((view) => <button type="button" role="tab" key={view} id={`ontology-tab-${view}`} aria-controls={`ontology-panel-${view}`} aria-selected={mode === view} tabIndex={mode === view ? 0 : -1} onClick={() => changeCanvasMode(view)}>
+              {view === 'relations' ? <><GitBranch size={15} aria-hidden="true" />对象关系图</> : <><Network size={15} aria-hidden="true" />定义依赖图</>}
+            </button>)}</div>
               {focusId && <button className="button subtle" type="button" onClick={() => setFocusId(undefined)}><X size={13} />取消聚焦</button>}</div>
-            <p className="ontology-canvas-description">{mode === 'relations' ? '对象通过 Link 连接，方向和基数说明业务关系。' : '沿已声明的引用，查看枚举、作用对象及函数绑定。'}</p>
-            <OntologyGraph records={records} rootIds={rootIds} categories={categories} categoryId={categoryId} mode={mode} selectedId={selectedId} focusId={focusId} onSelect={select} onFocus={setFocusId} layoutKey={layoutScope} />
+            {(['relations', 'dependencies'] as const).map((view) => <div key={view} role="tabpanel" id={`ontology-panel-${view}`} aria-labelledby={`ontology-tab-${view}`} hidden={mode !== view} tabIndex={0}>
+              {mode === view && <>
+                <p className="ontology-canvas-description">{view === 'relations' ? '对象通过 Link 连接，方向和基数说明业务关系。' : '沿已声明的引用，查看枚举、作用对象及函数绑定。'}</p>
+                <OntologyGraph records={records} rootIds={rootIds} categories={categories} categoryId={categoryId} mode={mode} selectedId={selectedId} focusId={focusId} onSelect={select} onFocus={setFocusId} layoutKey={layoutScope} />
+              </>}
+            </div>)}
             <div className="ontology-canvas-caption"><span>画布展示匹配资源及其已加载关联</span>{selected && <button type="button" className="button subtle" onClick={() => { setDetailOpen(true); setFocusId(selectedId) }}>聚焦所选定义</button>}</div>
           </section>
           {!narrow && <aside className="ontology-detail-panel" aria-label="本体详情">{inspector}</aside>}
