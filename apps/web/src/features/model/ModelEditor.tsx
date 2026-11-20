@@ -8,6 +8,7 @@ import { SchemaPropertiesEditor } from './SchemaPropertiesEditor'
 import { ModelDataPreview } from './ModelDataPreview'
 import { ModelWriteOperations } from './ModelWriteOperations'
 import { RelatedDefinitions } from './RelatedDefinitions'
+import { DefinitionDependencies } from './DefinitionDependencies'
 import { ActionTargetsEditor } from './ActionTargetsEditor'
 import { LinkStorageEditor, validateLinkStorage } from './LinkStorageEditor'
 import { CallableImplementationEditor } from './CallableImplementationEditor'
@@ -368,6 +369,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
         <ModelDataPreview key={definition.id || 'unpublished'} api={api} schemaId={definition.id} active={active && tab === 'data' && !uncertain} hasCurrent={locked} draft={record?.status !== 'active' || dirty} />
       </section>}
       {tab !== 'data' && <>
+      <DefinitionDependencies api={api} record={record} dirty={dirty} active={active && !uncertain} />
       {preview && <section className="model-preview"><div className="model-section-heading"><div><h3><FileCode2 size={17} />存储计划预览</h3><p className="muted">预览不会执行 SQL，也不会占用发布状态。</p></div></div>{preview.statements?.length ? <pre>{preview.statements.join('\n\n')}</pre> : <p className="model-inline-empty">此变更没有需要执行的存储语句。</p>}</section>}
       <div className="model-editor-footer"><span className="muted">{dirty ? '先保存草稿，再预览或发布。' : record?.status === 'active' ? '当前内容已生效，可再次确认或恢复发布。' : '草稿已保存，发布后对业务生效。'}</span><div className="model-inline-actions"><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle className="model-spin" size={16} /> : <FileCode2 size={16} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle className="model-spin" size={16} /> : <Save size={16} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle className="model-spin" size={16} /> : uncertain ? <RefreshCw size={16} /> : <Send size={16} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}<ArrowRight size={15} /></button></div></div>
       </>}

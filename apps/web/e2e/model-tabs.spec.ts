@@ -82,7 +82,45 @@ async function fixture(page: Page) {
     unhandled.push(`${method} ${path}`)
     return reply({ error: { code: 'unhandled', message: '未定义的隔离接口' } }, 404)
   })
-  return { writes, unhandled, dataWrites }
+  return { writes, unhandled, dataWrites, current }
+}
+
+for (const width of [1440, 390]) {
+  test(`定义依赖：对象与关系入口、窄屏和撤权清理 ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    const state = await fixture(page)
+    let denied = false
+    await page.route(/\/api\/metadata\/definitions\/[^/]+\/dependencies(?:\?.*)?$/, async (route) => {
+      if (denied) return route.fulfill({ status: 404, json: { code: 'not_found', message: '依赖读取资格已变化' } })
+      const id = new URL(route.request().url()).pathname.split('/').at(-2)!
+      const record = state.current.find((entry) => entry.definition.id === id)!
+      const summary = { ...record.definition, view: 'current', etag: record.etag }
+      return route.fulfill({ json: { scope: 'direct-definition-references', definition: summary,
+        dependencies: id === 'equipment-report' ? [{ definition: { ...summary, id: 'equipment', name: '生产设备', kind: 'schema' }, reasons: ['link-source'] }] : [],
+        dependents: id === 'equipment' ? [{ definition: { ...summary, id: 'calibrate', name: '校准动作草稿引用', kind: 'action', categoryId: 'quality', view: 'draft' }, reasons: ['action-target'] }] : [],
+      } })
+    })
+    await page.goto('/#models/equipment')
+    const panel = page.getByRole('region', { name: '定义依赖影响', exact: true })
+    await panel.getByRole('button', { name: '查看定义依赖', exact: true }).click()
+    await expect(panel.getByText('校准动作草稿引用', { exact: true })).toBeVisible()
+    await expect(panel.getByText('已保存草稿 · 跨分类', { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    denied = true
+    await panel.getByRole('button', { name: '刷新依赖', exact: true }).click()
+    await expect(panel.getByRole('alert')).toContainText('依赖读取资格已变化')
+    await expect(panel.getByText('校准动作草稿引用', { exact: true })).toHaveCount(0)
+    denied = false
+    await page.goto('/#models/equipment-report')
+    await panel.getByRole('button', { name: '查看定义依赖', exact: true }).click()
+    await expect(panel.getByRole('region', { name: '引用了谁', exact: true }).getByRole('link', { name: '生产设备', exact: true })).toBeVisible()
+    await expect(panel.getByText('关系来源', { exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    expect(state.unhandled).toEqual([])
+    expect(errors).toEqual([])
+  })
 }
 
 test('八个内置操作：业务唯一键校验更新与整批更新使用读取的并发凭证', async ({ page }) => {

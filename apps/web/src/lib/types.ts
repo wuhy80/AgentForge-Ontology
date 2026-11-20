@@ -280,6 +280,17 @@ export interface DefinitionRecord {
   hasCurrent?: boolean
 }
 export interface Organization { id: string; tenantId: string; categoryId?: string; name: string }
+export interface DefinitionDependencySummary {
+  id: string; kind: Kind; name: string; categoryId: string; groupId: string
+  view: 'current' | 'draft'; etag: string
+}
+export interface DefinitionDependency { definition: DefinitionDependencySummary; reasons: string[] }
+export interface DefinitionDependencyImpact {
+  scope: 'direct-definition-references'
+  definition: DefinitionDependencySummary
+  dependencies: DefinitionDependency[]
+  dependents: DefinitionDependency[]
+}
 export interface Page<T> { data: T[]; hasMore: boolean; nextCursor?: string }
 export interface Publication { id: string; tenantId: string; definitionId: string; status: string; error?: string }
 export interface Preview { operationId: string; status: string; statements?: string[] }
@@ -346,6 +357,7 @@ export interface QueryPathsResult { requestId: string; textHash: string; candida
 export interface QueryFieldInsertionRequest extends OntologySQLRequest { schemaId: string; fieldId: string; alias?: string; selectionFrom: number; selectionTo: number }
 export interface QueryFieldInsertionResult { requestId: string; textHash: string; text: string; from: number; to: number; diagnostics: SQLDiagnostic[] }
 export interface MetadataCapabilities {
+  dependencyImpact?: 'direct-definitions'
   definitions: Kind[]
   lifecycle: string[]
   definitionUpdates: string

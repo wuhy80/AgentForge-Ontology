@@ -173,7 +173,7 @@ describe('多 Link 查询工作台', () => {
     expect((screen.getByLabelText('模型角色 1') as HTMLInputElement).value).toBe('o');
     fireEvent.click(screen.getByRole('tab', { name: 'OntologySQL' }));
     const restored = await screen.findByRole('textbox', { name: 'OntologySQL 编辑器' });
-    expect((restored as HTMLTextAreaElement).value).toContain('JOIN LINK "o" VIA "业务"."订单客户" DIRECTION OUT AS "c"');
+    await waitFor(() => expect((restored as HTMLTextAreaElement).value).toContain('JOIN LINK "o" VIA "业务"."订单客户" DIRECTION OUT AS "c"'));
   });
   it('首次分析的自动刷新不取消正在读取关联定义的模式转换', async () => {
     fixture({ getCurrent: vi.fn().mockImplementation((_id: string, signal?: AbortSignal) => new Promise((resolve, reject) => {

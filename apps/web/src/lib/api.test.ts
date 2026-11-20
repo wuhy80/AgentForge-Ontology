@@ -8,6 +8,14 @@ const page = (data: unknown[], hasMore = false, nextCursor = '') => json({ data,
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('ApiClient transport and complete directories', () => {
+  it('reads a selected dependency view with same-origin credentials and cancellation', async () => {
+    const fetcher = vi.fn().mockResolvedValue(json({ scope: 'direct-definition-references' }))
+    vi.stubGlobal('fetch', fetcher)
+    const signal = new AbortController().signal
+    await new ApiClient().definitionDependencies('id/with space', 'draft', signal)
+    expect(fetcher).toHaveBeenCalledWith('/api/metadata/definitions/id%2Fwith%20space/dependencies?view=draft', expect.objectContaining({ signal, credentials: 'same-origin', cache: 'no-store', redirect: 'error' }))
+  })
+
   it('follows all pages using same-origin paths and never redirects credentials', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(page([{ id: 'first' }], true, 'first'))
       .mockResolvedValueOnce(page([{ id: 'second' }]))

@@ -1,3 +1,4 @@
+import { DefinitionDependencies } from './DefinitionDependencies'
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { AlertCircle, ArrowLeft, ArrowRight, Check, FileCode2, GitBranch, LoaderCircle, RefreshCw, Save, Send } from 'lucide-react'
 import { ApiError } from '../../lib/api'
@@ -192,6 +193,7 @@ export function LinkVisualEditor(props: ModelEditorProps) {
           <section role="tabpanel" hidden={tab !== 'data'} id={`${tabId}-panel-data`} aria-labelledby={`${tabId}-data`} className="link-config-panel">{active && tab === 'data' && !uncertain && !busy && <LinkDataPreview api={api} current={current} schemas={schemas} draft={dirty || record?.status !== 'active'} />}</section>
         </div>
       </div>
+      <DefinitionDependencies api={api} record={record} dirty={dirty} active={active && !uncertain} />
       {preview && <section className="model-preview"><div className="model-section-heading"><div><h3><FileCode2 size={17} />存储计划预览</h3><p className="muted">预览不会执行 SQL。</p></div></div>{preview.statements?.length ? <pre>{preview.statements.join('\n\n')}</pre> : <p className="model-inline-empty">此变更没有需要执行的存储语句。</p>}</section>}
       <div className="model-editor-footer link-editor-footer"><span className="muted">{dirty ? '修改仅在画布预览，保存草稿后再发布。' : record?.status === 'active' ? '当前关系已生效。' : '草稿保存后，预览并发布关系。'}</span><div className="model-inline-actions"><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle size={15} className="model-spin" /> : <FileCode2 size={15} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={15} className="model-spin" /> : <Save size={15} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle size={15} className="model-spin" /> : uncertain ? <RefreshCw size={15} /> : <Send size={15} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}</button></div></div>
     </div>

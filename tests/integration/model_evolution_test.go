@@ -150,6 +150,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	states := publish(c.Definition{Kind: c.KindEnum, Name: "工单状态", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待办"}, {Code: "legacy", Label: "旧状态"}}}})
 	code, state, note := c.NewID(), c.NewID(), c.NewID()
 	schema := publish(c.Definition{Kind: c.KindSchema, Name: "工单", Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: code, Name: "代码", DataType: "string", Required: true}, {ID: state, Name: "状态", DataType: "string", Required: true, EnumID: states.Definition.ID}, {ID: note, Name: "备注", DataType: "string", Nullable: true}}}})
+	verifyDefinitionImpactHTTP(t, admin, outsider, client, metaServer.URL, tenant, category, group, schema.Definition.ID, states.Definition.ID)
 	baseURL := dataServer.URL + "/data/schemas/" + schema.Definition.ID + "/instances"
 	create := func(label, value string, want int) c.Instance {
 		var item c.Instance

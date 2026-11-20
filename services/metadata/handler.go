@@ -69,6 +69,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /metadata/definitions", h.wrap(h.listDefinitions))
 	mux.HandleFunc("GET /metadata/resolve", h.wrap(h.resolve))
 	mux.HandleFunc("GET /metadata/definitions/{id}", h.wrap(h.getCurrent))
+	mux.HandleFunc("GET /metadata/definitions/{id}/dependencies", h.wrap(h.dependencyImpact))
 	mux.HandleFunc("GET /metadata/definitions/{id}/draft", h.wrap(h.getDraft))
 	mux.HandleFunc("PUT /metadata/definitions/{id}/draft", h.wrap(h.saveDraft))
 	mux.HandleFunc("POST /metadata/definitions/{id}/preview", h.wrap(h.preview))
@@ -189,7 +190,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p contrac
 	if err := h.authorize(r.Context(), p, "definition.read", "", ""); err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "schemaInheritance": false, "dbToSchema": true})
+	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "schemaInheritance": false, "dbToSchema": true})
 	return nil
 }
 

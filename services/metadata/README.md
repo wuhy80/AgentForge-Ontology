@@ -68,6 +68,7 @@ go run ./cmd/server
 | `POST /metadata/definitions` | 创建定义及首份草稿，返回服务端生成的定义/字段 ID |
 | `GET /metadata/definitions` | 默认分页读取已生效定义；`view=draft` 发现未发布草稿，支持 categoryId、kind |
 | `GET /metadata/definitions/{id}` | 读取当前定义；只有草稿的对象返回404 |
+| `GET /metadata/definitions/{id}/dependencies?view=current\|draft` | 查看所选视图的直接引用与当前/草稿引用方；逐项授权的逻辑摘要，不读取实例或开放生命周期写操作 |
 | `GET/PUT /metadata/definitions/{id}/draft` | 读取/保存草稿；PUT 必须带强 If-Match |
 | `POST /metadata/definitions/{id}/preview` | 预览草稿，缺少草稿时预览当前；显式来源会读取实时目录、验证映射并编译对应计划，不创建发布操作、修改源库或占用发布状态 |
 | `POST /metadata/definitions/{id}/publish` | 按草稿强 If-Match 生效，或恢复同一持久操作 |
@@ -85,6 +86,8 @@ Function/Action正文支持`sideEffects=dataWrite`及`dataWrite:[{schemaId,opera
 普通业务目录另使用 `POST /internal/metadata/business-directory`，同时校验服务令牌、原始Cookie/MCP会话及当前instance.query，不要求definition.read/organization.read；此内部响应含Data裁剪所需的私有定义，不得直接公开。Metadata.Config.SessionChecker须显式接入权威身份服务，未配置拒绝；实际DTO见[business_directory.go](../../contracts/business_directory.go)，公开目录/表单见[Data](../data/README.md)，授权与裁剪边界唯一见[权限设计](../../docs/权限/权限设计.md#当前实现协议2026-11-07)。
 
 组织及定义列表默认100条、最多200条，使用返回的 `nextCursor` 作为下一次 `after`。这与 Data 的查询游标分别处理。
+
+定义依赖查看是独立的有界快照，不采用上述目录分页。能力声明 `dependencyImpact=direct-definitions`，公开结构为[dependency_impact.go](../../contracts/dependency_impact.go)；范围、原因码、预算和拒绝语义唯一见[直接定义依赖查看](../../docs/发布与迁移.md#直接定义依赖查看2026-11-16已实现)。实现从同一租户只读事务快照中的当前/草稿计算引用，不用仅维护当前态的af_meta_dependencies推断草稿；不返回完整定义或隐藏对象计数，交付前逐项复核read/edit。现有lifecycle、disable/delete能力保持原声明，无新增迁移。
 
 Link 增加可选 `storageBinding`：支持平台托管关联表、同外部数据源关联表和外键映射，字段及边界统一见 [Link](../../docs/模块/Link.md#当前关系数据库实现2026-11-07)。保存及发布均核对两端为同租户已生效 Schema、映射形状及同源约束，Data 继续核验真实表列和索引。已生效无绑定 Link 允许一次性追加绑定并通过同一 prepare/activate 流程生效；之后绑定、端点和基数不可修改。无绑定仍仅为定义，发布不会自动生成关系事实。方向发现接口返回定义与方向，实际邻接数据由 Data 的 `QuerySpec.via` 执行。
 

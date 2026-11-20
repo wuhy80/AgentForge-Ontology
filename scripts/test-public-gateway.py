@@ -132,6 +132,7 @@ func main() {
                        'If-Match': '"'+synthetic+'"', 'Idempotency-Key': synthetic}
             for method, path, expected_path in [
                 ('GET', '/api/metadata/definitions/test?review_marker='+synthetic, '/metadata/definitions/test?review_marker='+synthetic),
+                ('GET', '/api/metadata/definitions/test/dependencies?view=draft', '/metadata/definitions/test/dependencies?view=draft'),
                 ('POST', '/api/metadata/auth/login', '/metadata/auth/login'),
                 ('POST', '/api/ontoapp-ontology/metadata/auth/login', '/metadata/auth/login'),
                 ('GET', '/api/ontoapp-ontology/metadata/auth/session', '/metadata/auth/session'),
@@ -200,6 +201,8 @@ func main() {
                 assert status == 200 and value['path'] == '/data/schemas/model/write-capabilities'
                 checks += 1
             for method, path in [('GET','/api/data/transactions'),('PUT','/api/data/transactions/status'),
+                                 ('POST','/api/metadata/definitions/model/dependencies'),
+                                 ('GET','/api/ontoapp-ontology/metadata/definitions/model/dependencies'),
                                  ('GET','/api/data/query/bind'),('PUT','/api/data/query/bind'),
                                  ('POST','/api/data/query/bind/execute'),('GET','/api/ontoapp-ontology/data/query/bind'),
                                  ('DELETE','/api/data/saved-queries'),('PATCH','/api/data/saved-queries/query-id'),

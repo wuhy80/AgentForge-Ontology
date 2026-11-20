@@ -1,0 +1,10 @@
+.model-definition-dependencies { padding: 20px; border-top: 1px solid var(--border); min-width: 0; }
+.dependency-view { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
+.dependency-view select { width: auto; max-width: 100%; }
+.dependency-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.dependency-columns h4 { display: flex; align-items: center; gap: 8px; }
+.dependency-columns ul { list-style: none; padding: 0; margin: 0; }
+.dependency-columns li { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 8px; overflow-wrap: anywhere; }
+.dependency-columns li > div { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.dependency-columns li p { margin: 6px 0 0; }
+@media (max-width: 700px) { .dependency-columns { grid-template-columns: minmax(0, 1fr); gap: 8px; } }

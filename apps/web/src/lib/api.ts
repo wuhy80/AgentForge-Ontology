@@ -7,7 +7,7 @@ import type {
   SchemaLink, LinkInstance,
   QueryContext, OntologySQLRequest, OntologySQLAnalysis, OntologySQLCompletions, OntologySQLFormat, OntologySQLResult,
   QueryPathsRequest, QueryPathsResult, QueryFieldInsertionRequest, QueryFieldInsertionResult,
-  SavedQuery, SavedQueryInput, SavedQuerySummary, SavedQueryTemplate,
+  SavedQuery, SavedQueryInput, SavedQuerySummary, SavedQueryTemplate, DefinitionDependencyImpact,
 } from './types'
 import type { ConnectionDirectory, CreateConnection, CreatedConnection, OAuthAuthorization, OAuthPreview } from './external-auth'
 
@@ -229,6 +229,9 @@ export class ApiClient {
   }
   getDraft(id: string, signal?: AbortSignal): Promise<DefinitionRecord> {
     return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/draft`, { signal })
+  }
+  definitionDependencies(id: string, view: 'current' | 'draft', signal?: AbortSignal): Promise<DefinitionDependencyImpact> {
+    return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/dependencies?view=${view}`, { signal })
   }
   async schemaLinks(schemaId: string, signal?: AbortSignal): Promise<SchemaLink[]> {
     return (await this.request<{ data: SchemaLink[] }>(`/api/metadata/schemas/${encodeURIComponent(schemaId)}/links`, { signal })).data

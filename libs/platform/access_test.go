@@ -9,6 +9,7 @@ func TestAccessRouteScopes(t *testing.T) {
 	}{
 		{"GET", "/metadata/categories", ScopeDiscover, true},
 		{"GET", "/metadata/definitions/secret", "", false},
+		{"GET", "/metadata/definitions/secret/dependencies", "", false},
 		{"GET", "/data/query/context", ScopeDiscover, true},
 		{"POST", "/data/query/ontology-sql", ScopeQuery, true},
 		{"POST", "/execution/invocations", ScopeInvoke, true},
