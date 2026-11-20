@@ -210,12 +210,21 @@ type WriteRequest struct {
 type QuerySpec struct {
 	From      Source          `json:"from"`
 	Via       *LinkTraversal  `json:"via,omitempty"`
+	Relation  *RelationFilter `json:"relation,omitempty"`
 	Rows      *RowQuery       `json:"rows,omitempty"`
 	Aggregate *AggregateQuery `json:"aggregate,omitempty"`
 	Where     *Expression     `json:"where,omitempty"`
 	Select    []string        `json:"select"`
 	OrderBy   []Order         `json:"orderBy,omitempty"`
 	Page      Page            `json:"page"`
+}
+
+// RelationFilter keeps root instances with or without a visible neighbor.
+// Direction is relative to the root instance.
+type RelationFilter struct {
+	LinkID    string `json:"linkId"`
+	Direction string `json:"direction"`
+	Operator  string `json:"operator"`
 }
 
 // LinkTraversal restricts the result Schema to one-hop neighbors of InstanceID.

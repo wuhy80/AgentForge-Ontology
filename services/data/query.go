@@ -237,7 +237,7 @@ type compiledQuery struct {
 }
 
 func compileQuery(d c.Definition, etag string, p c.Principal, dec c.Decision, q c.QuerySpec, secret string) (compiledQuery, error) {
-	if q.Via != nil {
+	if q.Via != nil || q.Relation != nil {
 		return compiledQuery{}, problem(422, "link_context_required", "关系查询必须先解析并授权关系两端")
 	}
 	return compileQueryPredicate(d, etag, p, dec, q, secret, nil)

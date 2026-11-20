@@ -30,6 +30,11 @@ export interface RowQueryNode { readonly id: string; readonly schemaId: string; 
 export interface RowQueryJoin { readonly from: string; readonly to: string; readonly linkId: string; readonly direction: 'out' | 'in' }
 /** Each INNER Link introduces one new object occurrence, including self/branch joins. */
 export interface RowQuery { readonly nodes: readonly RowQueryNode[]; readonly joins: readonly RowQueryJoin[] }
+export interface RelationFilter {
+  readonly linkId: string;
+  readonly direction: 'out' | 'in';
+  readonly operator: 'exists' | 'not_exists';
+}
 export interface QuerySpec {
   readonly from: Source;
   readonly where?: Expression;
@@ -37,6 +42,7 @@ export interface QuerySpec {
   readonly orderBy?: readonly Order[];
   readonly aggregate?: AggregateQuery;
   readonly rows?: RowQuery;
+  readonly relation?: RelationFilter;
   readonly page: { readonly limit: number; readonly cursor?: string };
 }
 export interface QueryBinding { readonly query: QuerySpec; readonly fields: readonly Property[] }

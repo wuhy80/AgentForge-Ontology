@@ -312,6 +312,9 @@ func (h *handler) query(w http.ResponseWriter, r *http.Request) {
 // All query frontends enter this path. A bound QuerySpec is a query description,
 // never an authorization token: current definitions and decisions are re-read.
 func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySpec) (c.QueryResult, error) {
+	if err := validateRelationFilter(req); err != nil {
+		return c.QueryResult{}, err
+	}
 	if req.Aggregate != nil {
 		current, err := h.resolve(ctx, p, req.From)
 		if err != nil {
@@ -336,6 +339,9 @@ func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySp
 	}
 	if req.Via != nil {
 		return h.queryLink(ctx, p, current, dec, req)
+	}
+	if req.Relation != nil {
+		return h.queryRelation(ctx, p, current, dec, req)
 	}
 	if current.Definition.Schema != nil && current.Definition.Schema.StorageBinding != nil {
 		return h.queryMapped(ctx, p, current, dec, req, "", "instance.query")

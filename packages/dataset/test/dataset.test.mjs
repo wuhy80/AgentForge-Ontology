@@ -30,6 +30,22 @@ function fixture(queryFunction = entityResult) {
 }
 const errorCode = (code) => (error) => error instanceof DataSetError && error.code === code;
 
+test('relation filters retain direction and operator through binding and pagination', async () => {
+  const { transport, calls } = fixture((query, count) => entityResult(query, count === 1 ? { hasMore: true, nextCursor: 'next' } : {}));
+  const relation = { linkId: '00000000-0000-4000-8000-000000000001', direction: 'in', operator: 'not_exists' };
+  const dataset = DataSet.fromSpec(transport, { from: source, select: [fields[0].id], page: { limit: 1 }, relation });
+  const bound = await dataset.bind();
+  const first = await bound.execute();
+  await first.nextPage();
+  assert.deepEqual(calls.query.map(({ query }) => query.relation), [relation, relation]);
+  const changed = DataSet.fromSpec({ ...transport, async bind(query) {
+    const response = await transport.bind(query);
+    delete response.query.relation;
+    return response;
+  } }, dataset.toQuery());
+  await assert.rejects(changed.bind(), errorCode('invalid_binding'));
+});
+
 test('construction and branching perform no I/O, AND predicates detach inputs, select/order replace', () => {
   const { transport, calls } = fixture();
   const initialSource = { ...source };

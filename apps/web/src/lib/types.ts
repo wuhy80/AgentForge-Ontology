@@ -313,6 +313,7 @@ export interface QueryAggregate { groupBy?: string[]; measures: AggregateMeasure
 export interface QuerySpec {
   from: Source
   via?: LinkTraversal
+  relation?: { linkId: string; direction: 'out' | 'in'; operator: 'exists' | 'not_exists' }
   rows?: RowQuery
   aggregate?: QueryAggregate
   where?: Expression

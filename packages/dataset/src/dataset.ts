@@ -1,5 +1,5 @@
 import { DataSetError } from './errors.js';
-import type { AggregateMeasure, AggregateOperation, AggregateQuery, DataSetPage, Expression, Instance, Property, QueryResult, QuerySpec, QueryTransport, RowQuery, Source, Value, Values } from './types.js';
+import type { AggregateMeasure, AggregateOperation, AggregateQuery, DataSetPage, Expression, Instance, Property, QueryResult, QuerySpec, QueryTransport, RelationFilter, RowQuery, Source, Value, Values } from './types.js';
 
 type RecordValue = Record<string, unknown>;
 const own = (value: object, key: string) => Object.hasOwn(value, key);
@@ -109,9 +109,19 @@ function rowScope(input: unknown): RowQuery {
   });
   return { nodes, joins };
 }
+function relationFilter(input: unknown): RelationFilter {
+  const value = record(input);
+  keys(value, ['linkId', 'direction', 'operator']);
+  const linkId = text(value.linkId, 'Link ID');
+  const { direction, operator } = value;
+  if (!uuid.test(linkId) || (direction !== 'out' && direction !== 'in') || (operator !== 'exists' && operator !== 'not_exists')) {
+    fail('关联筛选需要稳定 Link ID、out/in 方向及 exists/not_exists 操作');
+  }
+  return { linkId, direction, operator };
+}
 function plan(input: unknown, allowCursor = false): QuerySpec {
   const value = record(input);
-  keys(value, ['from', 'where', 'select', 'orderBy', 'aggregate', 'rows', 'page']);
+  keys(value, ['from', 'where', 'select', 'orderBy', 'aggregate', 'rows', 'relation', 'page']);
   const from = source(value.from);
   const select = array(value.select).map((field) => text(field, '返回字段'));
   if (select.length > 100 || new Set(select).size !== select.length) fail('返回字段最多100项且不能重复');
@@ -122,6 +132,8 @@ function plan(input: unknown, allowCursor = false): QuerySpec {
   const cursor = page.cursor === undefined ? undefined : text(page.cursor, '分页游标');
   const grouped = value.aggregate === undefined ? undefined : aggregate(value.aggregate);
   const rows = value.rows === undefined ? undefined : rowScope(value.rows);
+  const relation = value.relation === undefined ? undefined : relationFilter(value.relation);
+  if (relation && (grouped || rows)) fail('关联筛选仅用于根对象查询', 'unsupported_query');
   if (rows && (grouped || from.schemaId !== rows.nodes[0].schemaId)) fail('关联查询需要根节点稳定ID，且不能混用聚合', 'unsupported_query');
   if (grouped && select.length) fail('汇总查询select必须为空');
   const where = value.where === undefined ? undefined : expression(value.where);
@@ -138,7 +150,7 @@ function plan(input: unknown, allowCursor = false): QuerySpec {
     const visit = (e: Expression) => { if (e.field !== undefined) field(e.field); e.args?.forEach(visit); };
     if (where) visit(where);
   }
-  return { from, select, ...(where ? { where } : {}), ...(orderBy?.length ? { orderBy } : {}), ...(grouped ? { aggregate: grouped } : {}), ...(rows ? { rows } : {}), page: { limit: page.limit, ...(cursor ? { cursor } : {}) } };
+  return { from, select, ...(where ? { where } : {}), ...(orderBy?.length ? { orderBy } : {}), ...(grouped ? { aggregate: grouped } : {}), ...(rows ? { rows } : {}), ...(relation ? { relation } : {}), page: { limit: page.limit, ...(cursor ? { cursor } : {}) } };
 }
 function properties(input: unknown): Property[] {
   const fields = array(input, 'invalid_response');
@@ -253,7 +265,7 @@ export class DataSet {
     const binding: unknown = await invoke(() => this.#transport.bind(request, signal), signal);
     const response = record(binding, 'invalid_binding');
     const query = plan(response.query);
-    if (!query.from.schemaId || this.#plan.from.schemaId && this.#plan.from.schemaId !== query.from.schemaId || !!query.aggregate !== !!this.#plan.aggregate || JSON.stringify(query.rows) !== JSON.stringify(this.#plan.rows) || query.page.limit !== this.#plan.page.limit) fail('绑定响应改变了查询来源、关联结构、模式或预算', 'invalid_binding');
+    if (!query.from.schemaId || this.#plan.from.schemaId && this.#plan.from.schemaId !== query.from.schemaId || !!query.aggregate !== !!this.#plan.aggregate || JSON.stringify(query.rows) !== JSON.stringify(this.#plan.rows) || JSON.stringify(query.relation) !== JSON.stringify(this.#plan.relation) || query.page.limit !== this.#plan.page.limit) fail('绑定响应改变了查询来源、关联结构、模式或预算', 'invalid_binding');
     const fields = properties(response.fields);
     sameFields(fields, query);
     return new DataSet(this.#transport, query, fields);

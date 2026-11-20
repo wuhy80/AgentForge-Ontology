@@ -223,7 +223,11 @@ func TestRowQueryManagedSelfLinkIntegration(t *testing.T) {
 	})
 	ids := []string{}
 	for i := 0; i < 3; i++ {
-		response := f.request("POST", "/data/schemas/"+definition.ID+"/instances", c.WriteRequest{Values: map[string]json.RawMessage{property.ID: raw("同名")}, IdempotencyKey: c.NewID()}, false)
+		name := "可见"
+		if i == 2 {
+			name = "隐藏"
+		}
+		response := f.request("POST", "/data/schemas/"+definition.ID+"/instances", c.WriteRequest{Values: map[string]json.RawMessage{property.ID: raw(name)}, IdempotencyKey: c.NewID()}, false)
 		var instance c.Instance
 		if response.Code != 201 || json.Unmarshal(response.Body.Bytes(), &instance) != nil {
 			t.Fatalf("create managed row: %d %s", response.Code, response.Body)
@@ -252,6 +256,78 @@ func TestRowQueryManagedSelfLinkIntegration(t *testing.T) {
 	if len(rows) != 1 || rows[0].Entities[4].InstanceID != ids[0] {
 		t.Fatalf("four-link self-query failed: %+v", rows)
 	}
+	t.Run("relation filter", func(t *testing.T) {
+		extra := f.request("POST", "/data/links/"+link.ID+"/instances", c.LinkWriteRequest{SourceID: ids[0], TargetID: ids[2]}, false)
+		if extra.Code != 201 {
+			t.Fatalf("create second neighbor: %d %s", extra.Code, extra.Body)
+		}
+		filter := c.QuerySpec{From: q.From, Relation: &c.RelationFilter{LinkID: link.ID, Direction: "out", Operator: "exists"},
+			Select: []string{property.ID}, Page: c.Page{Limit: 1}}
+		binding := f.request("POST", "/data/query/bind", filter, false)
+		var bound c.QueryBinding
+		if binding.Code != 200 || json.Unmarshal(binding.Body.Bytes(), &bound) != nil ||
+			bound.Query.Relation == nil || *bound.Query.Relation != *filter.Relation {
+			t.Fatalf("bind relation filter: %d %s", binding.Code, binding.Body)
+		}
+		first := f.query(bound.Query, 200)
+		if len(first.Data) != 1 || first.NextCursor == "" {
+			t.Fatalf("relation filter first page: %+v", first)
+		}
+		filter.Page.Cursor = first.NextCursor
+		second := f.query(filter, 200)
+		if len(second.Data) != 1 || second.HasMore || second.Data[0].ID == first.Data[0].ID ||
+			(first.Data[0].ID != ids[0] && second.Data[0].ID != ids[0]) ||
+			(first.Data[0].ID != ids[1] && second.Data[0].ID != ids[1]) {
+			t.Fatalf("relation filter must yield each root once: %+v %+v", first, second)
+		}
+		filter.Relation.Operator = "not_exists"
+		f.query(filter, 422)
+		filter.Page.Cursor = ""
+		for _, direction := range []struct{ name, expected string }{{"out", ids[2]}, {"in", ids[0]}} {
+			filter.Relation.Direction = direction.name
+			result := f.query(filter, 200)
+			if len(result.Data) != 1 || result.Data[0].ID != direction.expected || result.HasMore {
+				t.Fatalf("negative relation filter %s: %+v", direction.name, result)
+			}
+		}
+		saved := f.request("POST", "/data/saved-queries", c.SavedQueryInput{
+			Name: "没有关联", Source: c.SavedQuerySource{Kind: "visual"}, Query: filter,
+		}, false)
+		var template c.SavedQuery
+		if saved.Code != 201 || json.Unmarshal(saved.Body.Bytes(), &template) != nil {
+			t.Fatalf("save relation filter: %d %s", saved.Code, saved.Body)
+		}
+		executed := f.request("POST", "/data/saved-queries/"+template.ID+"/execute", c.SavedQueryExecuteRequest{}, false)
+		var result c.QueryResult
+		if executed.Code != 200 || json.Unmarshal(executed.Body.Bytes(), &result) != nil ||
+			len(result.Data) != 1 || result.Data[0].ID != ids[0] {
+			t.Fatalf("execute saved relation filter: %d %s", executed.Code, executed.Body)
+		}
+		f.authorize = func(request c.AuthorizationRequest) c.Decision {
+			decision := f.decision
+			if request.Operation == "instance.query" {
+				decision.RowFilter = &c.Expression{Op: "eq", Field: property.ID, Value: raw("可见")}
+			}
+			return decision
+		}
+		filter.Relation.Direction = "out"
+		result = f.query(filter, 200)
+		if len(result.Data) != 1 || result.Data[0].ID != ids[1] || result.HasMore {
+			t.Fatalf("hidden neighbor affected negative relation filter: %+v", result)
+		}
+		f.authorize = func(request c.AuthorizationRequest) c.Decision {
+			decision := f.decision
+			if request.Operation == "link.query" {
+				decision.Allow = false
+			}
+			return decision
+		}
+		t.Cleanup(func() { f.authorize = nil })
+		f.query(filter, 403)
+		if executed := f.request("POST", "/data/saved-queries/"+template.ID+"/execute", c.SavedQueryExecuteRequest{}, false); executed.Code != 403 {
+			t.Fatalf("saved relation filter accepted revoked Link access: %d %s", executed.Code, executed.Body)
+		}
+	})
 }
 
 func TestRowQueryStringKeysUseExactComparisonsIntegration(t *testing.T) {

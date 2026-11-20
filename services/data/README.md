@@ -156,6 +156,8 @@ go run ./cmd/server -initialize-mapped-writes -tenant <租户ID> -schema <Schema
 
 `GET /data/capabilities` 新增 `rowQueries=true/maxRowJoins=4/queryPathPlanning=true`；`maxLinkHops=1` 表示既有固定实例via接口，并非INNER关联行上限。路径规划仅查授权元数据，使用候选不跳过运行时物理和权限校验。
 
+`relationFilter=managed-one-hop` 表示查询、绑定和个人保存查询 API 支持[单跳关联存在性筛选](../../docs/数据查询/DataSet.md#单跳关联存在性筛选2026-11-20)。
+
 ## 正确性与限制
 
 2026-11-08补充公网资源预算：Data每进程同时最多处理1个操作，最多4个等待者且最多等待250ms；等待发生在会话远程校验和正文读取之前，超出返回429 `data_busy`及`Retry-After: 1`，取消及时出队。同进程多个handler共用预算，健康/就绪探针豁免。该默认值面向160M单服务模板保守设置，不代表吞吐验收。请求context最多15秒，过期/取消返回受控JSON；数据库取消依赖实际驱动的QueryContext支持。完整JSON响应最多8 MiB，先计入编码转义、字段和游标开销，再有界编码与缓冲后提交，超限返回422 `response_budget`，不会先发送部分成功结果。实例、映射、Link关联行及来源SQL在逐行积累期间也检查预算；创建/更新在提交前限制完整实例状态，幂等身份与冲突规则不变。调用方遇到响应超限应减少投影或分页，不能静默截断；目录更严格的字节分页以OntologySQL主说明为准。单个数据库行在Scan前仍可能由驱动分配接收内存，以上不是对任意恶意来源报文的完整内存隔离，来源网络和数据库读取预算仍需受控。

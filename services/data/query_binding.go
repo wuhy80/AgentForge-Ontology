@@ -14,6 +14,7 @@ type logicalQueryBinding struct {
 	current  c.CurrentDefinition
 	decision c.Decision
 	rows     *rowQueryPlan
+	relation *relationFilterPlan
 }
 
 func (h *handler) bindQueryHTTP(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +78,11 @@ func (h *handler) bindQuery(ctx context.Context, p c.Principal, q c.QuerySpec) (
 	if err = h.recheck(ctx, p, "instance.query", bound.current.Definition.ID, bound.decision); err != nil {
 		return c.QueryBinding{}, err
 	}
+	if bound.relation != nil {
+		if err := h.recheckRelationFilter(ctx, p, bound.relation); err != nil {
+			return c.QueryBinding{}, err
+		}
+	}
 	return bound.QueryBinding, nil
 }
 
@@ -94,6 +100,9 @@ func (h *handler) compileBoundQuery(ctx context.Context, p c.Principal, q c.Quer
 		return out, err
 	}
 	q = detached
+	if err := validateRelationFilter(q); err != nil {
+		return out, err
+	}
 	if q.Via != nil {
 		return out, problem(422, "query_binding_unsupported", "查询绑定不支持固定实例导航")
 	}
@@ -116,7 +125,15 @@ func (h *handler) compileBoundQuery(ctx context.Context, p c.Principal, q c.Quer
 		}
 		q, fields = compiled.Bound, compiled.Fields
 	} else {
-		compiled, err := compileQuery(current.Definition, current.ETag, p, dec, q, h.cfg.CursorSecret)
+		var predicate *sqlPredicate
+		if q.Relation != nil {
+			out.relation, err = h.planRelationFilter(ctx, p, current, q.Relation)
+			if err != nil {
+				return out, err
+			}
+			predicate = &out.relation.predicate
+		}
+		compiled, err := compileQueryPredicate(current.Definition, current.ETag, p, dec, q, h.cfg.CursorSecret, predicate)
 		if err != nil {
 			return out, err
 		}

@@ -85,6 +85,8 @@ render(page.result.rows);
 
 via固定实例导航、LEFT、EXISTS及关系聚合仍拒绝。实体和关联映射仍由后端实际能力决定；SDK不额外开放HAVING、单位换算、全文、任意SQL、写入、团队保存、无界all或离线全集计算。三语言Function/Action隔离运行器不因此获得网络或业务查询能力。
 
+`DataSet.fromSpec` 支持根对象查询的 `relation: { linkId, direction: 'out', operator: 'not_exists' }`，绑定和分页保留完整筛选条件。范围与授权见[单跳关联存在性筛选](../../docs/数据查询/DataSet.md#单跳关联存在性筛选2026-11-20)。
+
 `createBrowserTransport`仅接受同源路径basePath，默认 `/api/data`；固定POST、Cookie、CSRF、禁止重定向、不缓存。默认20秒超时，可配置1～60000毫秒，响应8MiB预算在流读取时执行；401使该transport及其在途输出失效，应用退出时须显式invalidate。403保留服务端受控错误，不自动登录或更换身份。Node等其他环境可注入 `QueryTransport={bind,query}`，认证仍须遵守公开接口，SDK不代管密码、Cookie容器、OAuth或服务账号。
 
 真实集成使用[跨服务验证](../../tests/integration/dataset_sdk_test.go)，Node子进程经公开TLS、Cookie/CSRF、OPA和独立MySQL测试库运行SDK；只有显式设置 `ONTOLOGY_TEST_DATASET_SDK=1` 才启用，缺node或dist时失败。使用隔离测试库运行父测试 `TestModelEvolutionSessionsAndOPAEndToEnd`；不要把默认开发数据库当作隔离fixture。浏览器transport单测使用模拟fetch，其结果与真实服务集成分别记录在[项目总览](../../docs/项目总览.md#当前实现与验证2026-11-06)。

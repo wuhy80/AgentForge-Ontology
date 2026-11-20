@@ -373,5 +373,8 @@ func (h *handler) validateBoundQuery(ctx context.Context, p c.Principal, q c.Que
 	if err = h.recheckEnums(ctx, bound.current); err != nil {
 		return bound.Query, err
 	}
+	if bound.relation != nil {
+		return bound.Query, h.recheckRelationFilter(ctx, p, bound.relation)
+	}
 	return bound.Query, nil
 }

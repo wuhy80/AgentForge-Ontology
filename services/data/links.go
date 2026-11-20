@@ -124,8 +124,14 @@ func managedLinkPredicate(plan *linkPlan, direction, anchor string, originDecisi
 	if err != nil {
 		return sqlPredicate{}, err
 	}
-	sql := "EXISTS (SELECT 1 FROM " + quote(linkTableName(plan.definition.ID)) + " AS `af_link_edge` JOIN " + quote(tableName(origin.Definition.ID)) + " AS `af_link_origin` ON `af_link_origin`.`tenant_id`=`af_link_edge`.`tenant_id` AND `af_link_origin`.`id`=`af_link_edge`." + quote(fromCol) + " WHERE `af_link_edge`.`tenant_id`=? AND `af_link_edge`." + quote(fromCol) + "=? AND `af_link_edge`." + quote(toCol) + "=" + quote(tableName(target.Definition.ID)) + ".`id` AND (" + condition + "))"
-	return sqlPredicate{SQL: sql, Args: append([]any{plan.definition.TenantID, anchor}, args...)}, nil
+	where := "`af_link_edge`.`tenant_id`=?"
+	params := []any{plan.definition.TenantID}
+	if anchor != "" {
+		where += " AND `af_link_edge`." + quote(fromCol) + "=?"
+		params = append(params, anchor)
+	}
+	sql := "EXISTS (SELECT 1 FROM " + quote(linkTableName(plan.definition.ID)) + " AS `af_link_edge` JOIN " + quote(tableName(origin.Definition.ID)) + " AS `af_link_origin` ON `af_link_origin`.`tenant_id`=`af_link_edge`.`tenant_id` AND `af_link_origin`.`id`=`af_link_edge`." + quote(fromCol) + " WHERE " + where + " AND `af_link_edge`." + quote(toCol) + "=" + quote(tableName(target.Definition.ID)) + ".`id` AND (" + condition + "))"
+	return sqlPredicate{SQL: sql, Args: append(params, args...)}, nil
 }
 
 func externalLinkPredicate(plan *linkPlan, direction, anchor string, originDecision c.Decision) (sqlPredicate, error) {
