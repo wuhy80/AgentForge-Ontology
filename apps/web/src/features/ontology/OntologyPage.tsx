@@ -4,6 +4,7 @@ import { ApiClient, ApiError } from '../../lib/api'
 import type { Kind, Organization } from '../../lib/types'
 import { Dialog } from '../../components/Dialog'
 import { OntologyGraph } from './OntologyGraph'
+import { OntologyGraph3D } from './OntologyGraph3D'
 import { OntologyInspector } from './OntologyInspector'
 import { loadOntologyCatalog, type OntologyCatalog } from './ontology-catalog'
 import './ontology-page.css'
@@ -47,6 +48,7 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
   const [kind, setKind] = useState<Kind | ''>('')
   const [group, setGroup] = useState('')
   const [mode, setMode] = useState<'relations' | 'dependencies'>('relations')
+  const [dimension, setDimension] = useState<'2D' | '3D'>('2D')
   const [selectedId, setSelectedId] = useState<string>()
   const [focusId, setFocusId] = useState<string>()
   const [detailOpen, setDetailOpen] = useState(false)
@@ -103,6 +105,7 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
   }
   const inspector = <OntologyInspector record={selected} records={records} categories={categories} groups={catalog?.groups ?? []} categoryId={categoryId} onSelect={select}
     onOpenDefinition={(id) => visit(id, onOpenDefinition)} onQuery={(id) => visit(id, onQuery)} />
+  const Graph = dimension === '3D' ? OntologyGraph3D : OntologyGraph
 
   function changeCanvasMode(next: typeof mode) {
     setMode(next)
@@ -150,11 +153,14 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
             }}>{(['relations', 'dependencies'] as const).map((view) => <button type="button" role="tab" key={view} id={`ontology-tab-${view}`} aria-controls={`ontology-panel-${view}`} aria-selected={mode === view} tabIndex={mode === view ? 0 : -1} onClick={() => changeCanvasMode(view)}>
               {view === 'relations' ? <><GitBranch size={15} aria-hidden="true" />对象关系图</> : <><Network size={15} aria-hidden="true" />定义依赖图</>}
             </button>)}</div>
+              <div className="ontology-dimensions" role="group" aria-label="画布维度">
+                {(['2D', '3D'] as const).map(value => <button key={value} type="button" aria-pressed={dimension === value} onClick={() => setDimension(value)}>{value}</button>)}
+              </div>
               {focusId && <button className="button subtle" type="button" onClick={() => setFocusId(undefined)}><X size={13} />取消聚焦</button>}</div>
             {(['relations', 'dependencies'] as const).map((view) => <div key={view} role="tabpanel" id={`ontology-panel-${view}`} aria-labelledby={`ontology-tab-${view}`} hidden={mode !== view} tabIndex={0}>
               {mode === view && <>
                 <p className="ontology-canvas-description">{view === 'relations' ? '对象通过 Link 连接，方向和基数说明业务关系。' : '沿已声明的引用，查看枚举、作用对象及函数绑定。'}</p>
-                <OntologyGraph records={records} rootIds={rootIds} categories={categories} categoryId={categoryId} mode={mode} selectedId={selectedId} focusId={focusId} onSelect={select} onFocus={setFocusId} layoutKey={layoutScope} />
+                <Graph records={records} rootIds={rootIds} categories={categories} categoryId={categoryId} mode={mode} selectedId={selectedId} focusId={focusId} onSelect={select} onFocus={setFocusId} layoutKey={layoutScope} />
               </>}
             </div>)}
             <div className="ontology-canvas-caption"><span>画布展示匹配资源及其已加载关联</span>{selected && <button type="button" className="button subtle" onClick={() => { setDetailOpen(true); setFocusId(selectedId) }}>聚焦所选定义</button>}</div>

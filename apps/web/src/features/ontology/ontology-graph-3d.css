@@ -1,0 +1,55 @@
+.ontology-space {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  isolation: isolate;
+  background: radial-gradient(ellipse at 50% 55%, var(--surface-raised), var(--canvas) 75%);
+}
+.ontology-space:active { cursor: grabbing; }
+.ontology-space:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.ontology-space > svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ontology-space-grid { fill: none; stroke: var(--grid); opacity: .7; vector-effect: non-scaling-stroke; }
+.ontology-space-edge { fill: none; stroke: var(--edge); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+.ontology-space-edge[data-active=true] { stroke: var(--accent); stroke-width: 2.2; }
+.ontology-space-node, .ontology-space-label { position: absolute; cursor: pointer; }
+.ontology-space-node {
+  z-index: 1;
+  display: grid;
+  gap: 4px;
+  width: clamp(68px, 19%, 140px);
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 5px 14px var(--shadow);
+  text-align: left;
+}
+.ontology-space-node > span { color: var(--muted); font-size: 10px; }
+.ontology-space-node > strong { overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ontology-space-node[aria-pressed=true] { z-index: 2; border-color: var(--accent); background: var(--accent-soft); }
+.ontology-space-node:hover, .ontology-space-node:focus-visible { z-index: 3; border-color: var(--primary); }
+.ontology-space-label { z-index: 3; transform: translate(-50%, -50%); border: 0; background: transparent; min-width: 24px; min-height: 24px; }
+.ontology-space-label:hover { background: transparent; }
+.ontology-space-label > span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  display: none;
+  width: max-content;
+  max-width: 145px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.ontology-space-label:hover, .ontology-space-label:focus-visible { z-index: 4; }
+.ontology-space-label[data-active=true] > span, .ontology-space-label:hover > span, .ontology-space-label:focus-visible > span { display: block; }
+.ontology-space-label[data-active=true] > span { border-color: var(--accent); }
+.ontology-dimensions { display: flex; align-items: center; gap: 3px; }
+.ontology-dimensions button { padding: 5px 8px; }
+.ontology-dimensions button[aria-pressed=true] { color: var(--primary); background: var(--primary-soft); }
