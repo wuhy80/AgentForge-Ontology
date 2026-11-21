@@ -32,3 +32,8 @@ type CallableLifecyclePreview struct {
 	DefinitionID string `json:"definitionId"`
 	TargetStatus string `json:"targetStatus"`
 }
+
+// StorageDefinitionImpact reports committed facts in a managed definition snapshot.
+type StorageDefinitionImpact struct {
+	HasData bool `json:"hasData"`
+}

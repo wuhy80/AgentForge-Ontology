@@ -17,6 +17,20 @@ func TestSavedQueryMySQLInnerRowsParametersPaginationAndRevocation(t *testing.T)
 	link := c.Definition{ID: c.NewID(), TenantID: f.tenant, Kind: c.KindLink, Name: "对象明细", Link: &c.Link{SourceSchemaID: f.definition.ID, TargetSchemaID: target.ID, ForwardName: "明细", ReverseName: "对象", Cardinality: "N:M", OnDelete: "restrict", StorageBinding: &c.LinkStorageBinding{Mode: "managed"}}}
 	publishRowDefinition(t, f.mappedIntegrationFixture, link)
 	t.Cleanup(func() { _, _ = f.engine.DB().Exec("DROP TABLE IF EXISTS " + quote(linkTableName(link.ID))) })
+	checkImpact := func(id string, internal bool, status int, hasData bool) {
+		t.Helper()
+		w := f.request("GET", "/internal/definitions/"+id+"/storage-impact", nil, internal)
+		if w.Code != status || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("storage impact: %d %s", w.Code, w.Body)
+		}
+		if status == 200 && mutationDecode[c.StorageDefinitionImpact](t, w).HasData != hasData {
+			t.Fatalf("incorrect storage impact: %s", w.Body)
+		}
+	}
+	checkImpact(target.ID, false, 401, false)
+	checkImpact(target.ID, true, 200, false)
+	checkImpact(link.ID, true, 200, false)
+	checkImpact(c.NewID(), true, 404, false)
 	create := func(schema, field, value string) c.Instance {
 		w := f.request("POST", "/data/schemas/"+schema+"/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: map[string]json.RawMessage{field: raw(value)}}, false)
 		if w.Code != 201 {
@@ -31,6 +45,15 @@ func TestSavedQueryMySQLInnerRowsParametersPaginationAndRevocation(t *testing.T)
 		if w.Code != 201 {
 			t.Fatalf("create saved row link: %d %s", w.Code, w.Body)
 		}
+	}
+	checkImpact(target.ID, true, 200, true)
+	checkImpact(link.ID, true, 200, true)
+	if _, err := f.engine.DB().Exec("UPDATE af_data_gates SET status='prepared' WHERE tenant_id=? AND definition_id=?", f.tenant, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	checkImpact(target.ID, true, 409, false)
+	if _, err := f.engine.DB().Exec("UPDATE af_data_gates SET status='ready' WHERE tenant_id=? AND definition_id=?", f.tenant, target.ID); err != nil {
+		t.Fatal(err)
 	}
 	f.input.Query = c.QuerySpec{From: c.Source{SchemaID: f.definition.ID}, Rows: &c.RowQuery{
 		Nodes: []c.RowQueryNode{{ID: "n0", SchemaID: f.definition.ID, Alias: "对象"}, {ID: "n1", SchemaID: target.ID, Alias: "明细一"}, {ID: "n2", SchemaID: target.ID, Alias: "明细二"}},

@@ -225,3 +225,7 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 ### 保存查询影响检查
 
 `GET /internal/definitions/{id}/saved-query-impact` 要求内部服务凭据与 `X-Tenant-ID`，返回 `{"referenced":true|false}`。匹配范围沿用[本人保存查询筛选](../../docs/数据查询/DataSet.md#个人保存查询2026-11-08本批实现)。检查最多读取 201 份模板。发现直接引用即可确认存在，未发现且超过 200 份时返回 422 `saved_query_impact_budget`。查询只提供检查时的存在性，不返回所有者、模板详情或总数。
+
+### 托管实例与关系存量检查
+
+`GET /internal/definitions/{id}/storage-impact` 要求内部服务凭据和 `X-Tenant-ID`，返回 `{"hasData":true|false}`。支持当前生效的平台托管单表 Schema 和托管 Link。读取权威定义后，在 Data 只读事务的同一快照内核对存储门禁及摘要，并按租户检查是否存在实例或关系事实。映射未就绪返回 409，暂不支持的存储返回 422。结果是检查时的快照，正式删除仍须先关闭准入，再复核存量和依赖。
