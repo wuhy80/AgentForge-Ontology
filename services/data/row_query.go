@@ -86,14 +86,6 @@ func leftRowTarget(plan *rowQueryPlan, node string) bool {
 	return len(plan.edges) == 1 && plan.edges[0].join.Type == "left" && plan.edges[0].join.To == node
 }
 
-func rowCursorKey(plan *rowQueryPlan, node rowQueryNode) (string, string) {
-	column, mark := rowKey(node)
-	if leftRowTarget(plan, node.node.ID) {
-		column = "COALESCE(" + column + ", '')"
-	}
-	return column, mark
-}
-
 func (h *handler) planRowQuery(ctx context.Context, p c.Principal, q c.QuerySpec) (*rowQueryPlan, error) {
 	if err := validateRowQueryShape(q); err != nil {
 		return nil, err
@@ -287,8 +279,12 @@ func rowKeyArguments(plan *rowQueryPlan, keys []string) ([]any, error) {
 	}
 	args := []any{}
 	for i, node := range plan.nodes {
+		if keys[i] == "" && leftRowTarget(plan, node.node.ID) {
+			args = append(args, nil)
+			continue
+		}
 		if node.platformStorage() {
-			if !uuidPattern.MatchString(keys[i]) && !(keys[i] == "" && leftRowTarget(plan, node.node.ID)) {
+			if !uuidPattern.MatchString(keys[i]) {
 				return nil, problem(422, "invalid_cursor", "关联游标对象标识不合法")
 			}
 			args = append(args, keys[i])
@@ -307,13 +303,21 @@ func rowKeysAfter(plan *rowQueryPlan, keyArgs []any) (string, []any) {
 	for i, node := range plan.nodes {
 		terms := []string{}
 		for j := 0; j < i; j++ {
-			column, mark := rowCursorKey(plan, plan.nodes[j])
+			column, mark := rowKey(plan.nodes[j])
+			if keyArgs[j] == nil {
+				terms = append(terms, column+" IS NULL")
+				continue
+			}
 			terms = append(terms, column+"="+mark)
 			args = append(args, keyArgs[j])
 		}
-		column, mark := rowCursorKey(plan, node)
-		terms = append(terms, column+">"+mark)
-		args = append(args, keyArgs[i])
+		column, mark := rowKey(node)
+		if keyArgs[i] == nil {
+			terms = append(terms, column+" IS NOT NULL")
+		} else {
+			terms = append(terms, column+">"+mark)
+			args = append(args, keyArgs[i])
+		}
 		parts = append(parts, "("+strings.Join(terms, " AND ")+")")
 	}
 	return "(" + strings.Join(parts, " OR ") + ")", args
@@ -412,9 +416,6 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 		originKey, _ := rowKey(origin)
 		targetKey, _ := rowKey(target)
 		binding := edge.current.Definition.Link.StorageBinding
-		if edge.join.Type == "left" && binding.Mode != "managed" {
-			return compiled, problem(422, "unsupported_row_join", "LEFT Link 首批只支持平台托管关系")
-		}
 		if binding.Mode == "managed" || binding.Mode == "junction" {
 			edgeAlias := "e" + target.node.ID
 			fromColumn, toColumn := "source_id", "target_id"
@@ -437,17 +438,7 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 				fromEdge = linkExactColumn(origin.table, fromEdge, originKeyColumn)
 				toEdge = linkExactColumn(target.table, toEdge, targetKeyColumn)
 			}
-			if edge.join.Type == "left" {
-				// Join only visible edges and targets before null-extending the root.
-				from += " LEFT JOIN (" + tableName + " AS " + quoteID(edgeAlias) +
-					" JOIN " + rowTableSQL(target) + " AS " + quoteID(target.node.ID) +
-					" ON " + toEdge + "=" + targetKey + " AND " + strings.Join(rightConditions, " AND ") +
-					") ON " + fromEdge + "=" + originKey + " AND " + quoteID(edgeAlias) + ".`tenant_id`=?"
-				args = append(append(rightArgs, p.TenantID), args...)
-				continue
-			}
-			from += " JOIN " + tableName + " AS " + quoteID(edgeAlias) + " ON " + fromEdge + "=" + originKey
-			from += " JOIN " + rowTableSQL(target) + " AS " + quoteID(target.node.ID) + " ON " + toEdge + "=" + targetKey
+			var edgeTenant string
 			if tenantColumn != "" {
 				column := quoteID(edgeAlias) + "." + quoteID(tenantColumn)
 				mark := "?"
@@ -455,7 +446,25 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 					column = linkExactColumn(origin.table, column, c.SourceColumn{DataType: "string"})
 					mark = sourceExactStringParameter(origin.table)
 				}
-				conditions = append(conditions, column+"="+mark)
+				edgeTenant = column + "=" + mark
+			}
+			if edge.join.Type == "left" {
+				// Join only visible edges and targets before null-extending the root.
+				from += " LEFT JOIN (" + tableName + " AS " + quoteID(edgeAlias) +
+					" JOIN " + rowTableSQL(target) + " AS " + quoteID(target.node.ID) +
+					" ON " + toEdge + "=" + targetKey + " AND " + strings.Join(rightConditions, " AND ") +
+					") ON " + fromEdge + "=" + originKey
+				if edgeTenant != "" {
+					from += " AND " + edgeTenant
+					rightArgs = append(rightArgs, p.TenantID)
+				}
+				args = append(rightArgs, args...)
+				continue
+			}
+			from += " JOIN " + tableName + " AS " + quoteID(edgeAlias) + " ON " + fromEdge + "=" + originKey
+			from += " JOIN " + rowTableSQL(target) + " AS " + quoteID(target.node.ID) + " ON " + toEdge + "=" + targetKey
+			if edgeTenant != "" {
+				conditions = append(conditions, edgeTenant)
 				args = append(args, p.TenantID)
 			}
 		} else {
@@ -467,7 +476,13 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 			key, _ := referenced.table.column(referenced.table.keyColumn)
 			foreign := linkExactColumn(holder.table, rowColumn(holder, binding.ForeignKeyColumn), key)
 			reference, _ := rowKey(referenced)
-			from += " JOIN " + rowTableSQL(target) + " AS " + target.table.quoted(target.node.ID) + " ON " + foreign + "=" + reference
+			join, on := " JOIN ", foreign+"="+reference
+			if edge.join.Type == "left" {
+				join = " LEFT JOIN "
+				on += " AND " + strings.Join(rightConditions, " AND ")
+				args = append(rightArgs, args...)
+			}
+			from += join + rowTableSQL(target) + " AS " + target.table.quoted(target.node.ID) + " ON " + on
 		}
 	}
 	orderParts := []string{}
@@ -513,8 +528,12 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 		}
 	}
 	for _, node := range plan.nodes {
-		column, _ := rowCursorKey(plan, node)
-		orderParts = append(orderParts, column+" ASC")
+		column, _ := rowKey(node)
+		order := column + " ASC"
+		if plan.driver == "postgresql" && leftRowTarget(plan, node.node.ID) {
+			order += " NULLS FIRST"
+		}
+		orderParts = append(orderParts, order)
 	}
 	bound := q
 	bound.Page.Cursor = ""

@@ -133,6 +133,22 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 			if len(negative.Data) != 1 || negative.Data[0].ID != "13" || negative.HasMore {
 				t.Fatalf("mapped relation filter negative direction: %+v", negative)
 			}
+			left := c.QuerySpec{From: c.Source{SchemaID: source.ID}, Rows: &c.RowQuery{
+				Nodes: []c.RowQueryNode{{ID: "n0", SchemaID: source.ID, Alias: "source"}, {ID: "n1", SchemaID: target.ID, Alias: "target"}},
+				Joins: []c.RowQueryJoin{{From: "n0", To: "n1", LinkID: link.ID, Direction: "out", Type: "left"}},
+			}, Select: []string{"n0." + source.Schema.Properties[0].ID, "n1." + target.Schema.Properties[0].ID}, Page: c.Page{Limit: 1}}
+			left.OrderBy = []c.Order{{Field: left.Select[1], Direction: "asc"}}
+			rows := allRowPages(t, f, left)
+			if len(rows) != 3 || rows[0].Entities[0].InstanceID != "3" || len(rows[0].Entities) != 1 ||
+				string(rows[0].Values[left.Select[1]]) != "null" || len(rows[1].Entities) != 2 || len(rows[2].Entities) != 2 ||
+				rows[1].Entities[1].InstanceID != "10" || rows[2].Entities[1].InstanceID != "11" {
+				t.Fatalf("left junction did not preserve authorized matches and null ordering: %+v", rows)
+			}
+			left.Where = &c.Expression{Op: "isNull", Field: left.Select[1]}
+			if rows := allRowPages(t, f, left); len(rows) != 1 || rows[0].Entities[0].InstanceID != "3" {
+				t.Fatalf("left junction null condition: %+v", rows)
+			}
+			left.Where = nil
 			for _, mode := range []string{"source", "target"} {
 				fk := link
 				fk.ID = c.NewID()
@@ -179,6 +195,19 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 				got := f.query(filter, 200)
 				if len(got.Data) != 1 || got.Data[0].ID != "10" || got.HasMore != (mode == "source") {
 					t.Fatalf("foreign key relation filter (%s): %+v", mode, got)
+				}
+				left.Rows.Joins[0].LinkID = fk.ID
+				rows := allRowPages(t, f, left)
+				if len(rows) != 2 {
+					t.Fatalf("left foreign key (%s) lost roots: %+v", mode, rows)
+				}
+				for _, item := range rows {
+					if item.Entities[0].InstanceID == "3" {
+						if mode == "target" && len(item.Entities) != 1 ||
+							mode == "source" && (len(item.Entities) != 2 || item.Entities[1].InstanceID != "11") {
+							t.Fatalf("left foreign key (%s) mismatched right side: %+v", mode, item)
+						}
+					}
 				}
 			}
 			// A cardinality stronger than the catalog's unique constraints is rejected.

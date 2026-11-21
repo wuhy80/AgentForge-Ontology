@@ -127,9 +127,6 @@ func (h *handler) rowSQLScope(r *http.Request, p c.Principal, stmt *ontologySQLS
 			return nil, sqlScopeFailure("ambiguous_link", "关系入口不唯一，请使用 VIA 分类.Link主名 DIRECTION OUT/IN 明确关系及方向", join.Range)
 		}
 		selected := matches[0]
-		if join.Type == "left" && selected.link.Current.Definition.Link.StorageBinding.Mode != "managed" {
-			return nil, sqlScopeFailure("unsupported_row_join", "LEFT Link 首批只支持平台托管关系", join.Range)
-		}
 		target, err := h.current(r.Context(), p.TenantID, selected.target)
 		if err != nil {
 			return nil, err
