@@ -21,6 +21,34 @@ function deferred<T>() {
 }
 
 describe('query request lifecycle', () => {
+  it('keeps the selected managed relation and operator through pagination', async () => {
+    const query = vi.fn().mockResolvedValue(result);
+    const managed = { linkRef: { id: 'managed' }, direction: 'in', name: '明细', storageMode: 'managed' };
+    const api = {
+      query,
+      dataCapabilities: vi.fn().mockResolvedValue({ relationFilter: 'managed-one-hop', aggregates: true }),
+      schemaLinks: vi.fn().mockResolvedValue([
+        managed,
+        { ...managed, linkRef: { id: 'external' }, name: '外部明细', storageMode: 'junction' },
+        { ...managed, linkRef: { id: 'unbound' }, name: '仅定义', hasStorageBinding: false },
+      ]),
+    } as unknown as ApiClient;
+    render(<QueryPage categoryId="category" api={api} schemas={[schema]} onModel={vi.fn()} />);
+    await screen.findByRole('option', { name: '明细（反向）' });
+    expect(screen.queryByRole('option', { name: /外部明细/ })).toBeNull();
+    expect(screen.queryByRole('option', { name: /仅定义/ })).toBeNull();
+    fireEvent.change(screen.getByLabelText('关联筛选'), { target: { value: 'managed:in' } });
+    fireEvent.change(screen.getByLabelText('匹配方式'), { target: { value: 'not_exists' } });
+    expect((screen.getByRole('option', { name: '分组汇总' }) as HTMLOptionElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox', { name: amount.name }));
+    fireEvent.click(screen.getByRole('button', { name: '运行查询' }));
+    await screen.findByText(instance.values.amount as string);
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+    await waitFor(() => expect(query).toHaveBeenCalledTimes(2));
+    const relation = { linkId: 'managed', direction: 'in', operator: 'not_exists' };
+    expect(query.mock.calls[0][0].relation).toEqual(relation);
+    expect(query.mock.calls[1][0]).toEqual({ ...query.mock.calls[0][0], page: { limit: 25, cursor: 'server-cursor' } });
+  });
   it('映射对象可投影其他来源字段，仅主表属性可筛选排序，实例详情不提供写入入口', async () => {
     const primary = { ...amount, mapping: { dataSourceId: 'mysql-source', column: 'amount' } };
     const external = { id: 'status', name: '外部状态', dataType: 'string' as const, nullable: true, mapping: { dataSourceId: 'pg-source', namespace: 'public', table: 'states', column: 'status', keyColumn: 'order_id' } };

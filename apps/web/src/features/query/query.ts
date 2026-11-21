@@ -3,7 +3,7 @@ import type { Expression, JsonValue, Property, QueryAggregate, QuerySpec, Values
 export type FilterCondition = { id: string; kind: 'condition'; field: string; op: string; raw: string };
 export type FilterGroup = { id: string; kind: 'group'; join: 'and' | 'or'; negated: boolean; children: FilterNode[] };
 export type FilterNode = FilterCondition | FilterGroup;
-export type QueryEditor = { filter: FilterGroup; select: string[]; sort: string; direction: 'asc' | 'desc'; limit: string; aggregate?: QueryAggregate };
+export type QueryEditor = { filter: FilterGroup; select: string[]; sort: string; direction: 'asc' | 'desc'; limit: string; aggregate?: QueryAggregate; relation?: QuerySpec['relation'] };
 export type FieldDraft = { mode: 'unchanged' | 'omit' | 'value' | 'null'; text: string };
 export type FieldDrafts = Record<string, FieldDraft>;
 
@@ -113,6 +113,7 @@ export function compileFilter(group: FilterGroup, properties: Property[]): Expre
 }
 
 export function compileQuery(schemaId: string, properties: Property[], editor: QueryEditor): QuerySpec {
+  if (editor.relation && editor.aggregate) throw new Error('关联筛选仅用于明细记录');
   if (!editor.select.length && !editor.aggregate) throw new Error('请至少勾选一个返回字段');
   if (new Set(editor.select).size !== editor.select.length || editor.select.some((id) => !properties.some((property) => property.id === id))) throw new Error('返回字段已失效，请重新选择');
   if (!/^\d+$/.test(editor.limit) || Number(editor.limit) < 1 || Number(editor.limit) > 100) throw new Error('每页条数应为 1 至 100 的整数');
@@ -124,6 +125,7 @@ export function compileQuery(schemaId: string, properties: Property[], editor: Q
   return {
     from: { schemaId }, select: editor.aggregate ? [] : [...editor.select], ...(editor.aggregate ? { aggregate: editor.aggregate } : {}), ...(where ? { where } : {}),
     ...(sort ? { orderBy: [{ field: sort.id, direction: editor.direction }] } : {}),
+    ...(editor.relation ? { relation: { ...editor.relation } } : {}),
     page: { limit: Number(editor.limit) },
   };
 }

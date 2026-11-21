@@ -34,6 +34,7 @@ export function rowQueryModel(rows: RowQuery, context: RowQueryContext, allowInc
 }
 
 export function compileRowQuery(rows: RowQuery, context: RowQueryContext, editor: QueryEditor): QuerySpec {
+  if (editor.relation) throw new Error('关联存在性筛选仅用于根对象明细');
   if (editor.aggregate) throw new Error('分组汇总暂不支持 Link 关联查询');
   const model = rowQueryModel(rows, context);
   const query = compileQuery(model.schemaId, model.fields, editor);
@@ -93,8 +94,8 @@ function literal(value: JsonValue, field: Property): string {
   return ['int64', 'decimal'].includes(field.dataType) ? value : `'${value.replaceAll("'", "''")}'`;
 }
 
-export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue: (value: JsonValue, field: Property, op: string) => string = literal, context?: RowQueryContext): string {
-  if (query.relation) throw new Error('生成关联存在性文本需要关联的方向入口名');
+export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue: (value: JsonValue, field: Property, op: string) => string = literal, context?: RowQueryContext, relationEntry?: string): string {
+  if (query.relation && (!relationEntry || query.rows || query.aggregate)) throw new Error('关联筛选缺少可用的方向入口');
   if (query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询不属于可转换的查询');
   if (query.rows) {
     if (!context || query.rows.nodes[0]?.schemaId !== model.schemaId) throw new Error('关联查询缺少完整上下文');
@@ -152,10 +153,13 @@ export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue
   }).join('') ?? '';
   const groupBy = aggregate?.groupBy?.length ? `\nGROUP BY ${aggregate.groupBy.map((id) => reference(id).text).join(', ')}` : '';
   const sort = order ? aggregate?.measures.some((measure) => measure.id === order.field) ? quoteIdentifier(outputs.find((item) => item.id === order.field)!.name) : reference(order.field).text : '';
-  return `SELECT ${columns}\nFROM ${quoteIdentifier(model.category)}.${quoteIdentifier(model.name)} AS ${quoteIdentifier(query.rows?.nodes[0].alias ?? model.name)}${joins}${query.where ? `\nWHERE ${expression(query.where)}` : ''}${groupBy}${order ? `\nORDER BY ${sort} ${order.direction.toUpperCase()}` : ''}\nLIMIT ${query.page.limit};`;
+  const condition = query.where ? expression(query.where) : '';
+  const relation = query.relation ? `${query.relation.operator === 'not_exists' ? 'NOT ' : ''}EXISTS (SELECT 1 FROM LINK ${quoteIdentifier(model.name)}.${quoteIdentifier(relationEntry!)})` : '';
+  const where = relation && condition ? `${relation} AND (${condition})` : relation || condition;
+  return `SELECT ${columns}\nFROM ${quoteIdentifier(model.category)}.${quoteIdentifier(model.name)} AS ${quoteIdentifier(query.rows?.nodes[0].alias ?? model.name)}${joins}${where ? `\nWHERE ${where}` : ''}${groupBy}${order ? `\nORDER BY ${sort} ${order.direction.toUpperCase()}` : ''}\nLIMIT ${query.page.limit};`;
 }
 
-export function queryToSQLDraft(query: QuerySpec, model: QueryContextModel, context?: RowQueryContext): { text: string; drafts: ParameterDrafts; parameters: Record<string, JsonValue> } {
+export function queryToSQLDraft(query: QuerySpec, model: QueryContextModel, context?: RowQueryContext, relationEntry?: string): { text: string; drafts: ParameterDrafts; parameters: Record<string, JsonValue> } {
   const drafts: ParameterDrafts = {};
   const parameters: Record<string, JsonValue> = {};
   let index = 0;
@@ -165,12 +169,12 @@ export function queryToSQLDraft(query: QuerySpec, model: QueryContextModel, cont
     parameters[name] = value;
     drafts[name] = { mode: 'value', text: String(value), signature: parameterSignature({ ...field, nullable: ['in', 'notIn'].includes(op) && !!field.nullable, name, ranges: [], provided: true }) };
     return `:${name}`;
-  }, context);
+  }, context, relationEntry);
   return { text, drafts, parameters };
 }
 
 export function queryToEditor(query: QuerySpec, model: QueryContextModel, context?: RowQueryContext): QueryEditor {
-  if (query.relation) throw new Error('关联存在性筛选目前只能在 SQL 模式编辑');
+  if (query.rows && query.relation) throw new Error('关联存在性筛选仅用于根对象明细');
   if (query.rows && context) {
     if (query.from.schemaId !== query.rows.nodes[0]?.schemaId || query.via) throw new Error('关联查询起点无效');
     return queryToEditor({ ...query, rows: undefined }, rowQueryModel(query.rows, context));
@@ -209,6 +213,7 @@ export function queryToEditor(query: QuerySpec, model: QueryContextModel, contex
   const filter: FilterGroup = node.kind === 'group' ? node : { ...newGroup(), children: [node] };
   const editor: QueryEditor = { filter, select: [...query.select], sort: query.orderBy?.[0]?.field ?? '', direction: query.orderBy?.[0]?.direction ?? 'asc', limit: String(query.page.limit), ...(query.aggregate ? { aggregate: structuredClone(query.aggregate) } : {}) };
   // Revalidate the complete draft through the existing visual compiler before switching.
+  if (query.relation) editor.relation = { ...query.relation };
   compileQuery(model.schemaId, model.fields, editor);
   return editor;
 }

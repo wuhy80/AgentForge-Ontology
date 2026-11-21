@@ -69,5 +69,6 @@ function fieldBindings(query: QuerySpec) {
 export function assertVisualBindings(expected: QuerySpec, actual: QuerySpec) {
   const scope = (query: QuerySpec) => query.rows ? [query.rows.nodes.map((node) => [node.id, node.schemaId, node.alias]), query.rows.joins.map((join) => [join.from, join.to, join.linkId, join.direction])] : undefined;
   if (expected.from.schemaId !== actual.from.schemaId || JSON.stringify(scope(expected)) !== JSON.stringify(scope(actual))
+    || expected.relation?.linkId !== actual.relation?.linkId || expected.relation?.direction !== actual.relation?.direction || expected.relation?.operator !== actual.relation?.operator
     || JSON.stringify(fieldBindings(expected)) !== JSON.stringify(fieldBindings(actual))) throw new Error('模型、关系或字段绑定已改变，原查询已保留，请重新读取');
 }

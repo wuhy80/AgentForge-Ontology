@@ -31,7 +31,9 @@ function queryFor(request: OntologySQLRequest): QuerySpec {
   const select = Array.from(request.text.split('FROM')[0].matchAll(/"([^"]+)"\."([^"]+)"/g), ([, alias, name]) => reference(alias, name))
   const predicate = /WHERE\s*\(*"([^"]+)"\."([^"]+)"\s*>=\s*:([\p{L}\p{N}_]+)/u.exec(request.text)
   const where = predicate ? { op: 'and', args: [{ op: 'gte', field: reference(predicate[1], predicate[2]), value: request.parameters?.[predicate[3]] ?? '0' }] } : undefined
-  return { from: { schemaId: nodes[0].schemaId }, ...(joins.length ? { rows: { nodes, joins } } : {}), select, ...(where ? { where } : {}), page: { limit: Number(/LIMIT (\d+)/.exec(request.text)?.[1] ?? 25) } }
+  const matching = /WHERE (NOT )?EXISTS \(SELECT 1 FROM LINK "订单"\."客户"\)/.exec(request.text)
+  const relation: QuerySpec['relation'] = matching ? { linkId: 'order-customer', direction: 'out', operator: matching[1] ? 'not_exists' : 'exists' } : undefined
+  return { from: { schemaId: nodes[0].schemaId }, ...(joins.length ? { rows: { nodes, joins } } : {}), ...(relation ? { relation } : {}), select, ...(where ? { where } : {}), page: { limit: Number(/LIMIT (\d+)/.exec(request.text)?.[1] ?? 25) } }
 }
 function resultFor(query: QuerySpec) {
   const fields = query.select.map((reference) => {
@@ -43,7 +45,7 @@ function resultFor(query: QuerySpec) {
   const values = (index: number) => Object.fromEntries(fields.map((field) => [field.id, field.dataType === 'decimal' ? '9007199254740993.000001' : `客户${index}`]))
   return query.rows ? { data: [], fields, rowMode: true, rows: [1, 2].map((index) => ({ id: `row-${index}`, values: values(index), entities: query.rows!.nodes.map((node) => ({ nodeId: node.id, schemaId: node.schemaId, instanceId: node.id === 'n0' ? 'same-root' : `${node.id}-${index}` })) })), hasMore: !query.page.cursor, ...(!query.page.cursor ? { nextCursor: 'row-cursor' } : {}) } : { data: [{ id: 'root', schemaId: query.from.schemaId, values: values(1), etag: 'instance' }], fields, hasMore: false }
 }
-async function fixture(page: Page) {
+async function fixture(page: Page, relationFilter = false) {
   const definitions: DefinitionRecord[] = models.map((model) => ({ etag: model.schemaId, status: 'active', definition: { id: model.schemaId, tenantId, categoryId, groupId: 'group', kind: 'schema', name: model.name, schema: { mode: 'schema_2_db', storageLayout: 'single', properties: model.fields } } }))
   const records = new Map<string, SavedQuery>()
   const state = { queries: [] as QuerySpec[], paths: [] as QueryPathsRequest[], creates: [] as SavedQueryInput[], executes: [] as { parameters: Record<string, unknown>; cursor?: string }[], errors: [] as string[], unexpected: [] as string[], deny: false, denyContext: false }
@@ -54,7 +56,8 @@ async function fixture(page: Page) {
     if (method === 'GET') {
       if (path === '/api/metadata/auth/session') return reply({ user: { id: 'reader', tenantId, username: 'reader', displayName: '查询用户', administrator: false, enabled: true, roleIds: [], etag: 'user' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture' })
       if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
-      if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'], rowQueries: true, maxRowJoins: 4, savedQueries: true })
+      if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'], rowQueries: true, maxRowJoins: 4, savedQueries: true, ...(relationFilter ? { relationFilter: 'managed-one-hop' } : {}) })
+      if (relationFilter && path === '/api/metadata/schemas/orders/links') return reply({ data: [{ linkRef: { id: 'order-customer' }, direction: 'out', name: '客户', storageMode: 'managed', hasStorageBinding: true }] })
       if (path === '/api/data/sources') return reply({ data: [], hasMore: false })
       if (path === '/api/metadata/auth/connections') return reply({ data: [], hasMore: false })
       if (/^\/api\/data\/schemas\/[^/]+\/write-capabilities$/.test(path)) return reply({ schemaId: path.split('/')[4], operations: [] })
@@ -124,6 +127,31 @@ async function addCustomer(page: Page) {
 const isolated = (state: Awaited<ReturnType<typeof fixture>>) => { expect(state.errors).toEqual([]); expect(state.unexpected).toEqual([]) }
 async function setSQL(page: Page, text: string) { await page.getByLabel('OntologySQL 编辑器', { exact: true }).click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.insertText(text) }
 async function editorText(page: Page) { return (await page.getByLabel('OntologySQL 编辑器', { exact: true }).locator('.cm-line').allTextContents()).join('\n') }
+
+test('单跳无关联筛选保存并在可视化和 SQL 间往返', async ({ page }) => {
+  const state = await fixture(page, true)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/#query')
+  await page.getByRole('tab', { name: '可视化查询', exact: true }).click()
+  await page.getByRole('checkbox', { name: '金额', exact: true }).check()
+  await page.getByLabel('关联筛选').selectOption('order-customer:out')
+  await page.getByLabel('匹配方式').selectOption('not_exists')
+  await page.getByRole('button', { name: '运行查询', exact: true }).click()
+  const relation = { linkId: 'order-customer', direction: 'out', operator: 'not_exists' }
+  await expect.poll(() => state.queries[0]?.relation).toEqual(relation)
+  await page.getByRole('tab', { name: 'OntologySQL', exact: true }).click()
+  await expect.poll(() => editorText(page)).toContain('NOT EXISTS (SELECT 1 FROM LINK "订单"."客户")')
+  await page.getByRole('tab', { name: '可视化查询', exact: true }).click()
+  await expect(page.getByLabel('关联筛选')).toHaveValue('order-customer:out')
+  await expect(page.getByLabel('匹配方式')).toHaveValue('not_exists')
+  await page.getByRole('button', { name: '保存当前查询', exact: true }).click()
+  await page.getByRole('dialog').getByRole('textbox').fill('未关联客户')
+  await page.getByRole('dialog').getByRole('button', { name: '确认保存', exact: true }).click()
+  await expect.poll(() => state.creates[0]?.query.relation).toEqual(relation)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  expect(state.errors).toEqual([])
+  expect(state.unexpected).toEqual([])
+})
 
 for (const width of [1440, 390]) {
   test(`关联查询保存不含实参，按行展示和续页，撤权清除 ${width}px`, async ({ page }) => {

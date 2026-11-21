@@ -5,6 +5,7 @@ import type { DefinitionRecord, Organization, SavedQueryInput } from '../../lib/
 import { compileQuery, errorMessage } from './query';
 import { compileRowQuery, queryToSQLDraft } from './ontologySql';
 import { assertVisualBindings, loadRowContext } from './visualRows';
+import { isManagedRelation } from './RelationFilterEditor';
 import { VisualQueryPage } from './VisualQueryPage';
 import type { VisualDraft } from './VisualQueryPage';
 import { OntologySQLWorkspace } from './OntologySQLWorkspace';
@@ -83,7 +84,7 @@ function QueryModes({ initialDraft, remember, ...props }: Props & { initialDraft
         setMessage(converted ? '已完整转换为可视化查询；参数实参已填入条件。切换后请重新运行。' : '请勾选返回字段，按需添加条件后运行。');
       } else {
         const current = visualDraft.current;
-        if (current && (current.association || current.editor.select.length || current.editor.filter.children.length || current.editor.sort)) {
+        if (current && (current.association || current.editor.relation || current.editor.select.length || current.editor.filter.children.length || current.editor.sort)) {
           const rowContext = current.association ? await loadRowContext(props.api, current.association.rows, props.categories ?? [], controller.signal) : undefined;
           const context = rowContext ?? await props.api.queryContext({ schemaId: current.schema.definition.id, limit: 1 }, controller.signal);
           if (!active.current || request !== modeRequest.current) return;
@@ -91,8 +92,16 @@ function QueryModes({ initialDraft, remember, ...props }: Props & { initialDraft
           const model = context.models.find((item) => item.schemaId === current.schema.definition.id);
           if (!model) throw new Error('当前模型不可查询，请检查授权后重试');
           const query = current.association ? compileRowQuery(current.association.rows, rowContext!, current.editor) : compileQuery(model.schemaId, model.fields, current.editor);
-          const converted = queryToSQLDraft(query, model, rowContext);
-          if (query.rows) {
+          let relationEntry: string | undefined;
+          if (query.relation) {
+            const relation = query.relation;
+            const links = await props.api.schemaLinks(model.schemaId, controller.signal);
+            if (!active.current || request !== modeRequest.current) return;
+            if (visualDraft.current !== current) throw new Error('查询配置已改变，请重新转换');
+            relationEntry = links.find((link) => isManagedRelation(link) && link.linkRef.id === relation.linkId && link.direction === relation.direction)?.name;
+          }
+          const converted = queryToSQLDraft(query, model, rowContext, relationEntry);
+          if (query.rows || query.relation) {
             const requestId = crypto.randomUUID();
             const analysis = await props.api.analyzeOntologySQL({ text: converted.text, parameters: converted.parameters, defaultCategoryId: props.categoryId, requestId }, controller.signal);
             if (!active.current || request !== modeRequest.current) return;

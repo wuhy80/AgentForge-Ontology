@@ -688,7 +688,7 @@ func (h *handler) links(w http.ResponseWriter, r *http.Request, p contracts.Prin
 			return err
 		}
 		if l.SourceSchemaID == id {
-			data = append(data, map[string]any{"linkRef": map[string]string{"id": d.ID}, "direction": "out", "name": l.ForwardName, "sourceSchemaId": l.SourceSchemaID, "targetSchemaId": l.TargetSchemaID, "cardinality": l.Cardinality, "storageMode": storageMode})
+			data = append(data, map[string]any{"linkRef": map[string]string{"id": d.ID}, "direction": "out", "name": l.ForwardName, "sourceSchemaId": l.SourceSchemaID, "targetSchemaId": l.TargetSchemaID, "cardinality": l.Cardinality, "storageMode": storageMode, "hasStorageBinding": l.StorageBinding != nil})
 		}
 		if l.TargetSchemaID == id {
 			reverse := l.Cardinality
@@ -697,7 +697,7 @@ func (h *handler) links(w http.ResponseWriter, r *http.Request, p contracts.Prin
 			} else if reverse == "N:1" {
 				reverse = "1:N"
 			}
-			data = append(data, map[string]any{"linkRef": map[string]string{"id": d.ID}, "direction": "in", "name": l.ReverseName, "sourceSchemaId": l.TargetSchemaID, "targetSchemaId": l.SourceSchemaID, "cardinality": reverse, "storageMode": storageMode})
+			data = append(data, map[string]any{"linkRef": map[string]string{"id": d.ID}, "direction": "in", "name": l.ReverseName, "sourceSchemaId": l.TargetSchemaID, "targetSchemaId": l.SourceSchemaID, "cardinality": reverse, "storageMode": storageMode, "hasStorageBinding": l.StorageBinding != nil})
 		}
 	}
 	writeJSON(w, 200, map[string]any{"data": data})

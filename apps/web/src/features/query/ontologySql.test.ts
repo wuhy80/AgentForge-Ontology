@@ -13,6 +13,16 @@ const base: QuerySpec = { from: { schemaId: model.schemaId }, select: ['title', 
 const parameter: SQLParameter = { name: '金额', dataType: 'decimal', precision: 24, scale: 6, nullable: false, provided: false, ranges: [] };
 
 describe('OntologySQL editor conversions and parameters', () => {
+  it('keeps the stable relation filter and groups the root condition during SQL conversion', () => {
+    const relation = { linkId: 'detail', direction: 'in', operator: 'not_exists' } as const;
+    const query: QuerySpec = { ...base, relation, where: { op: 'or', args: [
+      { op: 'isNull', field: 'title' }, { op: 'isNull', field: 'amount' },
+    ] } };
+    const editor = queryToEditor(query, model);
+    expect(compileQuery(model.schemaId, model.fields, editor)).toEqual(query);
+    expect(queryToSQLDraft(query, model, undefined, '明细').text).toMatch(/WHERE NOT EXISTS \(SELECT 1 FROM LINK [^\n]+"明细"\) AND \(.+ OR .+\)/);
+    expect(() => queryToSQLDraft(query, model)).toThrow('方向入口');
+  });
   it('templates escape business names, omit long text and generate syntactically safe parameter names', () => {
     const template = modelTemplate(model, 'parameter');
     expect(template).toContain('"笔记"."标""题"');

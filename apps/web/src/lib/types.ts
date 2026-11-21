@@ -204,6 +204,8 @@ export interface LinkStorageBinding {
 // sourceSchemaId is the navigation start and targetSchemaId its result,
 // including for the reverse direction returned by Metadata.
 export interface SchemaLink {
+  storageMode?: LinkStorageBinding['mode']
+  hasStorageBinding?: boolean
   linkRef: { id: string }
   direction: 'out' | 'in'
   name: string
@@ -373,6 +375,7 @@ export interface MetadataCapabilities {
   enumReferences?: boolean
 }
 export interface DataCapabilities {
+  relationFilter?: 'managed-one-hop'
   backend: string
   schemaModes: string[]
   layouts: string[]
