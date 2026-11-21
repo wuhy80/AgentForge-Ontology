@@ -38,10 +38,9 @@ export function rowQueryModel(rows: RowQuery, context: RowQueryContext, allowInc
 
 export function compileRowQuery(rows: RowQuery, context: RowQueryContext, editor: QueryEditor): QuerySpec {
   if (editor.relation) throw new Error('关联存在性筛选仅用于根对象明细');
-  if (editor.aggregate) throw new Error('分组汇总暂不支持 Link 关联查询');
   const model = rowQueryModel(rows, context);
-  const query = compileQuery(model.schemaId, model.fields, editor);
-  if (editor.select.length > 100) throw new Error('返回字段最多 100 项');
+  const query = compileQuery(model.schemaId, model.fields, editor.aggregate ? { ...editor, select: [] } : editor, rows.nodes);
+  if (query.select.length > 100) throw new Error('返回字段最多 100 项');
   if (query.orderBy?.some((order) => !model.fields.find((field) => field.id === order.field)?.sortable)) throw new Error('排序字段当前不支持排序');
   return { ...query, rows };
 }
@@ -100,9 +99,10 @@ function literal(value: JsonValue, field: Property): string {
 export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue: (value: JsonValue, field: Property, op: string) => string = literal, context?: RowQueryContext, relationEntry?: string): string {
   if (query.relation && (!relationEntry || query.rows || query.aggregate)) throw new Error('关联筛选缺少可用的方向入口');
   if (query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询不属于可转换的查询');
+  let properties = model.fields;
   if (query.rows) {
     if (!context || query.rows.nodes[0]?.schemaId !== model.schemaId) throw new Error('关联查询缺少完整上下文');
-    rowQueryModel(query.rows, context);
+    properties = rowQueryModel(query.rows, context).fields;
   }
   const reference = (id?: string) => {
     const node = query.rows?.nodes.find((item) => id?.startsWith(`${item.id}.`));
@@ -135,15 +135,18 @@ export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue
     if (!operator || !availableOperators(field).some((item) => item.value === node.op)) throw new Error('条件无法完整转换为 OntologySQL');
     return `${text} ${operator} ${bindValue(node.value, field, node.op)}`;
   }
-  if (query.aggregate && query.rows) throw new Error('分组汇总暂不支持 Link 关联查询');
   if (!query.aggregate && (!query.select.length || new Set(query.select).size !== query.select.length)) throw new Error('请先选择返回字段');
-  if (query.aggregate) validateAggregate(query.aggregate, model.fields);
+  if (query.aggregate) {
+    if (query.rows && (query.orderBy?.length || query.select.length)) throw new Error('关联计数仅允许按分组属性固定排序');
+    validateAggregate(query.aggregate, properties, query.rows?.nodes);
+  }
   const aggregate = query.aggregate;
   const outputs = aggregate ? aggregateFields(aggregate, model.fields) : [];
   const columns = aggregate ? [...(aggregate.groupBy ?? []).map((id) => reference(id).text), ...aggregate.measures.map((measure) => {
     const op = measure.op === 'countDistinct' ? 'COUNT' : measure.op.toUpperCase();
-    const field = measure.field ? reference(measure.field).text : '*';
-    const name = outputs.find((item) => item.id === measure.id)!.name;
+    const role = query.rows?.nodes.find((node) => node.id === measure.field);
+    const field = role ? quoteIdentifier(role.alias) : measure.field ? reference(measure.field).text : '*';
+    const name = query.rows ? measure.name || measure.id : outputs.find((item) => item.id === measure.id)!.name;
     return `${op}(${measure.op === 'countDistinct' ? 'DISTINCT ' : ''}${field}) AS ${quoteIdentifier(name)}`;
   })].join(', ') : query.select.map((id) => reference(id).text).join(', ');
   const order = query.orderBy?.[0];
@@ -177,13 +180,10 @@ export function queryToSQLDraft(query: QuerySpec, model: QueryContextModel, cont
 }
 
 export function queryToEditor(query: QuerySpec, model: QueryContextModel, context?: RowQueryContext): QueryEditor {
-  if (query.rows && query.aggregate) throw new Error('关联计数请继续在 OntologySQL 中编辑');
-  if (query.rows && query.relation) throw new Error('关联存在性筛选仅用于根对象明细');
-  if (query.rows && context) {
-    if (query.from.schemaId !== query.rows.nodes[0]?.schemaId || query.via) throw new Error('关联查询起点无效');
-    return queryToEditor({ ...query, rows: undefined }, rowQueryModel(query.rows, context));
-  }
-  if (query.rows || query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询无法完整表示为当前的可视化单模型查询');
+  if (query.rows && (!context || query.from.schemaId !== query.rows.nodes[0]?.schemaId)) throw new Error('关联查询起点无效或缺少上下文');
+  if (query.rows && query.aggregate && query.select.length) throw new Error('关联计数不能同时返回明细字段');
+  const properties = query.rows ? rowQueryModel(query.rows, context!).fields : model.fields;
+  if (query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询无法完整表示为当前的可视化单模型查询');
   let count = 0;
   function visit(expression: Expression, depth = 0): FilterNode {
     if (++count > 85 || depth > 6) throw new Error('条件数量或嵌套超过可视化编辑器的完整表达范围，请继续使用 OntologySQL');
@@ -196,7 +196,7 @@ export function queryToEditor(query: QuerySpec, model: QueryContextModel, contex
       const child = visit(expression.args[0], depth + 1);
       return child.kind === 'group' ? { ...child, negated: !child.negated } : { ...newGroup(), negated: true, children: [child] };
     }
-    const field = model.fields.find((item) => item.id === expression.field);
+    const field = properties.find((item) => item.id === expression.field);
     if (!field?.filterable || !availableOperators(field).some((item) => item.value === expression.op) || expression.args?.length) throw new Error('查询包含可视化编辑器无法表达的条件');
     let raw = '';
     if (!['isNull', 'isNotNull'].includes(expression.op)) {
@@ -218,6 +218,7 @@ export function queryToEditor(query: QuerySpec, model: QueryContextModel, contex
   const editor: QueryEditor = { filter, select: [...query.select], sort: query.orderBy?.[0]?.field ?? '', direction: query.orderBy?.[0]?.direction ?? 'asc', limit: String(query.page.limit), ...(query.aggregate ? { aggregate: structuredClone(query.aggregate) } : {}) };
   // Revalidate the complete draft through the existing visual compiler before switching.
   if (query.relation) editor.relation = { ...query.relation };
-  compileQuery(model.schemaId, model.fields, editor);
+  if (query.rows) compileRowQuery(query.rows, context!, editor);
+  else compileQuery(model.schemaId, properties, editor);
   return editor;
 }

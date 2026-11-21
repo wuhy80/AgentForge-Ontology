@@ -154,7 +154,7 @@ go run ./cmd/server -initialize-mapped-writes -tenant <租户ID> -schema <Schema
 
 `QuerySpec.rows` 与 OntologySQL `JOIN LINK` 共用同一执行器，最多4条INNER Link、5个对象节点；支持managed/junction/foreign_key、反向、分支、自关联别名。必须同数据源及同数据库，只允许各节点主表属性；不支持LEFT、任意ON、跨源、次表投影、关系属性或聚合。每节点租户/行列授权与每条Link的发现和查询授权进入完整SQL，之后排序及LIMIT；游标绑定全部定义/授权/来源与目录摘要。`rowMode=true` 返回独立 `rows/fields`，保留每次节点绑定，不能将row ID用于实例接口。实际协议和共同语义见[DataSet](../../docs/数据查询/DataSet.md#关联行查询增量2026-11-07)。
 
-`GET /data/capabilities` 新增 `rowQueries=true/maxRowJoins=4/queryPathPlanning=true`；`maxLinkHops=1` 表示既有固定实例via接口，并非INNER关联行上限。路径规划仅查授权元数据，使用候选不跳过运行时物理和权限校验。
+`GET /data/capabilities` 新增 `rowQueries=true/maxRowJoins=4/queryPathPlanning=true`；`maxLinkHops=1` 表示既有固定实例via接口，并非INNER关联行上限。路径规划仅查授权元数据，使用候选不跳过运行时物理和权限校验。`rowAggregates=true` 表示同库关联支持按对象角色计数与分组，协议见[同库关联计数](../../docs/数据查询/DataSet.md#同库关联计数)。
 
 `relationFilter=managed-one-hop` 和 `mappedRelationFilter=true` 分别表示托管与同源映射关系支持[单跳关联存在性筛选](../../docs/数据查询/DataSet.md#单跳关联存在性筛选2026-11-20)。绑定和保存验证逻辑计划，执行时检查实际来源及映射目录。
 

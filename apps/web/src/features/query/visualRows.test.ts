@@ -18,6 +18,26 @@ const rows: RowQuery = { nodes: [{ id: 'n0', schemaId: 'orders', alias: '订单�
 const base: QuerySpec = { from: { schemaId: 'orders' }, rows, select: ['n0.amount', 'n1.name'], page: { limit: 25 } };
 
 describe('visual relationship query semantics', () => {
+  it('round-trips grouped counts and detects changes in metric role bindings', () => {
+    const query: QuerySpec = { ...base, select: [], rows: { ...rows, joins: [{ ...rows.joins[0], type: 'left' }] }, aggregate: {
+      groupBy: ['n0.amount'],
+      measures: [{ id: 'mTotal', op: 'count' }, { id: 'mBuyer', op: 'count', field: 'n1' }, { id: 'mOrder', op: 'countDistinct', field: 'n0' }],
+    } };
+    const editor = queryToEditor(query, context.models[0], context);
+    expect(compileRowQuery(query.rows!, context, editor)).toEqual(query);
+    const sql = queryToSQL(query, context.models[0], undefined, context);
+    expect(sql).toContain('COUNT(*) AS "mTotal", COUNT("买方") AS "mBuyer", COUNT(DISTINCT "订单角色") AS "mOrder"');
+    expect(sql).toContain('GROUP BY "订单角色"."金额"');
+    expect(sql).not.toContain('ORDER BY');
+    const changed = structuredClone(query);
+    changed.aggregate!.measures[1].id = 'm1';
+    expect(() => assertVisualBindings(query, changed)).not.toThrow();
+    changed.aggregate!.measures[1].field = 'n0';
+    expect(() => assertVisualBindings(query, changed)).toThrow('绑定');
+    editor.aggregate!.measures[1].field = 'n1.name';
+    expect(() => compileRowQuery(query.rows!, context, editor)).toThrow('对象角色');
+  });
+
   it('keeps reverse joins, role identities, exact decimals and nested predicates across editor and SQL conversion', () => {
     const query: QuerySpec = { ...base, orderBy: [{ field: 'n0.amount', direction: 'desc' }], where: { op: 'not', args: [{ op: 'or', args: [
       { op: 'in', field: 'n0.amount', value: ['0.000001', '9007199254740993.000001'] }, { op: 'isNull', field: 'n1.name' },

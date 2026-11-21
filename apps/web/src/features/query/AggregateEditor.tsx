@@ -1,8 +1,8 @@
 import { Plus, Trash2 } from 'lucide-react';
-import type { AggregateOperation, Property, QueryAggregate } from '../../lib/types';
+import type { AggregateOperation, Property, QueryAggregate, RowQueryNode } from '../../lib/types';
 import { aggregateLabels } from './query';
 
-export function AggregateEditor({ aggregate, properties, onChange }: { aggregate: QueryAggregate; properties: Property[]; onChange: (value: QueryAggregate) => void }) {
+export function AggregateEditor({ aggregate, properties, nodes, onChange }: { aggregate: QueryAggregate; properties: Property[]; nodes?: RowQueryNode[]; onChange: (value: QueryAggregate) => void }) {
   const available = properties.filter((field) => !['text', 'longtext'].includes(field.dataType));
   const groupBy = aggregate.groupBy ?? [];
   return <section className="query-aggregate-editor" aria-label="分组汇总配置">
@@ -13,10 +13,10 @@ export function AggregateEditor({ aggregate, properties, onChange }: { aggregate
       <label>汇总方式<select aria-label={`指标${index + 1}汇总方式`} value={measure.op} onChange={(event) => {
         const op = event.target.value as AggregateOperation;
         const source = available.find((field) => field.id === measure.field);
-        const field = source && (!['sum', 'avg'].includes(op) || ['int64', 'decimal'].includes(source.dataType)) && (!['min', 'max'].includes(op) || source.dataType !== 'boolean') ? source.id : undefined;
+        const field = nodes ? measure.field : source && (!['sum', 'avg'].includes(op) || ['int64', 'decimal'].includes(source.dataType)) && (!['min', 'max'].includes(op) || source.dataType !== 'boolean') ? source.id : undefined;
         onChange({ ...aggregate, measures: aggregate.measures.map((item) => item.id === measure.id ? { ...item, op, field } : item) });
-      }}>{Object.entries(aggregateLabels).map(([op, label]) => <option value={op} key={op}>{label}</option>)}</select></label>
-      <label>计算属性<select aria-label={`指标${index + 1}计算属性`} value={measure.field ?? ''} onChange={(event) => onChange({ ...aggregate, measures: aggregate.measures.map((item) => item.id === measure.id ? { ...item, field: event.target.value || undefined } : item) })}><option value="">{measure.op === 'count' ? '全部记录 COUNT(*)' : '选择属性'}</option>{(measure.op === 'count' ? properties : available).filter((field) => (!['sum', 'avg'].includes(measure.op) || ['int64', 'decimal'].includes(field.dataType)) && (!['min', 'max'].includes(measure.op) || field.dataType !== 'boolean')).map((field) => <option key={field.id} value={field.id}>{field.name}</option>)}</select></label>
+      }}>{Object.entries(aggregateLabels).filter(([op]) => !nodes || op === "count" || op === "countDistinct").map(([op, label]) => <option value={op} key={op}>{label}</option>)}</select></label>
+      <label>{nodes ? "计数对象" : "计算属性"}<select aria-label={`指标${index + 1}${nodes ? "计数对象" : "计算属性"}`} value={measure.field ?? ''} onChange={(event) => onChange({ ...aggregate, measures: aggregate.measures.map((item) => item.id === measure.id ? { ...item, field: event.target.value || undefined } : item) })}><option value="">{measure.op === 'count' ? (nodes ? '全部关联行 COUNT(*)' : '全部记录 COUNT(*)') : (nodes ? '选择对象角色' : '选择属性')}</option>{nodes ? nodes.map((node) => <option key={node.id} value={node.id}>{node.alias}</option>) : (measure.op === 'count' ? properties : available).filter((field) => (!['sum', 'avg'].includes(measure.op) || ['int64', 'decimal'].includes(field.dataType)) && (!['min', 'max'].includes(measure.op) || field.dataType !== 'boolean')).map((field) => <option key={field.id} value={field.id}>{field.name}</option>)}</select></label>
       <label>显示名称<input aria-label={`指标${index + 1}显示名称`} value={measure.name ?? ''} maxLength={128} placeholder="例如：合计金额" onChange={(event) => onChange({ ...aggregate, measures: aggregate.measures.map((item) => item.id === measure.id ? { ...item, name: event.target.value } : item) })} /></label>
       <button type="button" className="button subtle query-icon-button" aria-label={`删除指标${index + 1}`} onClick={() => onChange({ ...aggregate, measures: aggregate.measures.filter((item) => item.id !== measure.id) })}><Trash2 size={15} /></button>
     </div>)}

@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -190,6 +191,33 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 			}
 			count.Aggregate.GroupBy = []string{left.Select[0]}
 			f.query(count, 422)
+			edgeTable := f.qualified(index, edgeName)
+			f.exec(index, "INSERT INTO "+edgeTable+" (tenant,source_id,target_id) VALUES (?,?,?)", f.tenant, 3, 10)
+			count.Page.Cursor = ""
+			count.Aggregate.GroupBy = nil
+			counts = f.query(count, 200)
+			if len(counts.AggregateRows) != 1 || string(counts.AggregateRows[0].Values["mDetails"]) != `"3"` ||
+				string(counts.AggregateRows[0].Values["mObjects"]) != `"2"` {
+				t.Fatalf("many-to-many count must distinguish joined rows from distinct objects: %+v", counts)
+			}
+			f.exec(index, "DELETE FROM "+edgeTable+" WHERE tenant=? AND source_id=?", f.tenant, 3)
+
+			sourceTable := f.qualified(index, sourceName)
+			const firstExtraID = 100
+			values := make([]string, 0, c.MaxAggregateGroups)
+			args := make([]any, 0, c.MaxAggregateGroups*4)
+			for id := firstExtraID; id < firstExtraID+c.MaxAggregateGroups; id++ {
+				values = append(values, "(?,?,?,?)")
+				args = append(args, f.tenant, id, fmt.Sprintf("分组%d", id), "O1")
+			}
+			f.exec(index, "INSERT INTO "+sourceTable+" (tenant,id,name,owner) VALUES "+strings.Join(values, ","), args...)
+			count.Aggregate.GroupBy = []string{left.Select[0]}
+			overBudget := f.request("POST", "/data/query", count, false)
+			if overBudget.Code != 422 || !strings.Contains(overBudget.Body.String(), `"aggregate_group_budget"`) {
+				t.Fatalf("expected grouped query to reject the entire result over budget: %d %s", overBudget.Code, overBudget.Body)
+			}
+			f.exec(index, "DELETE FROM "+sourceTable+" WHERE tenant=? AND id>=?", f.tenant, firstExtraID)
+
 			for _, mode := range []string{"source", "target"} {
 				fk := link
 				fk.ID = c.NewID()

@@ -394,6 +394,7 @@ export interface DataCapabilities {
   links: boolean
   ontologySQL: boolean
   rowQueries?: boolean
+  rowAggregates?: boolean
   maxRowJoins?: number
   queryPathPlanning?: boolean
   batch: boolean

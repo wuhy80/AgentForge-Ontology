@@ -33,16 +33,23 @@ function queryFor(request: OntologySQLRequest): QuerySpec {
   const where = predicate ? { op: 'and', args: [{ op: 'gte', field: reference(predicate[1], predicate[2]), value: request.parameters?.[predicate[3]] ?? '0' }] } : undefined
   const matching = /WHERE (NOT )?EXISTS \(SELECT 1 FROM LINK "订单"\."客户"\)/.exec(request.text)
   const relation: QuerySpec['relation'] = matching ? { linkId: 'order-customer', direction: 'out', operator: matching[1] ? 'not_exists' : 'exists' } : undefined
-  return { from: { schemaId: nodes[0].schemaId }, ...(joins.length ? { rows: { nodes, joins } } : {}), ...(relation ? { relation } : {}), select, ...(where ? { where } : {}), page: { limit: Number(/LIMIT (\d+)/.exec(request.text)?.[1] ?? 25) } }
+  const measures = Array.from(request.text.split('FROM')[0].matchAll(/COUNT\((DISTINCT )?(\*|"([^"]+)")\) AS "([^"]+)"/g), ([, distinct, , alias, name], index) => ({
+    id: `m${index}`, op: distinct ? 'countDistinct' as const : 'count' as const, name, ...(alias ? { field: nodes.find((node) => node.alias === alias)!.id } : {}),
+  }))
+  return { from: { schemaId: nodes[0].schemaId }, ...(joins.length ? { rows: { nodes, joins } } : {}), ...(relation ? { relation } : {}), select: measures.length ? [] : select, ...(measures.length ? { aggregate: { groupBy: select, measures } } : {}), ...(where ? { where } : {}), page: { limit: Number(/LIMIT (\d+)/.exec(request.text)?.[1] ?? 25) } }
 }
 function resultFor(query: QuerySpec) {
-  const fields = query.select.map((reference) => {
+  const fields = (query.aggregate?.groupBy ?? query.select).map((reference) => {
     const [nodeId, fieldId] = query.rows ? reference.split('.') : ['n0', reference]
     const node = query.rows?.nodes.find((item) => item.id === nodeId) ?? { schemaId: query.from.schemaId!, alias: modelFor(query.from.schemaId!).name }
     const field = modelFor(node.schemaId).fields.find((item) => item.id === fieldId)!
     return { ...field, id: reference, name: query.rows ? `${node.alias}.${field.name}` : field.name }
   })
   const values = (index: number) => Object.fromEntries(fields.map((field) => [field.id, field.dataType === 'decimal' ? '9007199254740993.000001' : `客户${index}`]))
+  if (query.aggregate) {
+    const metrics = query.aggregate.measures.map((item) => ({ id: item.id, name: item.name || item.id, dataType: 'int64' }))
+    return { data: [], fields: [...fields, ...metrics], aggregateMode: true, aggregateRows: [{ values: { ...values(1), ...Object.fromEntries(metrics.map((item) => [item.id, '7'])) } }], hasMore: !query.page.cursor, ...(!query.page.cursor ? { nextCursor: 'aggregate-cursor' } : {}) }
+  }
   return query.rows ? { data: [], fields, rowMode: true, rows: [1, 2].map((index) => ({ id: `row-${index}`, values: values(index), entities: query.rows!.nodes.map((node) => ({ nodeId: node.id, schemaId: node.schemaId, instanceId: node.id === 'n0' ? 'same-root' : `${node.id}-${index}` })) })), hasMore: !query.page.cursor, ...(!query.page.cursor ? { nextCursor: 'row-cursor' } : {}) } : { data: [{ id: 'root', schemaId: query.from.schemaId, values: values(1), etag: 'instance' }], fields, hasMore: false }
 }
 async function fixture(page: Page, relationFilter = false) {
@@ -56,7 +63,7 @@ async function fixture(page: Page, relationFilter = false) {
     if (method === 'GET') {
       if (path === '/api/metadata/auth/session') return reply({ user: { id: 'reader', tenantId, username: 'reader', displayName: '查询用户', administrator: false, enabled: true, roleIds: [], etag: 'user' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture' })
       if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
-      if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'], rowQueries: true, leftRowQueries: true, maxRowJoins: 4, savedQueries: true, ...(relationFilter ? { relationFilter: 'managed-one-hop' } : {}) })
+      if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'], rowQueries: true, rowAggregates: true, leftRowQueries: true, maxRowJoins: 4, savedQueries: true, ...(relationFilter ? { relationFilter: 'managed-one-hop' } : {}) })
       if (relationFilter && path === '/api/metadata/schemas/orders/links') return reply({ data: [{ linkRef: { id: 'order-customer' }, direction: 'out', name: '客户', storageMode: 'managed', hasStorageBinding: true }] })
       if (path === '/api/data/sources') return reply({ data: [], hasMore: false })
       if (path === '/api/metadata/auth/connections') return reply({ data: [], hasMore: false })
@@ -137,6 +144,29 @@ test('从可视化创建左关联并保留 SQL 类型', async ({ page }) => {
   await expect.poll(() => state.queries[0]?.rows?.joins[0].type).toBe('left')
   await page.getByRole('tab', { name: 'OntologySQL', exact: true }).click()
   await expect.poll(() => editorText(page)).toContain('LEFT JOIN LINK')
+  isolated(state)
+})
+
+test('可视化配置左关联去重计数并续页与切换 SQL', async ({ page }) => {
+  const state = await fixture(page)
+  await page.goto('/#query')
+  await addCustomer(page, true)
+  await page.getByLabel('查询结果类型').selectOption('aggregate')
+  await page.getByRole('checkbox', { name: '订单.金额', exact: true }).check()
+  await page.getByLabel('指标1汇总方式').selectOption('countDistinct')
+  await page.getByLabel('指标1计数对象').selectOption('n1')
+  await page.getByLabel('指标1显示名称').fill('客户数')
+  await expect(page.getByLabel('排序字段')).toHaveCount(0)
+  await page.getByRole('button', { name: '运行查询', exact: true }).click()
+  await expect(page.getByRole('cell', { name: '7', exact: true })).toBeVisible()
+  expect(state.queries[0].select).toEqual([])
+  expect(state.queries[0].aggregate).toEqual({ groupBy: ['n0.amount'], measures: [{ id: 'm0', op: 'countDistinct', field: 'n1', name: '客户数' }] })
+  await page.getByRole('button', { name: '下一页', exact: true }).click()
+  await expect.poll(() => state.queries[1]?.page.cursor).toBe('aggregate-cursor')
+  await page.getByRole('tab', { name: 'OntologySQL', exact: true }).click()
+  await expect.poll(() => editorText(page)).toContain('COUNT(DISTINCT "客户") AS "客户数"')
+  await page.getByRole('tab', { name: '可视化查询', exact: true }).click()
+  await expect(page.getByLabel('指标1计数对象')).toHaveValue('n1')
   isolated(state)
 })
 
