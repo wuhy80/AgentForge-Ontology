@@ -87,14 +87,17 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	}
 	function := create(executableFunction())
 	publish(function, 200)
+	functionPath := "/metadata/definitions/" + function.Definition.ID
+	request("GET", functionPath+"/disable-preview", function.ETag, nil, 200, nil)
 	actionDefinition := executableFunction()
 	actionDefinition.Kind, actionDefinition.Name, actionDefinition.Action, actionDefinition.Function = c.KindAction, "调用Python", actionDefinition.Function, nil
 	actionDefinition.Action.Runtime, actionDefinition.Action.FunctionID = nil, function.Definition.ID
 	actionDefinition.Action.Input[0].ID, actionDefinition.Action.Output[0].ID = "action-in", "action-out"
 	action := create(actionDefinition)
-	functionPath := "/metadata/definitions/" + function.Definition.ID
 	request("POST", functionPath+"/disable", function.ETag, nil, 409, nil)
+	request("GET", functionPath+"/disable-preview", function.ETag, nil, 409, nil)
 	publish(action, 200)
+	request("GET", functionPath+"/disable-preview", function.ETag, nil, 409, nil)
 	request("POST", functionPath+"/disable", function.ETag, nil, 409, nil)
 	inlineDefinition := executableAction()
 	inlineDefinition.Name = "独立Python动作"
@@ -104,6 +107,13 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	request("POST", inlinePath+"/disable", "", nil, 428, nil)
 	request("POST", inlinePath+"/disable", "stale", nil, 412, nil)
 	var lifecycle c.CurrentDefinition
+	var preview c.CallableLifecyclePreview
+	request("GET", inlinePath+"/disable-preview", "stale", nil, 412, nil)
+	request("GET", inlinePath+"/disable-preview", inline.ETag, nil, 200, &preview)
+	request("GET", inlinePath, "", nil, 200, &lifecycle)
+	if preview.DefinitionID != inline.Definition.ID || preview.TargetStatus != disabledDefinition || lifecycle.Status != "active" {
+		t.Fatalf("disable preview changed current state: preview=%+v state=%s", preview, lifecycle.Status)
+	}
 	request("POST", inlinePath+"/disable", inline.ETag, nil, 200, &lifecycle)
 	if lifecycle.Status != disabledDefinition || lifecycle.Definition.ID != inline.Definition.ID {
 		t.Fatalf("disabled callable was not retained: %+v", lifecycle)
@@ -115,6 +125,11 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	}
 	request("PUT", inlinePath+"/draft", inline.ETag, inline.Definition, 409, nil)
 	request("POST", inlinePath+"/publish", inline.ETag, nil, 409, nil)
+	request("GET", inlinePath+"/restore-preview", inline.ETag, nil, 200, &preview)
+	request("GET", inlinePath, "", nil, 200, &lifecycle)
+	if preview.TargetStatus != "active" || lifecycle.Status != disabledDefinition {
+		t.Fatal("restore preview changed current state")
+	}
 	request("POST", inlinePath+"/restore", inline.ETag, nil, 200, &lifecycle)
 	if lifecycle.Status != "active" || lifecycle.Definition.ID != inline.Definition.ID {
 		t.Fatalf("restored callable lost its identity: %+v", lifecycle)

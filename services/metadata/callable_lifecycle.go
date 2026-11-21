@@ -9,14 +9,17 @@ import (
 
 const disabledDefinition = "disabled"
 
-func (h *handler) callableLifecycle(restore bool) endpoint {
+func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 	return func(w http.ResponseWriter, r *http.Request, p c.Principal) error {
 		ctx := r.Context()
 		id := r.PathValue("id")
 		var result c.CurrentDefinition
-		err := h.withTenantTx(ctx, p.TenantID, "", func(tx *sql.Tx) error {
-			row, err := scanDefinition(tx.QueryRowContext(ctx, "SELECT "+definitionColumns+
-				" FROM af_meta_definitions WHERE tenant_id=? AND id=? FOR UPDATE", p.TenantID, id))
+		check := func(tx *sql.Tx) error {
+			statement := "SELECT " + definitionColumns + " FROM af_meta_definitions WHERE tenant_id=? AND id=?"
+			if !preview {
+				statement += " FOR UPDATE"
+			}
+			row, err := scanDefinition(tx.QueryRowContext(ctx, statement, p.TenantID, id))
 			if err != nil {
 				return err
 			}
@@ -25,6 +28,16 @@ func (h *handler) callableLifecycle(restore bool) endpoint {
 			}
 			if err = h.authorize(ctx, p, "definition.read", id, row.d.Kind); err != nil {
 				return err
+			}
+			if preview {
+				var active string
+				err := tx.QueryRowContext(ctx, "SELECT publication_id FROM af_meta_tenant_guards WHERE tenant_id=?", p.TenantID).Scan(&active)
+				if err != nil && err != sql.ErrNoRows {
+					return err
+				}
+				if active != "" {
+					return problem(409, "publication_in_progress", "该租户发布状态已改变，请先读取权威生效状态")
+				}
 			}
 			if err = matchHeader(r, row.currentDigest); err != nil {
 				return err
@@ -72,6 +85,8 @@ func (h *handler) callableLifecycle(restore bool) endpoint {
 						return problem(409, "definition_in_use", "当前或草稿定义仍引用此定义")
 					}
 				}
+			}
+			if !preview && row.status != next {
 				if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET status=? WHERE tenant_id=? AND id=?", next, p.TenantID, id); err != nil {
 					return err
 				}
@@ -87,12 +102,31 @@ func (h *handler) callableLifecycle(restore bool) endpoint {
 			// Keep the retained definition readable to management callers.
 			result = c.CurrentDefinition{Definition: d, ETag: row.currentDigest, Status: next}
 			return nil
-		})
+		}
+		var err error
+		if preview {
+			w.Header().Set("Cache-Control", "no-store")
+			tx, beginErr := h.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+			if beginErr != nil {
+				return beginErr
+			}
+			defer tx.Rollback()
+			err = check(tx)
+			if err == nil {
+				err = tx.Commit()
+			}
+		} else {
+			err = h.withTenantTx(ctx, p.TenantID, "", check)
+		}
 		if err != nil {
 			return err
 		}
 		w.Header().Set("ETag", etagHeader(result.ETag))
-		writeJSON(w, http.StatusOK, result)
+		if preview {
+			writeJSON(w, http.StatusOK, c.CallableLifecyclePreview{DefinitionID: id, TargetStatus: result.Status})
+		} else {
+			writeJSON(w, http.StatusOK, result)
+		}
 		return nil
 	}
 }

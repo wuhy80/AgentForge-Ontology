@@ -26,3 +26,9 @@ type DefinitionDependencyImpact struct {
 	Dependencies []DefinitionDependency      `json:"dependencies"`
 	Dependents   []DefinitionDependency      `json:"dependents"`
 }
+
+// CallableLifecyclePreview describes a validated target status at read time.
+type CallableLifecyclePreview struct {
+	DefinitionID string `json:"definitionId"`
+	TargetStatus string `json:"targetStatus"`
+}

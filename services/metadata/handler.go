@@ -76,8 +76,10 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("PUT /metadata/definitions/{id}/draft", h.wrap(h.saveDraft))
 	mux.HandleFunc("POST /metadata/definitions/{id}/preview", h.wrap(h.preview))
 	mux.HandleFunc("POST /metadata/definitions/{id}/publish", h.wrap(h.publish))
-	mux.HandleFunc("POST /metadata/definitions/{id}/disable", h.wrap(h.callableLifecycle(false)))
-	mux.HandleFunc("POST /metadata/definitions/{id}/restore", h.wrap(h.callableLifecycle(true)))
+	mux.HandleFunc("GET /metadata/definitions/{id}/disable-preview", h.wrap(h.callableLifecycle(false, true)))
+	mux.HandleFunc("GET /metadata/definitions/{id}/restore-preview", h.wrap(h.callableLifecycle(true, true)))
+	mux.HandleFunc("POST /metadata/definitions/{id}/disable", h.wrap(h.callableLifecycle(false, false)))
+	mux.HandleFunc("POST /metadata/definitions/{id}/restore", h.wrap(h.callableLifecycle(true, false)))
 	mux.HandleFunc("GET /metadata/publications/{id}", h.wrap(h.getPublication))
 	mux.HandleFunc("GET /metadata/schemas/{id}/links", h.wrap(h.links))
 	return mux
@@ -194,7 +196,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p contrac
 	if err := h.authorize(r.Context(), p, "definition.read", "", ""); err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "callableLifecycle": "pure-only", "actionRecordRead": true, "schemaInheritance": false, "dbToSchema": true})
+	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "callableLifecycle": "pure-only", "callableLifecyclePreview": true, "actionRecordRead": true, "schemaInheritance": false, "dbToSchema": true})
 	return nil
 }
 
