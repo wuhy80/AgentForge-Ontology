@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Keep gVisor's systemd cgroups inside the dedicated rootless user's delegation.
+set -Eeuo pipefail
+
+sandbox_uid=$(awk '$1 == 0 {print $2; exit}' /proc/self/uid_map)
+[[ "$sandbox_uid" =~ ^[0-9]+$ && "$sandbox_uid" -gt 0 ]] || { echo 'Rootless user namespace required' >&2; exit 1; }
+cgroup_root="/sys/fs/cgroup/user.slice/user-${sandbox_uid}.slice/user@${sandbox_uid}.service"
+[[ -d "$cgroup_root" ]] || { echo 'Delegated user cgroup missing' >&2; exit 1; }
+export DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/user/$sandbox_uid/bus"
+exec unshare --mount --propagation private /bin/sh -ec 'mount --bind "$1" /sys/fs/cgroup; shift; exec /usr/local/bin/runsc "$@"' sh "$cgroup_root" "$@"

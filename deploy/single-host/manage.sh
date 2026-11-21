@@ -42,6 +42,7 @@ configure_units() {
         command -v "$binary" >/dev/null || { echo "缺少rootless执行依赖：$binary" >&2; exit 1; }
     done
     [[ -x /usr/local/bin/runsc ]] || { echo '缺少/usr/local/bin/runsc' >&2; exit 1; }
+    install -m 755 "$repo/deploy/single-host/ontology-runsc" /usr/local/bin/ontology-runsc
     awk -F: -v user=ontology-sandbox '$1==user && $3+0 >= 65536 { found=1 } END { exit found ? 0 : 1 }' /etc/subuid || { echo 'ontology-sandbox没有至少65536个独立subuid' >&2; exit 1; }
     awk -F: -v user=ontology-sandbox '$1==user && $3+0 >= 65536 { found=1 } END { exit found ? 0 : 1 }' /etc/subgid || { echo 'ontology-sandbox没有至少65536个独立subgid' >&2; exit 1; }
     [[ " $(id -nG ontology-execution) " != *" docker "* ]] || gpasswd -d ontology-execution docker
