@@ -94,6 +94,7 @@ function literal(value: JsonValue, field: Property): string {
 }
 
 export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue: (value: JsonValue, field: Property, op: string) => string = literal, context?: RowQueryContext): string {
+  if (query.relation) throw new Error('生成关联存在性文本需要关联的方向入口名');
   if (query.via || query.from.schemaId !== model.schemaId || query.page.cursor || (query.orderBy?.length ?? 0) > 1) throw new Error('此查询不属于可转换的查询');
   if (query.rows) {
     if (!context || query.rows.nodes[0]?.schemaId !== model.schemaId) throw new Error('关联查询缺少完整上下文');
@@ -169,6 +170,7 @@ export function queryToSQLDraft(query: QuerySpec, model: QueryContextModel, cont
 }
 
 export function queryToEditor(query: QuerySpec, model: QueryContextModel, context?: RowQueryContext): QueryEditor {
+  if (query.relation) throw new Error('关联存在性筛选目前只能在 SQL 模式编辑');
   if (query.rows && context) {
     if (query.from.schemaId !== query.rows.nodes[0]?.schemaId || query.via) throw new Error('关联查询起点无效');
     return queryToEditor({ ...query, rows: undefined }, rowQueryModel(query.rows, context));

@@ -40,7 +40,7 @@ const language = StreamLanguage.define<{ comment: boolean }>({
     }
     if (stream.match(/^-?\d+(?:\.\d+)?/)) return 'number';
     if (stream.eat(':')) { stream.eatWhile(/[\p{L}\p{N}_]/u); return 'typeName'; }
-    if (stream.match(/^(?:SELECT|FROM|AS|WHERE|AND|OR|NOT|IS|NULL|IN|TRUE|FALSE|ORDER|BY|ASC|DESC|LIMIT|STARTS_WITH|JOIN|LINK|VIA|DIRECTION|OUT)\b/i)) return 'keyword';
+    if (stream.match(/^(?:SELECT|FROM|AS|WHERE|AND|OR|NOT|EXISTS|IS|NULL|IN|TRUE|FALSE|ORDER|BY|ASC|DESC|LIMIT|STARTS_WITH|JOIN|LINK|VIA|DIRECTION|OUT)\b/i)) return 'keyword';
     if (stream.match(/^[=<>!]+/)) return 'operator';
     stream.next(); return null;
   },

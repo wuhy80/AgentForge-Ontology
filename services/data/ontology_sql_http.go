@@ -186,6 +186,25 @@ func (h *handler) analyzeOntologySQL(r *http.Request, p c.Principal, req c.Ontol
 	out = bindOntologySQL(stmt, filtered, req.Parameters)
 	out.RequestID, out.TextHash = req.RequestID, ontologySQLTextHash(req.Text)
 	out.Fields = safeQueryProperties(out.Fields)
+	var relationPlan *relationFilterPlan
+	var relation *c.RelationFilter
+	if stmt.Relation != nil {
+		relation, err = h.bindOntologySQLRelation(r, p, current, stmt)
+		if err == nil {
+			relationPlan, err = h.planRelationFilter(r.Context(), p, current, relation)
+		}
+		if err != nil {
+			var public *apiError
+			if !errors.As(err, &public) || public.status >= 500 {
+				return out, err
+			}
+			if hiddenSQLSource(err) {
+				out.Diagnostics = append(out.Diagnostics, sqlDiagnostic("link_unavailable", "关联入口不存在或当前不可查询", stmt.Relation.Range))
+			} else {
+				out.Diagnostics = append(out.Diagnostics, sqlDiagnostic(public.code, public.message, stmt.Relation.Range))
+			}
+		}
+	}
 	if err := validateOntologySQLDecision(definition, dec); err != nil {
 		var public *apiError
 		if !errors.As(err, &public) {
@@ -226,7 +245,12 @@ func (h *handler) analyzeOntologySQL(r *http.Request, p c.Principal, req c.Ontol
 		if out.Query.Aggregate != nil {
 			_, err = compileAggregateQuery(definition, current.ETag, p, dec, *out.Query, h.cfg.CursorSecret)
 		} else {
-			if _, err = compileQuery(definition, current.ETag, p, dec, *out.Query, h.cfg.CursorSecret); err == nil {
+			out.Query.Relation = relation
+			var predicate *sqlPredicate
+			if relationPlan != nil {
+				predicate = &relationPlan.predicate
+			}
+			if _, err = compileQueryPredicate(definition, current.ETag, p, dec, *out.Query, h.cfg.CursorSecret, predicate); err == nil {
 				err = validateOntologySQLCapabilities(definition, dec, *out.Query)
 			}
 		}
@@ -241,6 +265,11 @@ func (h *handler) analyzeOntologySQL(r *http.Request, p c.Principal, req c.Ontol
 	}
 	if err := h.recheckEnums(r.Context(), current); err != nil {
 		return out, err
+	}
+	if relationPlan != nil {
+		if err := h.recheckRelationFilter(r.Context(), p, relationPlan); err != nil {
+			return out, err
+		}
 	}
 	return out, nil
 }

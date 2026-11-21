@@ -232,6 +232,7 @@ type ontologySQLStatement struct {
 	Measures                            []ontologySQLAggregate
 	GroupBy                             []ontologySQLField
 	Where                               *ontologySQLExpression
+	Relation                            *ontologySQLRelation
 	Order                               *ontologySQLField
 	Direction                           string
 	Limit                               int
@@ -246,6 +247,10 @@ type ontologySQLAggregate struct {
 type ontologySQLJoin struct {
 	FromAlias, Entry, Category, Name, Direction, Alias string
 	Range                                              c.SQLRange
+}
+type ontologySQLRelation struct {
+	Alias, Entry, Operator string
+	Range                  c.SQLRange
 }
 type ontologySQLParser struct {
 	tokens       []ontologySQLToken
@@ -518,7 +523,34 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 		}
 	}
 	if p.accept("WHERE") {
-		s.Where = p.expr(0)
+		start := p.index
+		negated := p.accept("NOT")
+		if p.accept("EXISTS") {
+			relation := &ontologySQLRelation{Operator: "exists", Range: p.tokens[start].Range}
+			if negated {
+				relation.Operator = "not_exists"
+			}
+			p.expect("(")
+			p.expect("SELECT")
+			one := p.take()
+			if one.Kind != "number" || one.Text != "1" {
+				p.fail("unsupported_relation_filter", "关联存在性子查询必须投影数字 1", one.Range)
+			}
+			p.expect("FROM")
+			p.expect("LINK")
+			relation.Alias = p.identifier().Text
+			p.expect(".")
+			entry := p.identifier()
+			relation.Entry, relation.Range.To = entry.Text, entry.Range.To
+			p.expect(")")
+			s.Relation = relation
+			if p.accept("AND") {
+				s.Where = p.and(0)
+			}
+		} else {
+			p.index = start
+			s.Where = p.expr(0)
+		}
 	}
 	if p.accept("GROUP") {
 		p.expect("BY")
@@ -550,6 +582,9 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 		}
 	}
 	p.accept(";")
+	if s.Relation != nil && (len(s.Joins) != 0 || len(s.Measures) != 0 || len(s.GroupBy) != 0) {
+		p.fail("unsupported_relation_filter", "关联存在性筛选仅用于根对象查询", s.Relation.Range)
+	}
 	if p.peek().Kind != "eof" {
 		p.fail("unsupported_syntax", "仅支持单条SELECT、INNER JOIN LINK或单模型聚合；不支持任意键JOIN、HAVING、普通列别名或OFFSET", p.peek().Range)
 	}
@@ -568,6 +603,7 @@ func formatOntologySQL(text string) (string, []c.SQLDiagnostic) {
 	}
 	var out strings.Builder
 	previous := ""
+	depth := 0
 	lineStart := true
 	writeSpace := func() {
 		if !lineStart && previous != " " {
@@ -596,8 +632,16 @@ func formatOntologySQL(text string) (string, []c.SQLDiagnostic) {
 			}
 			continue
 		}
-		if t.Kind == "word" && (t.Text == "FROM" || t.Text == "JOIN" || t.Text == "WHERE" || t.Text == "GROUP" || t.Text == "ORDER" || t.Text == "LIMIT") {
+		if depth == 0 && t.Kind == "word" && (t.Text == "FROM" || t.Text == "JOIN" || t.Text == "WHERE" || t.Text == "GROUP" || t.Text == "ORDER" || t.Text == "LIMIT") {
 			newline()
+		}
+		if t.Kind == "punctuation" {
+			switch t.Text {
+			case "(":
+				depth++
+			case ")":
+				depth--
+			}
 		}
 		value := t.Raw
 		if t.Kind == "word" {

@@ -43,6 +43,7 @@ func (h *handler) compileSavedQuery(r *http.Request, p c.Principal, request c.Sa
 	}
 	binder := ontologySQLBinder{statement: statement, analysis: c.OntologySQLAnalysis{Diagnostics: []c.SQLDiagnostic{}}}
 	var err error
+	var relation *c.RelationFilter
 	if len(statement.Joins) != 0 {
 		if len(statement.Measures) != 0 || len(statement.GroupBy) != 0 {
 			return out, problem(422, "aggregate_unsupported", "聚合不支持JOIN LINK")
@@ -62,6 +63,12 @@ func (h *handler) compileSavedQuery(r *http.Request, p c.Principal, request c.Sa
 		}
 		if err := validateSchema(current.Definition); err != nil {
 			return out, err
+		}
+		if statement.Relation != nil {
+			relation, err = h.bindOntologySQLRelation(r, p, current, statement)
+			if err != nil {
+				return out, err
+			}
 		}
 		decision, err := h.authorize(r.Context(), p, "instance.query", current.Definition.ID)
 		if err != nil {
@@ -128,6 +135,7 @@ func (h *handler) compileSavedQuery(r *http.Request, p c.Principal, request c.Sa
 		return out, problem(422, "invalid_saved_query_sql", message)
 	}
 	query := *analysis.Query
+	query.Relation = relation
 	var placeholders func(*ontologySQLExpression, *c.Expression)
 	placeholders = func(expression *ontologySQLExpression, bound *c.Expression) {
 		if expression == nil || bound == nil {

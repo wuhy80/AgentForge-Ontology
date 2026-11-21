@@ -94,7 +94,7 @@ SDK通过 `rows(scope)` 或fromSpec接受稳定节点/Link计划，关联字段�
 
 服务端逐项校验两端定义的 `definition.read`、`instance.query`，以及 Link 的 `definition.read`、`link.query`。`exists` 表示至少有一个通过关联端行权限的邻居；`not_exists` 表示没有可见邻居。租户限制和关联端行条件都在存在性子查询内执行，分页前应用。权限不足返回错误；仅在行策略隐藏邻居时将其排除。绑定与个人保存查询仅验证元数据和当前授权，执行时重新授权，分页游标绑定筛选条件及执行上下文。
 
-公开能力值为 `relationFilter=managed-one-hop`。可经查询、绑定和个人保存查询 API 使用，TypeScript SDK 通过 `DataSet.fromSpec` 接入。OntologySQL 文本、工作台可视化编辑、其他存储及邻居业务条件仍待扩展。
+公开能力值为 `relationFilter=managed-one-hop`。可经查询、绑定和个人保存查询 API 使用，TypeScript SDK 通过 `DataSet.fromSpec` 接入。OntologySQL 文本见[单跳关系存在性](OntologySQL.md#单跳关系存在性)。工作台可视化编辑、其他存储及邻居业务条件仍待扩展。
 
 ## 1. DataSet 的定位
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
+	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 )
 
 const rowSQLWorkID = "1b74bd75-135a-4f2f-8f10-7ac08918ef01"
@@ -17,6 +18,51 @@ const rowSQLLinkA = "1b74bd75-135a-4f2f-8f10-7ac08918ef03"
 const rowSQLLinkB = "1b74bd75-135a-4f2f-8f10-7ac08918ef04"
 const rowSQLWorkField = "1b74bd75-135a-4f2f-8f10-7ac08918ef21"
 const rowSQLLineField = "1b74bd75-135a-4f2f-8f10-7ac08918ef31"
+
+func TestOntologySQLRelationFilter(t *testing.T) {
+	text := `SELECT "e"."设备编码" FROM "设备" AS "e" WHERE NOT EXISTS (SELECT 1 FROM LINK "e"."工单") AND ("e"."所属部门" = :部门 OR "e"."所属部门" = '维修');`
+	request := c.OntologySQLRequest{Text: text, DefaultCategoryID: "category-a", RequestID: "relation",
+		Parameters: map[string]json.RawMessage{"部门": raw("生产")}}
+	app := rowSQLTestHandler(t, rowSQLDefinitions(), "")
+	w := callOntologySQL(t, app, "POST", "/data/query/ontology-sql/analyze", request)
+	var analysis c.OntologySQLAnalysis
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &analysis) != nil || !analysis.Ready || analysis.Query == nil {
+		t.Fatalf("relation analysis: %d %s", w.Code, w.Body)
+	}
+	want := c.RelationFilter{LinkID: rowSQLLinkA, Direction: "out", Operator: "not_exists"}
+	if analysis.Query.Relation == nil || *analysis.Query.Relation != want || analysis.Query.Where == nil || analysis.Query.Where.Op != "or" {
+		t.Fatalf("incorrect root or relation filter: %+v", analysis.Query)
+	}
+	session := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		app.ServeHTTP(w, r.WithContext(platform.WithSessionUser(r.Context(), c.User{TenantID: "tenant-a", ID: "reader", Enabled: true})))
+	})
+	w = callOntologySQL(t, session, "POST", "/data/saved-queries/compile",
+		c.SavedQueryCompileRequest{Text: strings.Replace(text, `FROM "设备"`, `FROM "生产管理"."设备"`, 1)})
+	var template c.SavedQueryTemplate
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &template) != nil || template.Query.Relation == nil ||
+		*template.Query.Relation != want || len(template.Parameters) != 1 || template.Parameters[0].Name != "部门" {
+		t.Fatalf("relation template: %d %s", w.Code, w.Body)
+	}
+	hidden := rowSQLTestHandler(t, rowSQLDefinitions(), rowSQLWorkID)
+	w = callOntologySQL(t, hidden, "POST", "/data/query/ontology-sql/analyze", request)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &analysis) != nil || analysis.Ready ||
+		len(analysis.Diagnostics) != 1 || analysis.Diagnostics[0].Code != "link_unavailable" {
+		t.Fatalf("hidden relation was not masked: %d %s", w.Code, w.Body)
+	}
+	for _, invalid := range []string{
+		strings.ReplaceAll(text, "AND (", "OR ("),
+		strings.ReplaceAll(text, "SELECT 1", "SELECT 2"),
+		strings.ReplaceAll(text, `LINK "e"."工单")`, `LINK "e"."工单" WHERE TRUE)`),
+	} {
+		if stmt, diagnostics := parseOntologySQL(invalid); stmt != nil || len(diagnostics) == 0 {
+			t.Fatalf("accepted unsupported relation syntax: %s", invalid)
+		}
+	}
+	formatted, diagnostics := formatOntologySQL(text)
+	if len(diagnostics) != 0 || !strings.Contains(formatted, "EXISTS (SELECT 1 FROM LINK") {
+		t.Fatalf("format relation query: %s, %v", formatted, diagnostics)
+	}
+}
 
 func rowSQLDefinitions() []c.Definition {
 	root := testDefinition()
