@@ -138,6 +138,46 @@ func TestSavedQueryMySQLDefinitionFilter(t *testing.T) {
 	}
 }
 
+func TestSavedQueryMySQLTenantImpact(t *testing.T) {
+	f := newSavedQueriesFixture(t)
+	saved := mutationDecode[c.SavedQuery](t, f.own("POST", "/data/saved-queries", "", f.input, 201))
+	path := "/internal/definitions/" + f.definition.ID + "/saved-query-impact"
+	if w := f.request("GET", path, nil, false); w.Code != 401 {
+		t.Fatalf("user session accessed internal impact: %d", w.Code)
+	}
+	check := func(path, tenant string, wantStatus int, referenced bool) {
+		t.Helper()
+		r := httptest.NewRequest("GET", path, nil)
+		r.Header.Set("Authorization", "Bearer "+f.service)
+		r.Header.Set("X-Tenant-ID", tenant)
+		w := httptest.NewRecorder()
+		f.app.ServeHTTP(w, r)
+		if w.Code != wantStatus || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("impact: status %d body %s", w.Code, w.Body)
+		}
+		if wantStatus == 200 && w.Body.String() != fmt.Sprintf("{\"referenced\":%t}\n", referenced) {
+			t.Fatalf("unexpected impact response: %s", w.Body)
+		}
+	}
+	check(path, f.tenant, 200, true)
+	check(path, f.tenant+"-other", 200, false)
+	check(path, "", 400, false)
+	check(path+"?extra=true", f.tenant, 422, false)
+	missing := "/internal/definitions/" + c.NewID() + "/saved-query-impact"
+	check(missing, f.tenant, 200, false)
+	for i := 0; i < savedQueryImpactBudget; i++ {
+		if _, err := f.engine.DB().Exec(`INSERT INTO af_data_saved_queries
+ (tenant_id,user_id,id,name,name_key,template_json,etag,created_at,updated_at)
+ SELECT tenant_id,?,id,name,name_key,template_json,etag,created_at,updated_at
+ FROM af_data_saved_queries WHERE tenant_id=? AND user_id=? AND id=?`,
+			fmt.Sprintf("fixture-owner-%d", i), f.tenant, "saved-owner", saved.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check(missing, f.tenant, 422, false)
+	check(path, f.tenant, 200, true)
+}
+
 func TestSavedQueryMySQLCRUDIsolationETagAndCurrentAuthorization(t *testing.T) {
 	f := newSavedQueriesFixture(t)
 	saved := mutationDecode[c.SavedQuery](t, f.own("POST", "/data/saved-queries", "", f.input, 201))

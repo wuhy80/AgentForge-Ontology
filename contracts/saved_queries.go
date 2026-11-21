@@ -71,3 +71,8 @@ type SavedQueryCompileRequest struct {
 	Text              string `json:"text"`
 	DefaultCategoryID string `json:"defaultCategoryId,omitempty"`
 }
+
+// SavedQueryDefinitionImpact reports existence within one tenant without template details.
+type SavedQueryDefinitionImpact struct {
+	Referenced bool `json:"referenced"`
+}

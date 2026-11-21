@@ -221,3 +221,7 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 ## Action 当前记录读取
 
 内部 `POST /internal/execution/current-record` 仅在服务认证及原调用者浏览器会话均通过时处理。Data 根据权威生效 Action 解析读取声明，执行 `action.invoke`、`instance.read`、行条件和明确字段投影。协议见[调用定义](../../docs/模块/Function.md#action-读取当前记录)。
+
+### 保存查询影响检查
+
+`GET /internal/definitions/{id}/saved-query-impact` 要求内部服务凭据与 `X-Tenant-ID`，返回 `{"referenced":true|false}`。匹配范围沿用[本人保存查询筛选](../../docs/数据查询/DataSet.md#个人保存查询2026-11-08本批实现)。检查最多读取 201 份模板。发现直接引用即可确认存在，未发现且超过 200 份时返回 422 `saved_query_impact_budget`。查询只提供检查时的存在性，不返回所有者、模板详情或总数。

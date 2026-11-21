@@ -286,12 +286,7 @@ func (h *handler) savedQueriesListHTTP(w http.ResponseWriter, r *http.Request) {
 	statement := "SELECT " + savedSummaryColumns + " FROM af_data_saved_queries WHERE tenant_id=? AND user_id=? AND id>?"
 	args := []any{p.TenantID, p.Subject, after}
 	if definitionID != "" {
-		// Constrain the match to persisted definition bindings. Free-form
-		// SQL text and result or field IDs cannot create a dependency.
-		statement += ` AND JSON_CONTAINS(JSON_EXTRACT(template_json,
-			'$.query.from.schemaId', '$.query.relation.linkId',
-			'$.query.rows.nodes[*].schemaId', '$.query.rows.joins[*].linkId',
-			'$.parameters[*].enumId'), JSON_QUOTE(?))`
+		statement += " AND " + savedQueryDefinitionMatch
 		args = append(args, definitionID)
 	}
 	rows, err := h.cfg.Engine.DB().QueryContext(r.Context(), statement+" ORDER BY id LIMIT ?", append(args, limit+1)...)
