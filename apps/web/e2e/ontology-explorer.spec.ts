@@ -123,6 +123,46 @@ test('默认使用二维，三维旋转和切换图层时保留所选定义', as
   assertReadOnly(state)
 })
 
+test('个人分层配置可初始化、调整，在二维和三维共享并在刷新后保留', async ({ page }) => {
+  const state = await ontologyFixture(page)
+  await page.goto('/#ontology')
+  await page.getByRole('button', { name: '配置分层', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '配置业务分层' })
+  await dialog.getByRole('button', { name: '从分组初始化' }).click()
+  await dialog.getByRole('button', { name: '新增层' }).click()
+  await dialog.getByRole('textbox', { name: '层名称' }).last().fill('标签层')
+  await dialog.getByRole('combobox', { name: '标签', exact: true }).selectOption({ label: '标签层' })
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const theme of ['deep', 'light']) {
+      await page.locator('html').evaluate((element, value) => { element.dataset.theme = value }, theme)
+      const field = dialog.getByRole('textbox', { name: '层名称' }).last()
+      await field.focus()
+      expect(await field.evaluate(element => ({
+        focused: element === document.activeElement,
+        styled: element.closest('.field') !== null && parseFloat(getComputedStyle(element).paddingLeft) > 4,
+      }))).toMatchObject({ focused: true, styled: true })
+      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+      await expect(dialog.getByRole('button', { name: '保存分层' })).toBeEnabled()
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await dialog.getByRole('button', { name: '保存分层' }).click()
+  const flat = page.getByRole('region', { name: '二维分层画布' })
+  await expect(flat.getByText('标签层 · 1', { exact: true })).toBeVisible()
+  await expect(flat.locator('[data-cross-layer=true]')).not.toHaveCount(0)
+  await page.getByRole('button', { name: '3D', exact: true }).click()
+  const scene = page.getByRole('region', { name: '本体对象关系三维画布' })
+  await expect(scene.getByText('标签层 · 1', { exact: true })).toBeVisible()
+  await scene.getByRole('combobox', { name: '聚焦层' }).selectOption({ label: '标签层' })
+  await expect(scene.getByRole('button', { name: '对象模型：标签', exact: true })).toBeVisible()
+  await expect(scene.getByRole('button', { name: '对象模型：笔记', exact: true })).toHaveCount(0)
+  await page.reload()
+  await page.getByRole('button', { name: '分层布局', exact: true }).click()
+  await expect(flat.getByText('标签层 · 1', { exact: true })).toBeVisible()
+  assertReadOnly(state)
+})
+
 test('390px目录、详情对话框和画布聚焦可用且页面无横向溢出', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const state = await ontologyFixture(page)

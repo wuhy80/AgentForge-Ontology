@@ -5,6 +5,7 @@ import type { Kind, Organization } from '../../lib/types'
 import { Dialog } from '../../components/Dialog'
 import { OntologyGraph } from './OntologyGraph'
 import { OntologyGraph3D } from './OntologyGraph3D'
+import { OntologyLayerDialog, readOntologyLayers } from './OntologyLayers'
 import { OntologyInspector } from './OntologyInspector'
 import { loadOntologyCatalog, type OntologyCatalog } from './ontology-catalog'
 import './ontology-page.css'
@@ -49,6 +50,11 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
   const [group, setGroup] = useState('')
   const [mode, setMode] = useState<'relations' | 'dependencies'>('relations')
   const [dimension, setDimension] = useState<'2D' | '3D'>('2D')
+  const layerKey = `agentforge:ontology-layers:${layoutScope}:${categoryId}`
+  const [layers, setLayers] = useState(() => readOntologyLayers(layerKey))
+  const [layered, setLayered] = useState(false)
+  const [configureLayers, setConfigureLayers] = useState(false)
+  const [layerFocus, setLayerFocus] = useState<string>()
   const [selectedId, setSelectedId] = useState<string>()
   const [focusId, setFocusId] = useState<string>()
   const [detailOpen, setDetailOpen] = useState(false)
@@ -105,7 +111,7 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
   }
   const inspector = <OntologyInspector record={selected} records={records} categories={categories} groups={catalog?.groups ?? []} categoryId={categoryId} onSelect={select}
     onOpenDefinition={(id) => visit(id, onOpenDefinition)} onQuery={(id) => visit(id, onQuery)} />
-  const Graph = dimension === '3D' ? OntologyGraph3D : OntologyGraph
+  const graphProps = { records, rootIds, categories, categoryId, mode, selectedId, focusId, onSelect: select, onFocus: setFocusId, layoutKey: layoutScope }
 
   function changeCanvasMode(next: typeof mode) {
     setMode(next)
@@ -156,11 +162,15 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
               <div className="ontology-dimensions" role="group" aria-label="画布维度">
                 {(['2D', '3D'] as const).map(value => <button key={value} type="button" aria-pressed={dimension === value} onClick={() => setDimension(value)}>{value}</button>)}
               </div>
+              <button type="button" className="button" aria-pressed={layered} onClick={() => { setLayered(!layered); setLayerFocus(undefined) }}>分层布局</button>
+              <button type="button" className="button" onClick={() => setConfigureLayers(true)}>配置分层</button>
               {focusId && <button className="button subtle" type="button" onClick={() => setFocusId(undefined)}><X size={13} />取消聚焦</button>}</div>
             {(['relations', 'dependencies'] as const).map((view) => <div key={view} role="tabpanel" id={`ontology-panel-${view}`} aria-labelledby={`ontology-tab-${view}`} hidden={mode !== view} tabIndex={0}>
               {mode === view && <>
                 <p className="ontology-canvas-description">{view === 'relations' ? '对象通过 Link 连接，方向和基数说明业务关系。' : '沿已声明的引用，查看枚举、作用对象及函数绑定。'}</p>
-                <Graph records={records} rootIds={rootIds} categories={categories} categoryId={categoryId} mode={mode} selectedId={selectedId} focusId={focusId} onSelect={select} onFocus={setFocusId} layoutKey={layoutScope} />
+                {dimension === '3D' || layered
+                  ? <OntologyGraph3D {...graphProps} flat={dimension === '2D'} layers={layered ? layers : undefined} layerFocus={layerFocus} onLayerFocus={setLayerFocus} />
+                  : <OntologyGraph {...graphProps} />}
               </>}
             </div>)}
             <div className="ontology-canvas-caption"><span>画布展示匹配资源及其已加载关联</span>{selected && <button type="button" className="button subtle" onClick={() => { setDetailOpen(true); setFocusId(selectedId) }}>聚焦所选定义</button>}</div>
@@ -168,6 +178,13 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
           {!narrow && <aside className="ontology-detail-panel" aria-label="本体详情">{inspector}</aside>}
         </div>
         {narrow && detailOpen && selected && <Dialog title="本体详情" onClose={() => setDetailOpen(false)}><div className="ontology-mobile-inspector">{inspector}<button type="button" className="button" onClick={() => { setFocusId(selectedId); setDetailOpen(false); setMobilePane('canvas') }}>在画布中聚焦</button></div></Dialog>}
+        {configureLayers && <OntologyLayerDialog value={layers} records={local} groups={catalog.groups} onClose={() => setConfigureLayers(false)} onSave={value => {
+          setLayers(value)
+          setLayered(true)
+          setLayerFocus(undefined)
+          setConfigureLayers(false)
+          try { localStorage.setItem(layerKey, JSON.stringify(value)) } catch { /* Keep the current view usable. */ }
+        }} />}
       </>}
     </>}
   </div>
