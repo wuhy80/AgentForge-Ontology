@@ -40,7 +40,7 @@ HAVING、关系聚合、分层汇总、映射/跨源聚合、单位换算、物�
 
 | 公开Data入口 | 语义 |
 | --- | --- |
-| `GET /data/saved-queries?limit=20&cursor=…` | 本人有界摘要目录，至多50条；摘要不含源文、查询计划、参数或结果 |
+| `GET /data/saved-queries?limit=20&cursor=…` | 本人有界摘要目录，至多50条。可选 `definitionId` 按模板中持久化的根 Schema、关联节点 Schema、关联路径或存在性筛选 Link、参数声明 Enum 的稳定 ID 筛选。筛选条件纳入游标签名。摘要不含源文、查询计划、参数或结果 |
 | `POST /data/saved-queries/compile` | 接受text及可选defaultCategoryId，不接收运行实参；用户显式操作时将SQL名称绑定为ID计划和参数占位声明，不写库、不运行业务查询 |
 | `POST /data/saved-queries` | 保存经校验的模板，返回新ID及强ETag |
 | `GET /data/saved-queries/{id}` | 重新核对本人身份及当前查询授权后读取模板；无权读取别人的模板 |

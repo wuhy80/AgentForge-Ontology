@@ -40,6 +40,13 @@ func TestSavedQueryMySQLInnerRowsParametersPaginationAndRevocation(t *testing.T)
 	saved := mutationDecode[c.SavedQuery](t, f.own("POST", "/data/saved-queries", "", f.input, 201))
 	path := "/data/saved-queries/" + saved.ID
 	f.own("GET", path, "", nil, 200)
+	for _, id := range []string{target.ID, link.ID, amount.ID} {
+		listed := f.own("GET", "/data/saved-queries?definitionId="+id, "", nil, 200)
+		page := mutationDecode[c.SavedQueryPage](t, listed)
+		if (len(page.Data) == 1) != (id != amount.ID) {
+			t.Fatalf("unexpected binding matches for %s: %+v", id, page)
+		}
+	}
 	bound := decodeQueryBinding(t, f.request("POST", "/data/query/bind", c.QuerySpec{From: saved.Query.From, Rows: saved.Query.Rows, Select: saved.Query.Select, Page: saved.Query.Page}, false))
 	if len(bound.Fields) != 3 || bound.Query.Rows == nil {
 		t.Fatal("bound row scope missing")
@@ -85,4 +92,17 @@ func TestSavedQueryMySQLInnerRowsParametersPaginationAndRevocation(t *testing.T)
 	f.own("GET", path, "", nil, 403)
 	f.own("POST", path+"/execute", "", c.SavedQueryExecuteRequest{Parameters: parameters}, 403)
 	f.own("DELETE", path, saved.ETag, nil, 204)
+	f.authorize = nil
+	f.input.Query = c.QuerySpec{
+		From:     c.Source{SchemaID: f.definition.ID},
+		Relation: &c.RelationFilter{LinkID: link.ID, Direction: "out", Operator: "exists"},
+		Select:   []string{f.definition.Schema.Properties[0].ID},
+		Page:     c.Page{Limit: 1},
+	}
+	f.input.Parameters = nil
+	filtered := mutationDecode[c.SavedQuery](t, f.own("POST", "/data/saved-queries", "", f.input, 201))
+	listed := mutationDecode[c.SavedQueryPage](t, f.own("GET", "/data/saved-queries?definitionId="+link.ID, "", nil, 200))
+	if len(listed.Data) != 1 || listed.Data[0].ID != filtered.ID {
+		t.Fatalf("missing exists filter Link binding: %+v", listed)
+	}
 }

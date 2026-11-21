@@ -254,8 +254,8 @@ func (h *handler) savedQueriesListHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	limit, after := 20, ""
 	for key, values := range r.URL.Query() {
-		if key != "limit" && key != "cursor" || len(values) != 1 {
-			writeError(w, problem(400, "invalid_saved_query_page", "列表仅接受单项limit与cursor"))
+		if (key != "limit" && key != "cursor" && key != "definitionId") || len(values) != 1 {
+			writeError(w, problem(400, "invalid_saved_query_page", "列表仅接受单项 limit、cursor 和 definitionId"))
 			return
 		}
 	}
@@ -267,6 +267,14 @@ func (h *handler) savedQueriesListHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	fingerprint := digest([]any{"private-saved-queries-v1", limit})
+	definitionID := r.URL.Query().Get("definitionId")
+	if r.URL.Query().Has("definitionId") {
+		if !uuidPattern.MatchString(definitionID) {
+			writeError(w, problem(422, "invalid_definition_id", "definitionId 必须为有效的定义 ID"))
+			return
+		}
+		fingerprint = digest([]any{"private-saved-queries-v1", limit, definitionID})
+	}
 	if encoded := r.URL.Query().Get("cursor"); encoded != "" {
 		cursor, parseErr := parseCursor(h.cfg.CursorSecret, encoded)
 		if len(encoded) > 4096 || parseErr != nil || cursor.TenantID != p.TenantID || cursor.Subject != p.Subject || cursor.SchemaID != "saved-queries" || cursor.Fingerprint != fingerprint || !uuidPattern.MatchString(cursor.LastID) {
@@ -275,7 +283,18 @@ func (h *handler) savedQueriesListHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		after = cursor.LastID
 	}
-	rows, err := h.cfg.Engine.DB().QueryContext(r.Context(), "SELECT "+savedSummaryColumns+" FROM af_data_saved_queries WHERE tenant_id=? AND user_id=? AND id>? ORDER BY id LIMIT ?", p.TenantID, p.Subject, after, limit+1)
+	statement := "SELECT " + savedSummaryColumns + " FROM af_data_saved_queries WHERE tenant_id=? AND user_id=? AND id>?"
+	args := []any{p.TenantID, p.Subject, after}
+	if definitionID != "" {
+		// Constrain the match to persisted definition bindings. Free-form
+		// SQL text and result or field IDs cannot create a dependency.
+		statement += ` AND JSON_CONTAINS(JSON_EXTRACT(template_json,
+			'$.query.from.schemaId', '$.query.relation.linkId',
+			'$.query.rows.nodes[*].schemaId', '$.query.rows.joins[*].linkId',
+			'$.parameters[*].enumId'), JSON_QUOTE(?))`
+		args = append(args, definitionID)
+	}
+	rows, err := h.cfg.Engine.DB().QueryContext(r.Context(), statement+" ORDER BY id LIMIT ?", append(args, limit+1)...)
 	if err != nil {
 		writeError(w, err)
 		return

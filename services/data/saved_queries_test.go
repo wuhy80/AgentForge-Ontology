@@ -108,6 +108,36 @@ func (f *savedQueriesFixture) own(method, path, etag string, body any, want int)
 	return w
 }
 
+func TestSavedQueryMySQLDefinitionFilter(t *testing.T) {
+	f := newSavedQueriesFixture(t)
+	saved := mutationDecode[c.SavedQuery](t, f.own("POST", "/data/saved-queries", "", f.input, 201))
+	f.input.Name = "第二份查询"
+	f.own("POST", "/data/saved-queries", "", f.input, 201)
+	path := "/data/saved-queries?limit=1&definitionId="
+	first := mutationDecode[c.SavedQueryPage](t, f.own("GET", path+f.definition.ID, "", nil, 200))
+	if len(first.Data) != 1 || !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("unexpected first page: %+v", first)
+	}
+	second := mutationDecode[c.SavedQueryPage](t, f.own("GET", path+f.definition.ID+"&cursor="+first.NextCursor, "", nil, 200))
+	if len(second.Data) != 1 || second.HasMore || second.Data[0].ID == first.Data[0].ID {
+		t.Fatalf("unexpected second page: %+v", second)
+	}
+	for _, id := range []string{saved.Parameters[0].EnumID, c.NewID()} {
+		page := mutationDecode[c.SavedQueryPage](t, f.own("GET", path+id, "", nil, 200))
+		if (len(page.Data) == 1) != (id == saved.Parameters[0].EnumID) {
+			t.Fatalf("wrong matches for %s: %+v", id, page)
+		}
+		f.own("GET", path+id+"&cursor="+first.NextCursor, "", nil, 422)
+	}
+	f.own("GET", path, "", nil, 422)
+	for _, identity := range [][2]string{{f.tenant, "other-user"}, {f.tenant + "-other", "saved-owner"}} {
+		response := f.call("GET", path+f.definition.ID, identity[0], identity[1], "", nil)
+		if response.Code != 200 || len(mutationDecode[c.SavedQueryPage](t, response).Data) != 0 {
+			t.Fatalf("filtered list escaped owner scope: %d %s", response.Code, response.Body)
+		}
+	}
+}
+
 func TestSavedQueryMySQLCRUDIsolationETagAndCurrentAuthorization(t *testing.T) {
 	f := newSavedQueriesFixture(t)
 	saved := mutationDecode[c.SavedQuery](t, f.own("POST", "/data/saved-queries", "", f.input, 201))

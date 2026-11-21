@@ -58,7 +58,7 @@ Data 的 JSON 请求体最多 8 MiB（8388608 字节），包括字段名、JSON
 | `POST /data/transactions/status` | 使用原完整事务正文核对持久回执，不执行任何业务写入 |
 | `POST /data/query` | 中文名称或稳定 ID 绑定、类型化筛选、投影、排序和签名游标；可选aggregate执行独立只读单模型统计 |
 | `POST /data/query/bind` | 无游标QuerySpec的只读逻辑绑定，返回稳定ID计划与安全输出fields；不扫描业务表或读取物理目录，实际执行仍重新授权 |
-| `GET /data/saved-queries`、`POST /data/saved-queries` | 当前租户/用户的摘要分页及保存；非本体定义，不开放跨用户管理 |
+| `GET /data/saved-queries`、`POST /data/saved-queries` | 当前租户/用户的摘要分页及保存。列表可按 `definitionId` 筛选直接定义绑定，详见[个人保存查询](../../docs/数据查询/DataSet.md#个人保存查询2026-11-08本批实现) |
 | `POST /data/saved-queries/compile` | text/defaultCategoryId无实参SQL模板编译，返回稳定ID计划及声明，不写库、不扫描业务行 |
 | `GET /data/saved-queries/{id}`、`PUT`、`DELETE` | 私有模板详情、更新与删除；更新/删除要求强If-Match，缺少428、旧值412，跨owner404 |
 | `POST /data/saved-queries/{id}/execute` | parameters及可选cursor，重新授权后返回公共QueryResult；不按保存source重绑名称 |
