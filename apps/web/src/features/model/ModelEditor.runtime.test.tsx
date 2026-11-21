@@ -28,18 +28,28 @@ describe('模型编辑的执行配置', () => {
   it('confirms callable disable and restore while keeping the same definition', async () => {
     const { api, props } = fixture(fn)
     const lifecycle = vi.fn().mockResolvedValueOnce({ ...fn, status: 'disabled' }).mockResolvedValueOnce({ ...fn })
+    const preview = vi.fn().mockRejectedValueOnce(new Error('当前或草稿定义仍引用此定义'))
+      .mockResolvedValueOnce({ definitionId: 'fn', targetStatus: 'disabled' })
+      .mockResolvedValueOnce({ definitionId: 'fn', targetStatus: 'active' })
     Object.assign(api, {
-      metadataCapabilities: vi.fn().mockResolvedValue({ callableLifecycle: 'pure-only' }),
+      previewCallableLifecycle: preview,
+      metadataCapabilities: vi.fn().mockResolvedValue({ callableLifecycle: 'pure-only', callableLifecyclePreview: true }),
       setCallableLifecycle: lifecycle,
     })
     render(<ModelEditor {...props} />)
     await userEvent.click(await screen.findByRole('button', { name: '停用定义' }))
-    await userEvent.click(screen.getByRole('button', { name: '确认停用' }))
+    await screen.findByText('当前或草稿定义仍引用此定义')
+    expect(screen.queryByRole('button', { name: '确认停用' })).toBeNull()
+    expect(lifecycle).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '停用定义' }))
+    await userEvent.click(await screen.findByRole('button', { name: '确认停用' }))
+    expect(preview).toHaveBeenNthCalledWith(2, 'fn', 'disable', fn.etag)
     await screen.findByText('定义已停用。')
     expect(lifecycle).toHaveBeenNthCalledWith(1, 'fn', 'disable', fn.etag)
     expect((screen.getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true)
     await userEvent.click(screen.getByRole('button', { name: '恢复定义' }))
-    await userEvent.click(screen.getByRole('button', { name: '确认恢复' }))
+    await userEvent.click(await screen.findByRole('button', { name: '确认恢复' }))
+    expect(preview).toHaveBeenNthCalledWith(3, 'fn', 'restore', fn.etag)
     await screen.findByText('定义已恢复。')
     expect(lifecycle).toHaveBeenNthCalledWith(2, 'fn', 'restore', fn.etag)
   })

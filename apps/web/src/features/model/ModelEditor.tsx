@@ -77,6 +77,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupError, setGroupError] = useState('')
   const [busy, setBusy] = useState<'save' | 'preview' | 'publish' | 'reload' | 'lifecycle' | ''>('')
+  const [lifecyclePreviewAvailable, setLifecyclePreviewAvailable] = useState(false)
   const [lifecycleAvailable, setLifecycleAvailable] = useState(false)
   const [recordReadAvailable, setRecordReadAvailable] = useState(false)
   const [confirmLifecycle, setConfirmLifecycle] = useState(false)
@@ -126,6 +127,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   useEffect(() => {
     setSchemaMigrations(undefined); setCapabilityError('')
     setLifecycleAvailable(false)
+    setLifecyclePreviewAvailable(false)
     setRecordReadAvailable(false)
     if (!active || typeof api.metadataCapabilities !== 'function') return
     if (!callable && (!locked || !definition.schema || definition.schema.storageBinding)) return
@@ -134,6 +136,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
       if (controller.signal.aborted) return
       setSchemaMigrations(capabilities.schemaMigrations)
       setLifecycleAvailable(capabilities.callableLifecycle === 'pure-only')
+      setLifecyclePreviewAvailable(capabilities.callableLifecyclePreview === true)
       setRecordReadAvailable(capabilities.actionRecordRead === true)
     }).catch((cause: unknown) => { if (!controller.signal.aborted && definition.schema) setCapabilityError(cause instanceof Error ? cause.message : '迁移能力读取失败。') })
     return () => controller.abort()
@@ -291,6 +294,22 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
     } catch (cause) { report(cause) } finally { setBusy('') }
   }
 
+  async function checkLifecycle() {
+    if (!record || !lifecycleAllowed || dirty || busy || uncertain) return
+    if (!lifecyclePreviewAvailable) {
+      setConfirmLifecycle(true)
+      return
+    }
+    setBusy('lifecycle'); setError(''); setMessage('')
+    try {
+      const result = await api.previewCallableLifecycle(record.definition.id, suspended ? 'restore' : 'disable', record.etag)
+      if (result.definitionId !== record.definition.id || result.targetStatus !== (suspended ? 'active' : 'disabled')) {
+        throw new Error('定义状态预览与请求不一致，请重新读取。')
+      }
+      setConfirmLifecycle(true)
+    } catch (cause) { report(cause) } finally { setBusy('') }
+  }
+
   async function changeLifecycle() {
     if (!record || !lifecycleAllowed || dirty || busy || uncertain) return
     setBusy('lifecycle'); setError(''); setMessage(''); setConfirmLifecycle(false)
@@ -311,9 +330,10 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
     <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" onClick={requestClose} disabled={!!busy}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑定义' : `新建${kindLabels[definition.kind]}`}</h1><p className="muted">{kindDescriptions[definition.kind]}</p></div></div>
     <div className="model-editor">
       <div className="model-editor-meta"><span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{suspended ? '已停用' : record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}
-        {lifecycleAllowed && !confirmLifecycle && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => setConfirmLifecycle(true)}>{suspended ? '恢复定义' : '停用定义'}</button>}
+        {lifecycleAllowed && !confirmLifecycle && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void checkLifecycle()}>{suspended ? '恢复定义' : '停用定义'}</button>}
       </div>
       {confirmLifecycle && lifecycleAllowed && <div className="notice">
+        {lifecyclePreviewAvailable && <p>预览检查通过，确认时将重新检查。</p>}
         <p>{suspended ? '恢复后，此定义可按现有权限调用。' : '停用后，此定义将暂停调用，已保存的内容仍可查看。'}</p>
         <div className="model-inline-actions"><button type="button" className="button primary" disabled={!!busy || dirty || uncertain} onClick={() => void changeLifecycle()}>{suspended ? '确认恢复' : '确认停用'}</button><button type="button" className="button subtle" onClick={() => setConfirmLifecycle(false)}>取消</button></div>
       </div>}
