@@ -298,6 +298,7 @@ type Decision struct {
 }
 
 type Error struct {
+	FieldID string `json:"fieldId,omitempty"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }

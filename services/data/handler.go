@@ -38,10 +38,23 @@ type handler struct {
 type apiError struct {
 	status        int
 	code, message string
+	fieldID       string
 }
 
-func (e *apiError) Error() string                    { return e.message }
-func problem(status int, code, message string) error { return &apiError{status, code, message} }
+func (e *apiError) Error() string { return e.message }
+func problem(status int, code, message string) error {
+	return &apiError{status: status, code: code, message: message}
+}
+
+func fieldProblem(id string, err error) error {
+	var detail *apiError
+	if !errors.As(err, &detail) || detail.status != 422 {
+		return err
+	}
+	out := *detail
+	out.fieldID = id
+	return &out
+}
 
 func NewHandler(cfg Config) http.Handler {
 	h := &handler{cfg: cfg, client: cfg.HTTPClient}
@@ -128,7 +141,7 @@ func writeError(w http.ResponseWriter, err error) {
 	}
 	var e *apiError
 	if errors.As(err, &e) {
-		writeJSON(w, e.status, c.Error{Code: e.code, Message: e.message})
+		writeJSON(w, e.status, c.Error{Code: e.code, Message: e.message, FieldID: e.fieldID})
 		return
 	}
 	var dbError *mysql.MySQLError

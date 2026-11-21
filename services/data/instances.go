@@ -128,10 +128,10 @@ func buildValues(s *c.Schema, input map[string]json.RawMessage, base map[string]
 			return nil, problem(403, "forbidden_field", "属性只读或不允许写入")
 		}
 		if _, err := typedValue(p, raw); err != nil {
-			return nil, err
+			return nil, fieldProblem(p.ID, err)
 		}
 		if err := enumWriteValue(p, raw); err != nil {
-			return nil, err
+			return nil, fieldProblem(p.ID, err)
 		}
 		out[p.ID] = raw
 	}
@@ -148,6 +148,9 @@ func buildValues(s *c.Schema, input map[string]json.RawMessage, base map[string]
 			} else if !p.Required && p.Nullable {
 				out[p.ID] = json.RawMessage("null")
 			} else {
+				if fieldAllowed(allowed, p.ID) {
+					return nil, fieldProblem(p.ID, problem(422, "missing_field", "请填写必填属性"))
+				}
 				return nil, problem(422, "missing_field", "缺少必填属性或模型要求的值")
 			}
 		}
