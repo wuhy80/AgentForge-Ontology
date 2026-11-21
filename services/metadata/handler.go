@@ -76,6 +76,8 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("PUT /metadata/definitions/{id}/draft", h.wrap(h.saveDraft))
 	mux.HandleFunc("POST /metadata/definitions/{id}/preview", h.wrap(h.preview))
 	mux.HandleFunc("POST /metadata/definitions/{id}/publish", h.wrap(h.publish))
+	mux.HandleFunc("POST /metadata/definitions/{id}/disable", h.wrap(h.callableLifecycle(false)))
+	mux.HandleFunc("POST /metadata/definitions/{id}/restore", h.wrap(h.callableLifecycle(true)))
 	mux.HandleFunc("GET /metadata/publications/{id}", h.wrap(h.getPublication))
 	mux.HandleFunc("GET /metadata/schemas/{id}/links", h.wrap(h.links))
 	return mux
@@ -192,7 +194,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p contrac
 	if err := h.authorize(r.Context(), p, "definition.read", "", ""); err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "schemaInheritance": false, "dbToSchema": true})
+	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "callableLifecycle": "pure-only", "actionRecordRead": true, "schemaInheritance": false, "dbToSchema": true})
 	return nil
 }
 
@@ -472,6 +474,9 @@ func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, p contracts.
 		}
 		if err := matchHeader(r, expected); err != nil {
 			return err
+		}
+		if row.status == disabledDefinition {
+			return problem(409, "definition_disabled", "请先恢复定义再保存草稿")
 		}
 		if row.d.Kind != d.Kind || row.d.CategoryID != d.CategoryID {
 			return problem(422, "unsupported_change", "定义不能改变类型或跨分类移动")

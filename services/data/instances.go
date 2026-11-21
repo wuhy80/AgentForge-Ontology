@@ -43,6 +43,10 @@ func projectInstance(in c.Instance, allowed []string) c.Instance {
 }
 
 func selectInstance(ctx context.Context, tx *sql.Tx, d c.Definition, tenant, id string, filter *c.Expression, lock bool) (c.Instance, error) {
+	return selectInstanceFields(ctx, tx, d, d.Schema.Properties, tenant, id, filter, lock)
+}
+
+func selectInstanceFields(ctx context.Context, tx *sql.Tx, d c.Definition, fields []c.Property, tenant, id string, filter *c.Expression, lock bool) (c.Instance, error) {
 	out := c.Instance{SchemaID: d.ID, Values: map[string]json.RawMessage{}}
 	compiler := expressionCompiler{schema: d.Schema, allowed: []string{"*"}}
 	condition, args, err := compiler.compile(filter, 0)
@@ -50,7 +54,7 @@ func selectInstance(ctx context.Context, tx *sql.Tx, d c.Definition, tenant, id 
 		return out, err
 	}
 	columns := []string{"`id`", "`etag`"}
-	for _, p := range d.Schema.Properties {
+	for _, p := range fields {
 		columns = append(columns, quote(columnName(p.ID)))
 	}
 	query := "SELECT " + strings.Join(columns, ",") + " FROM " + quote(tableName(d.ID)) + " WHERE `tenant_id`=? AND `id`=? AND (" + condition + ")"
@@ -80,7 +84,7 @@ func selectInstance(ctx context.Context, tx *sql.Tx, d c.Definition, tenant, id 
 	}
 	out.ID = dbString(values[0])
 	out.ETag = dbString(values[1])
-	for i, p := range d.Schema.Properties {
+	for i, p := range fields {
 		raw, e := rawDatabaseValue(p, values[i+2])
 		if e != nil {
 			return out, e

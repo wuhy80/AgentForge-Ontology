@@ -139,6 +139,9 @@ func (h *handler) beginPublication(ctx context.Context, tenant, id string, r *ht
 			return err
 		}
 		candidate, err := parseDefinition(row.draft)
+		if row.status == disabledDefinition {
+			return problem(409, "definition_disabled", "请先恢复定义再发布")
+		}
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) && row.currentDigest != "" {
 				if err := matchHeader(r, row.currentDigest); err != nil {
@@ -229,6 +232,24 @@ func validateReferences(ctx context.Context, tx *sql.Tx, d contracts.Definition)
 		refs[id] = ref
 	}
 	if d.Action != nil {
+		if read := d.Action.RecordRead; read != nil {
+			schema := refs[read.SchemaID].Schema
+			if schema == nil || schema.StorageBinding != nil {
+				return problem(422, "invalid_record_read", "当前记录读取需要平台托管 Schema")
+			}
+			for _, id := range read.FieldIDs {
+				found := false
+				for _, property := range schema.Properties {
+					if property.ID == id && property.DataType != "longtext" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return problem(422, "invalid_record_read", "声明字段不存在或超出支持范围")
+				}
+			}
+		}
 		for _, id := range d.Action.TargetSchemaIDs {
 			if refs[id].ID != id || refs[id].TenantID != d.TenantID || refs[id].Kind != contracts.KindSchema {
 				return problem(422, "invalid_action_target", "动作关联对象必须引用同租户已生效的Schema稳定标识")

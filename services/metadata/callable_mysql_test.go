@@ -92,11 +92,33 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	actionDefinition.Action.Runtime, actionDefinition.Action.FunctionID = nil, function.Definition.ID
 	actionDefinition.Action.Input[0].ID, actionDefinition.Action.Output[0].ID = "action-in", "action-out"
 	action := create(actionDefinition)
+	functionPath := "/metadata/definitions/" + function.Definition.ID
+	request("POST", functionPath+"/disable", function.ETag, nil, 409, nil)
 	publish(action, 200)
+	request("POST", functionPath+"/disable", function.ETag, nil, 409, nil)
 	inlineDefinition := executableAction()
 	inlineDefinition.Name = "独立Python动作"
 	inline := create(inlineDefinition)
 	publish(inline, 200)
+	inlinePath := "/metadata/definitions/" + inline.Definition.ID
+	request("POST", inlinePath+"/disable", "", nil, 428, nil)
+	request("POST", inlinePath+"/disable", "stale", nil, 412, nil)
+	var lifecycle c.CurrentDefinition
+	request("POST", inlinePath+"/disable", inline.ETag, nil, 200, &lifecycle)
+	if lifecycle.Status != disabledDefinition || lifecycle.Definition.ID != inline.Definition.ID {
+		t.Fatalf("disabled callable was not retained: %+v", lifecycle)
+	}
+	request("POST", inlinePath+"/disable", inline.ETag, nil, 200, nil)
+	request("GET", inlinePath, "", nil, 200, &lifecycle)
+	if lifecycle.Status != disabledDefinition {
+		t.Fatal("current definition did not expose paused state")
+	}
+	request("PUT", inlinePath+"/draft", inline.ETag, inline.Definition, 409, nil)
+	request("POST", inlinePath+"/publish", inline.ETag, nil, 409, nil)
+	request("POST", inlinePath+"/restore", inline.ETag, nil, 200, &lifecycle)
+	if lifecycle.Status != "active" || lifecycle.Definition.ID != inline.Definition.ID {
+		t.Fatalf("restored callable lost its identity: %+v", lifecycle)
+	}
 	originalSource := inline.Definition.Action.Runtime.Source
 	inline.Definition.Action.TestCases = []c.CallableTestCase{{ID: "uppercase-sample", Name: "大写样例", Input: map[string]json.RawMessage{inline.Definition.Action.Input[0].ID: json.RawMessage(`"hello"`)}}}
 	inline.Definition.Action.Runtime.Source = "def main(inputs):\n    return {'结果': inputs['文本'].upper()}\n"

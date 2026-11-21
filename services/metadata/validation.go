@@ -204,6 +204,12 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if err := canonicalDataWrite(c); err != nil {
 			return err
 		}
+		if err := contracts.ValidateActionRecordRead(*d); err != nil {
+			return problem(422, "invalid_record_read", err.Error())
+		}
+		if c.RecordRead != nil {
+			sort.Strings(c.RecordRead.FieldIDs)
+		}
 		if c.FunctionID != "" && c.ArtifactRef != "" {
 			return problem(422, "unsupported_runtime", "实现函数与产物引用不能同时配置")
 		}

@@ -85,6 +85,7 @@ type memoryMetadata struct {
 	mu          sync.Mutex
 	definitions map[string]c.Definition
 	drafts      map[string]c.Definition
+	disabled    bool
 }
 
 func (m *memoryMetadata) Draft(_ context.Context, tenant, id string) (c.CurrentDefinition, error) {
@@ -119,7 +120,11 @@ func (m *memoryMetadata) Current(_ context.Context, tenant, id string) (c.Curren
 	raw, _ := json.Marshal(d)
 	var isolated c.Definition
 	_ = json.Unmarshal(raw, &isolated)
-	return c.CurrentDefinition{Definition: isolated, Status: "active", ETag: digest(isolated)}, nil
+	status := "active"
+	if m.disabled {
+		status = "disabled"
+	}
+	return c.CurrentDefinition{Definition: isolated, Status: status, ETag: digest(isolated)}, nil
 }
 func (m *memoryMetadata) set(d c.Definition) {
 	m.mu.Lock()
@@ -227,6 +232,73 @@ func request(h http.Handler, method, path, key, body string) *httptest.ResponseR
 }
 
 const validBody = `{"definitionId":"function","input":{"fn-in":"9007199254740993.10"}}`
+
+type recordReadFixture struct {
+	DataTransactionClient
+	read func(c.ActionRecordReadRequest) (c.ActionRecordSnapshot, error)
+}
+
+func (f recordReadFixture) ReadActionRecord(_ context.Context, request c.ActionRecordReadRequest) (c.ActionRecordSnapshot, error) {
+	return f.read(request)
+}
+
+func TestActionRecordReadInjectsOnlyTransientAuthorizedSnapshot(t *testing.T) {
+	f := newFixture()
+	action := f.fn
+	action.Kind, action.ID, action.Action, action.Function = c.KindAction, "read-action", action.Function, nil
+	action.Action.Input = []c.Property{{ID: "record-id", Name: "对象", DataType: "uuid", Required: true}}
+	action.Action.TargetSchemaIDs = []string{"schema"}
+	action.Action.RecordRead = &c.ActionRecordRead{SchemaID: "schema", InstanceInputID: "record-id", FieldIDs: []string{"readable"}}
+	f.meta.set(action)
+	snapshot := c.ActionRecordSnapshot{ETag: "row-etag", Values: map[string]json.RawMessage{"readable": json.RawMessage(`"value-from-data"`)}}
+	client := recordReadFixture{read: func(req c.ActionRecordReadRequest) (c.ActionRecordSnapshot, error) {
+		if req.ActionID != action.ID || req.InstanceID != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" || req.Session.Token == "" {
+			t.Fatalf("wrong read scope: %s / %s", req.ActionID, req.InstanceID)
+		}
+		return snapshot, nil
+	}}
+	f.runner.run = func(_ context.Context, _ *c.ScriptRuntime, input map[string]json.RawMessage, _ string) (map[string]json.RawMessage, error) {
+		if string(input[c.ActionRecordInputName]) != `{"readable":"value-from-data"}` {
+			t.Fatalf("read snapshot missing from runner input: %s", input[c.ActionRecordInputName])
+		}
+		return map[string]json.RawMessage{"结果": json.RawMessage(`"1.00"`)}, nil
+	}
+	app := NewHandler(Config{Store: f.store, Metadata: f.meta, Authorizer: f.auth, SessionChecker: f.auth, Runner: f.runner, DataTransactions: client, MaxConcurrent: 1})
+	body := `{"definitionId":"read-action","input":{"record-id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}}`
+	got := invocation(t, request(app, "POST", "/execution/invocations", "prefetch", body), 201)
+	if got.Status != "succeeded" {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	stored, err := f.store.FindID(context.Background(), "tenant", "user", got.ID)
+	encoded, _ := json.Marshal(stored)
+	if err != nil || stored.RecordReadDigest == "" || strings.Contains(string(encoded), "value-from-data") {
+		t.Fatal("stored execution includes raw prefetched data or lacks its digest")
+	}
+	snapshot.ETag = "changed"
+	if w := request(app, "GET", "/execution/invocations/"+got.ID, "", ""); w.Code != 409 {
+		t.Fatalf("changed record allowed historical delivery: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestDisabledCallableRejectsNewAndPriorInvocations(t *testing.T) {
+	f := newFixture()
+	first := invocation(t, request(f.h, "POST", "/execution/invocations", "initial", validBody), 201)
+	f.meta.disabled = true
+	for _, response := range []*httptest.ResponseRecorder{
+		request(f.h, "POST", "/execution/invocations", "blocked", validBody),
+		request(f.h, "POST", "/execution/invocations", "initial", validBody),
+		request(f.h, "GET", "/execution/invocations/"+first.ID, "", ""),
+	} {
+		if response.Code != 404 || strings.Contains(response.Body.String(), "9007199254740993") {
+			t.Fatalf("disabled callable exposed execution or output: %d %s", response.Code, response.Body)
+		}
+	}
+	f.meta.disabled = false
+	invocation(t, request(f.h, "POST", "/execution/invocations", "restored", validBody), 201)
+	if f.runner.calls.Load() != 2 {
+		t.Fatal("disabled request ran, or restored request was blocked")
+	}
+}
 
 func invocation(t *testing.T, w *httptest.ResponseRecorder, status int) c.Invocation {
 	t.Helper()

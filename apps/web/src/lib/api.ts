@@ -303,6 +303,9 @@ export class ApiClient {
   publish(id: string, etag: string): Promise<Publication> {
     return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/publish`, { method: 'POST', etag })
   }
+  setCallableLifecycle(id: string, action: 'disable' | 'restore', etag: string): Promise<DefinitionRecord> {
+    return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/${action}`, { method: 'POST', etag })
+  }
   getPublication(id: string, signal?: AbortSignal): Promise<Publication> {
     return this.request(`/api/metadata/publications/${encodeURIComponent(id)}`, { signal })
   }

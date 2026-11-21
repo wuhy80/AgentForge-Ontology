@@ -16,6 +16,7 @@ function modelSummary(definition: Definition) {
 }
 
 function ModelStatus({ entry }: { entry: DefinitionRecord }) {
+  if (entry.status === 'disabled') return <span className="model-status model-status-draft">已停用</span>
   const draft = entry.status === 'draft'
   return <span className={`model-status ${draft ? 'model-status-draft' : 'model-status-active'}`}>{draft ? <CircleDashed size={12} /> : <Check size={12} />}{draft ? entry.hasCurrent ? '待发布变更' : '草稿' : '已生效'}</span>
 }
@@ -117,7 +118,7 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
     setLocalEntries({})
     const current = editorRef.current
     const authorizationRecord = current?.authorizationRecord ?? current?.record
-    if (authorizationRecord?.status === 'active' && ![...entries, ...(currentEntries ?? [])].some((entry) => entry.definition.id === authorizationRecord.definition.id && entry.definition.tenantId === authorizationRecord.definition.tenantId)) {
+    if (authorizationRecord && authorizationRecord.status !== 'draft' && ![...entries, ...(currentEntries ?? [])].some((entry) => entry.definition.id === authorizationRecord.definition.id && entry.definition.tenantId === authorizationRecord.definition.tenantId)) {
       openingSequence.current++; setOpening(''); closeEditor()
       return
     }

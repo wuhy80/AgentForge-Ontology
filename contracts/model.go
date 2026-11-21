@@ -151,6 +151,7 @@ type Callable struct {
 	ArtifactRef     string                `json:"artifactRef,omitempty"`
 	SideEffects     string                `json:"sideEffects"`
 	DataWrite       []DataWriteCapability `json:"dataWrite,omitempty"`
+	RecordRead      *ActionRecordRead     `json:"recordRead,omitempty"`
 	Runtime         *ScriptRuntime        `json:"runtime,omitempty"`
 	TestCases       []CallableTestCase    `json:"testCases,omitempty"`
 }

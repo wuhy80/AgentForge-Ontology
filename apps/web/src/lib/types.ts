@@ -223,6 +223,7 @@ export interface Callable {
   artifactRef?: string
   sideEffects: 'none' | 'dataWrite' | 'externalWrite'
   dataWrite?: DataWriteCapability[]
+  recordRead?: { schemaId: string; instanceInputId: string; fieldIds: string[] }
   runtime?: ScriptRuntime
   testCases?: CallableTestCase[]
 }
@@ -360,6 +361,8 @@ export interface QueryPathsResult { requestId: string; textHash: string; candida
 export interface QueryFieldInsertionRequest extends OntologySQLRequest { schemaId: string; fieldId: string; alias?: string; selectionFrom: number; selectionTo: number }
 export interface QueryFieldInsertionResult { requestId: string; textHash: string; text: string; from: number; to: number; diagnostics: SQLDiagnostic[] }
 export interface MetadataCapabilities {
+  callableLifecycle?: 'pure-only'
+  actionRecordRead?: boolean
   dependencyImpact?: 'direct-definitions'
   definitions: Kind[]
   lifecycle: string[]

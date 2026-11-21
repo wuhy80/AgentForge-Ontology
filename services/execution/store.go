@@ -22,12 +22,13 @@ type Record struct {
 	Root        c.Definition `json:"root"`
 	// Keep the original JSON key so existing persisted Function/Action records
 	// remain readable. The definition retains its real Action or Function kind.
-	Implementation c.Definition               `json:"function"`
-	Input          map[string]json.RawMessage `json:"input"`
-	ImageID        string                     `json:"imageId"`
-	DeadlineAt     time.Time                  `json:"deadlineAt"`
-	Transaction    *c.WriteTransactionRequest `json:"transaction,omitempty"`
-	PreparedOutput map[string]json.RawMessage `json:"preparedOutput,omitempty"`
+	Implementation   c.Definition               `json:"function"`
+	Input            map[string]json.RawMessage `json:"input"`
+	ImageID          string                     `json:"imageId"`
+	DeadlineAt       time.Time                  `json:"deadlineAt"`
+	Transaction      *c.WriteTransactionRequest `json:"transaction,omitempty"`
+	PreparedOutput   map[string]json.RawMessage `json:"preparedOutput,omitempty"`
+	RecordReadDigest string                     `json:"recordReadDigest,omitempty"`
 }
 
 type Store interface {

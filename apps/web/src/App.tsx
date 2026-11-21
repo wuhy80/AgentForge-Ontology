@@ -839,7 +839,7 @@ function Overview({
                       </td>
                       <td>
                         <span className={`badge ${entry.status === 'draft' ? 'badge-amber' : 'badge-green'}`}>
-                          {entry.status === 'draft' ? '草稿' : '已生效'}
+                          {entry.status === 'disabled' ? '已停用' : entry.status === 'draft' ? '草稿' : '已生效'}
                         </span>
                       </td>
                       <td>

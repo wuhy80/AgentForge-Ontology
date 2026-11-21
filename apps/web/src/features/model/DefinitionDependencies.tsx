@@ -6,7 +6,7 @@ import './definition-dependencies.css'
 
 const reasons: Record<string, string> = {
   enum: '枚举取值', 'link-source': '关系来源', 'link-target': '关系目标',
-  'action-target': '动作关联对象', 'data-write': '业务写入范围', implementation: '函数实现',
+  'action-target': '动作关联对象', 'data-write': '业务写入范围', 'record-read': '当前记录读取', implementation: '函数实现',
 }
 
 export function DefinitionDependencies({ api, record, dirty, active = true }: {

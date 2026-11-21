@@ -25,6 +25,24 @@ function editSource(source: string) {
 }
 
 describe('模型编辑的执行配置', () => {
+  it('confirms callable disable and restore while keeping the same definition', async () => {
+    const { api, props } = fixture(fn)
+    const lifecycle = vi.fn().mockResolvedValueOnce({ ...fn, status: 'disabled' }).mockResolvedValueOnce({ ...fn })
+    Object.assign(api, {
+      metadataCapabilities: vi.fn().mockResolvedValue({ callableLifecycle: 'pure-only' }),
+      setCallableLifecycle: lifecycle,
+    })
+    render(<ModelEditor {...props} />)
+    await userEvent.click(await screen.findByRole('button', { name: '停用定义' }))
+    await userEvent.click(screen.getByRole('button', { name: '确认停用' }))
+    await screen.findByText('定义已停用。')
+    expect(lifecycle).toHaveBeenNthCalledWith(1, 'fn', 'disable', fn.etag)
+    expect((screen.getByRole('button', { name: '保存草稿' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: '恢复定义' }))
+    await userEvent.click(screen.getByRole('button', { name: '确认恢复' }))
+    await screen.findByText('定义已恢复。')
+    expect(lifecycle).toHaveBeenNthCalledWith(2, 'fn', 'restore', fn.etag)
+  })
   it('配置事务写入对象及基本操作保存，切回纯计算清除范围，草稿写入禁用', async () => {
     const draft = structuredClone(fn)
     draft.status = 'draft'; draft.definition.function!.runtime = initialRuntime('python')

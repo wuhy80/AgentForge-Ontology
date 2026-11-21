@@ -218,3 +218,6 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 事务持有平台 Schema/Link gate，来源事务持有写入 gate 和目标行锁，提交前复核授权。对象、外键事实、幂等回执、对象/关系 outbox 在同一来源事务中提交；不写平台影子关系表，也不宣称跨库业务原子提交。create 最小表单/能力发现仅在具备关系与端点权限时开放对应 FK 字段；提交时仍重新检查实际目标和行权限。patch 字段继续保护既有 FK。
 
 隔离 MySQL 26.7.0 的 `TestMySQLMappedForeignKeyCreateAuthorizationAndRollback` 验证成功创建、关系权限拒绝、目标行权限拒绝、目标不存在、失败不留对象、关系事件同事务提交、既有 FK 修改与删除拒绝；原来源写入与发布排空测试通过。附加 DML-only/跨库级联账号用例未配置，明确跳过。公网来源设施初始化和真实业务导入结果分别记录，不能混作同一验收。
+## Action 当前记录读取
+
+内部 `POST /internal/execution/current-record` 仅在服务认证及原调用者浏览器会话均通过时处理。Data 根据权威生效 Action 解析读取声明，执行 `action.invoke`、`instance.read`、行条件和明确字段投影。协议见[调用定义](../../docs/模块/Function.md#action-读取当前记录)。

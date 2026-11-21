@@ -256,6 +256,56 @@ func TestRowQueryManagedSelfLinkIntegration(t *testing.T) {
 	if len(rows) != 1 || rows[0].Entities[4].InstanceID != ids[0] {
 		t.Fatalf("four-link self-query failed: %+v", rows)
 	}
+	t.Run("Action current record", func(t *testing.T) {
+		action := c.Definition{ID: c.NewID(), TenantID: f.tenant, Kind: c.KindAction, Action: &c.Callable{
+			SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python"}, TargetSchemaIDs: []string{definition.ID},
+			Input:      []c.Property{{ID: "anchor", Name: "记录", DataType: "uuid", Required: true}},
+			RecordRead: &c.ActionRecordRead{SchemaID: definition.ID, InstanceInputID: "anchor", FieldIDs: []string{property.ID}},
+		}}
+		f.mu.Lock()
+		f.current[action.ID] = c.CurrentDefinition{Definition: action, ETag: digest(action), Status: "active"}
+		f.mu.Unlock()
+		body := c.ActionRecordReadRequest{ActionID: action.ID, DefinitionDigest: digest(action), InstanceID: ids[0],
+			TenantID: f.tenant, SubjectID: "mapped-reader",
+			Session: c.SessionCheck{Token: "fixture-session", Method: "POST", CSRFToken: strings.Repeat("c", 64)}}
+		t.Cleanup(func() { f.authorize = nil })
+		read := func(want int) c.ActionRecordSnapshot {
+			t.Helper()
+			r := f.request("POST", "/internal/execution/current-record", body, true)
+			if r.Code != want {
+				t.Fatalf("current record read: %d want %d: %s", r.Code, want, r.Body)
+			}
+			var snapshot c.ActionRecordSnapshot
+			if want == 200 && json.Unmarshal(r.Body.Bytes(), &snapshot) != nil {
+				t.Fatal("invalid snapshot")
+			}
+			return snapshot
+		}
+		got := read(200)
+		if got.ETag == "" || len(got.Values) != 1 || string(got.Values[property.ID]) != string(raw("可见")) {
+			t.Fatalf("unexpected snapshot: %+v", got)
+		}
+		f.authorize = func(req c.AuthorizationRequest) c.Decision {
+			decision := f.decision
+			if req.Operation == "instance.read" {
+				decision.RowFilter = &c.Expression{Op: "eq", Field: property.ID, Value: raw("可见")}
+			}
+			return decision
+		}
+		body.InstanceID = ids[2]
+		read(404)
+		body.InstanceID = ids[0]
+		f.authorize = func(req c.AuthorizationRequest) c.Decision {
+			decision := f.decision
+			if req.Operation == "instance.read" {
+				decision.ReadFields = nil
+			}
+			return decision
+		}
+		read(403)
+		body.SubjectID = "other-user"
+		read(403)
+	})
 	t.Run("relation filter", func(t *testing.T) {
 		extra := f.request("POST", "/data/links/"+link.ID+"/instances", c.LinkWriteRequest{SourceID: ids[0], TargetID: ids[2]}, false)
 		if extra.Code != 201 {

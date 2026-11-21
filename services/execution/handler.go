@@ -226,6 +226,9 @@ func (h *handler) draftPlan(ctx context.Context, p c.Principal, id, etag string)
 }
 
 func (h *handler) resolvePlan(ctx context.Context, p c.Principal, out plan) (plan, error) {
+	if err := c.ValidateActionRecordRead(out.root); err != nil {
+		return out, problem(422, "invalid_record_read", err.Error())
+	}
 	if err := h.authorize(ctx, p, out.root.Kind, out.root.ID); err != nil {
 		return out, err
 	}
@@ -332,6 +335,9 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p c.Princ
 			out["maxTransactionItems"] = c.MaxBulkWriteItems
 		}
 	}
+	if _, ok := h.cfg.DataTransactions.(actionRecordClient); ok && available && dataTransactionsConfigured(h.cfg.DataTransactions) {
+		out["actionRecordRead"] = true
+	}
 	if !available {
 		out["reason"] = "运行器或执行存储尚未就绪"
 	}
@@ -400,6 +406,9 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		return err
 	}
 	rootCallable := definitionCallable(initial.root)
+	if rootCallable.RecordRead != nil && (mode != c.InvocationModeCurrent || platform.ValidAccessToken(platform.Bearer(r))) {
+		return problem(403, "record_read_unsupported", "当前记录读取仅支持浏览器调用当前定义")
+	}
 	if rootCallable.SideEffects == "dataWrite" {
 		if platform.ValidAccessToken(platform.Bearer(r)) {
 			return problem(403, "connection_scope_denied", "外部连接不允许调用带数据写入的定义")
@@ -424,6 +433,25 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	}
 	now := time.Now().UTC()
 	record := Record{TenantID: p.TenantID, SubjectID: p.Subject, RequestKey: key, RequestHash: hash, Root: initial.root, Implementation: initial.implementation, Input: namedInput, ImageID: imageID, DeadlineAt: now.Add(time.Duration(runtime.TimeoutSeconds)*time.Second + 90*time.Second), Invocation: c.Invocation{ID: c.NewID(), DefinitionID: initial.root.ID, DefinitionName: initial.root.Name, Kind: initial.root.Kind, Status: "running", CreatedAt: now.Format(time.RFC3339Nano), CodeDigest: sourceDigest(runtime.Source), Mode: mode, DraftETag: request.DraftETag}}
+	runnerInput := namedInput
+	if rootCallable.RecordRead != nil {
+		snapshot, err := h.actionRecordSnapshot(r.Context(), r, record)
+		if err != nil {
+			return err
+		}
+		record.RecordReadDigest = digest(snapshot)
+		runnerInput = make(map[string]json.RawMessage, len(namedInput)+1)
+		for key, value := range namedInput {
+			runnerInput[key] = value
+		}
+		runnerInput[c.ActionRecordInputName], err = json.Marshal(snapshot.Values)
+		if err != nil {
+			return err
+		}
+		if raw, _ := json.Marshal(runnerInput); len(raw) > MaxPayloadBytes {
+			return problem(422, "input_budget", "参数和当前记录超过执行输入预算")
+		}
+	}
 	// Recheck after setup and immediately before admission; no saved allow or
 	// user-supplied viaAction context can substitute for these current checks.
 	if err := h.checkRecord(r.Context(), r, p, record); err != nil {
@@ -457,7 +485,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		execution, runErr = h.cfg.Runner.(DataRunner).RunWithData(runCtx, runtime, namedInput, imageID)
 		output, operations = execution.Output, execution.Operations
 	} else {
-		output, runErr = h.cfg.Runner.Run(runCtx, runtime, namedInput, imageID)
+		output, runErr = h.cfg.Runner.Run(runCtx, runtime, runnerInput, imageID)
 	}
 	stop()
 	if runErr != nil {
@@ -544,6 +572,15 @@ func (h *handler) checkRecord(ctx context.Context, r *http.Request, p c.Principa
 			return problem(409, "definition_changed", "当前定义已改变，原事务结果须先核对；请勿更换请求标识重复执行写入")
 		}
 		return problem(409, "definition_changed", "当前定义已改变，无法按原执行上下文安全交付结果；请使用新请求标识重新运行")
+	}
+	if record.Root.Action != nil && record.Root.Action.RecordRead != nil {
+		snapshot, err := h.actionRecordSnapshot(ctx, r, record)
+		if err != nil {
+			return err
+		}
+		if record.RecordReadDigest == "" || digest(snapshot) != record.RecordReadDigest {
+			return problem(409, "record_changed", "当前记录已改变，请重新调用")
+		}
 	}
 	return nil
 }

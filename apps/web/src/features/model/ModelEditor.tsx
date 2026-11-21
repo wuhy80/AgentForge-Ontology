@@ -13,6 +13,7 @@ import { ActionTargetsEditor } from './ActionTargetsEditor'
 import { LinkStorageEditor, validateLinkStorage } from './LinkStorageEditor'
 import { CallableImplementationEditor } from './CallableImplementationEditor'
 import { CallableRunner } from './CallableRunner'
+import { ActionRecordReadEditor } from './ActionRecordReadEditor'
 import { CallableTestCasesEditor } from './CallableTestCasesEditor'
 import { activeEntries, cloneDefinition, kindDescriptions, kindLabels, MAX_SCHEMA_INDEXES, MAX_SCHEMA_PROPERTIES, newDefinition, validateDefinition } from './model-helpers'
 
@@ -75,7 +76,10 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const [groups, setGroups] = useState<Organization[]>([])
   const [groupsLoading, setGroupsLoading] = useState(false)
   const [groupError, setGroupError] = useState('')
-  const [busy, setBusy] = useState<'save' | 'preview' | 'publish' | 'reload' | ''>('')
+  const [busy, setBusy] = useState<'save' | 'preview' | 'publish' | 'reload' | 'lifecycle' | ''>('')
+  const [lifecycleAvailable, setLifecycleAvailable] = useState(false)
+  const [recordReadAvailable, setRecordReadAvailable] = useState(false)
+  const [confirmLifecycle, setConfirmLifecycle] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [conflict, setConflict] = useState(false)
@@ -89,9 +93,12 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const diagnosticEpoch = useRef(0)
   const tabId = useId()
   const dirty = JSON.stringify(definition) !== JSON.stringify(record?.definition ?? initialDefinition)
-  const locked = !!(record?.hasCurrent || record?.status === 'active')
+  const suspended = record?.status === 'disabled'
+  const locked = !!(record?.hasCurrent || record?.status === 'active' || suspended)
   const uncertain = !!publication && !['succeeded', 'rejected'].includes(publication.status)
-  const disabled = !!busy || uncertain
+  const disabled = !!busy || uncertain || suspended
+  const callable = definition.action ?? definition.function
+  const lifecycleAllowed = lifecycleAvailable && !!callable && (!callable.sideEffects || callable.sideEffects === 'none') && (record?.status === 'active' || suspended)
   const category = categories.find((item) => item.id === categoryId)
   const bindingReady = !!category && definition.categoryId === categoryId && (!!record || !groupsLoading && groups.some((group) => group.id === definition.groupId))
   const authorizedEntries = entries.filter((entry) => !definition.tenantId || entry.definition.tenantId === definition.tenantId)
@@ -118,11 +125,17 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
 
   useEffect(() => {
     setSchemaMigrations(undefined); setCapabilityError('')
-    if (!active || !locked || !definition.schema || definition.schema.storageBinding || typeof api.metadataCapabilities !== 'function') return
+    setLifecycleAvailable(false)
+    setRecordReadAvailable(false)
+    if (!active || typeof api.metadataCapabilities !== 'function') return
+    if (!callable && (!locked || !definition.schema || definition.schema.storageBinding)) return
     const controller = new AbortController()
     api.metadataCapabilities(controller.signal).then((capabilities) => {
-      if (!controller.signal.aborted) setSchemaMigrations(capabilities.schemaMigrations)
-    }).catch((cause: unknown) => { if (!controller.signal.aborted) setCapabilityError(cause instanceof Error ? cause.message : '迁移能力读取失败。') })
+      if (controller.signal.aborted) return
+      setSchemaMigrations(capabilities.schemaMigrations)
+      setLifecycleAvailable(capabilities.callableLifecycle === 'pure-only')
+      setRecordReadAvailable(capabilities.actionRecordRead === true)
+    }).catch((cause: unknown) => { if (!controller.signal.aborted && definition.schema) setCapabilityError(cause instanceof Error ? cause.message : '迁移能力读取失败。') })
     return () => controller.abort()
   }, [api, active, locked, definition.kind, definition.schema?.storageBinding])
 
@@ -271,10 +284,22 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
         if (!(cause instanceof ApiError) || cause.status !== 404) throw cause
         latest = await api.getCurrent(record.definition.id)
       }
-      latest.hasCurrent = locked || latest.status === 'active'
-      if (latest.hasCurrent) setCurrentRecord(latest.status === 'active' ? latest : await api.getCurrent(record.definition.id))
+      latest.hasCurrent = locked || latest.status === 'active' || latest.status === 'disabled'
+      if (latest.hasCurrent) setCurrentRecord(latest.status !== 'draft' ? latest : await api.getCurrent(record.definition.id))
       setRecord(latest); setDefinition(cloneDefinition(latest.definition)); setConflict(false); setPreview(undefined); setMessage('已载入服务器最新内容。')
       try { await onSaved(latest) } catch { /* Editor already has the authoritative record. */ }
+    } catch (cause) { report(cause) } finally { setBusy('') }
+  }
+
+  async function changeLifecycle() {
+    if (!record || !lifecycleAllowed || dirty || busy || uncertain) return
+    setBusy('lifecycle'); setError(''); setMessage(''); setConfirmLifecycle(false)
+    try {
+      const updated = await api.setCallableLifecycle(record.definition.id, suspended ? 'restore' : 'disable', record.etag)
+      updated.hasCurrent = true
+      setRecord(updated); setCurrentRecord(updated); setDefinition(cloneDefinition(updated.definition))
+      setMessage(suspended ? '定义已恢复。' : '定义已停用。')
+      try { await onSaved(updated) } catch { setMessage('状态已变更，目录刷新失败；可稍后刷新目录。') }
     } catch (cause) { report(cause) } finally { setBusy('') }
   }
 
@@ -285,8 +310,14 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   return <section className="model-editor-page" aria-label="模型编辑">
     <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" onClick={requestClose} disabled={!!busy}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑定义' : `新建${kindLabels[definition.kind]}`}</h1><p className="muted">{kindDescriptions[definition.kind]}</p></div></div>
     <div className="model-editor">
-      <div className="model-editor-meta"><span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}</div>
-      {locked && <div className="notice model-lock-notice">{allowAppend ? definition.schema?.storageBinding ? '此定义已生效。现有结构与来源绑定保持锁定，可新增允许空值的属性和索引，预览并发布后生效。' : '此定义已生效。可追加允许空值或有合法默认值的属性、新增普通或唯一索引；现有字段、索引与来源绑定保持锁定。发布前请核对计划，唯一索引须检查既有数据。' : definition.enum ? '此枚举已生效。可增加业务值、修改标签或停用值；已有编码保留，停用值仍可解释旧数据，不用于新写入。' : definition.function ? '此函数已生效。可更新执行语言、源码、入口和超时，保存并发布后生效；参数类型、约束和副作用保持锁定。' : definition.action ? definition.action.runtime ? '此动作已生效。可更新独立源码的执行语言、代码、入口和超时，保存并发布后生效；参数类型、约束、副作用和实现方式保持锁定。' : '此动作已生效。可修改展示信息和关联对象；参数、绑定实现和副作用保持锁定。' : definition.link && !linkStorageLocked ? '此关系定义已生效。可补充关系存储映射，保存并发布后启用关联查询；关系两端、基数及删除策略保持锁定。' : '此定义已生效。可修改名称、描述和显示标签；数据结构与绑定保持锁定。'}</div>}
+      <div className="model-editor-meta"><span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{suspended ? '已停用' : record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}
+        {lifecycleAllowed && !confirmLifecycle && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => setConfirmLifecycle(true)}>{suspended ? '恢复定义' : '停用定义'}</button>}
+      </div>
+      {confirmLifecycle && lifecycleAllowed && <div className="notice">
+        <p>{suspended ? '恢复后，此定义可按现有权限调用。' : '停用后，此定义将暂停调用，已保存的内容仍可查看。'}</p>
+        <div className="model-inline-actions"><button type="button" className="button primary" disabled={!!busy || dirty || uncertain} onClick={() => void changeLifecycle()}>{suspended ? '确认恢复' : '确认停用'}</button><button type="button" className="button subtle" onClick={() => setConfirmLifecycle(false)}>取消</button></div>
+      </div>}
+      {locked && !suspended && <div className="notice model-lock-notice">{allowAppend ? definition.schema?.storageBinding ? '此定义已生效。现有结构与来源绑定保持锁定，可新增允许空值的属性和索引，预览并发布后生效。' : '此定义已生效。可追加允许空值或有合法默认值的属性、新增普通或唯一索引；现有字段、索引与来源绑定保持锁定。发布前请核对计划，唯一索引须检查既有数据。' : definition.enum ? '此枚举已生效。可增加业务值、修改标签或停用值；已有编码保留，停用值仍可解释旧数据，不用于新写入。' : definition.function ? '此函数已生效。可更新执行语言、源码、入口和超时，保存并发布后生效；参数类型、约束和副作用保持锁定。' : definition.action ? definition.action.runtime ? '此动作已生效。可更新独立源码的执行语言、代码、入口和超时，保存并发布后生效；参数类型、约束、副作用和实现方式保持锁定。' : '此动作已生效。可修改展示信息和关联对象；参数、绑定实现和副作用保持锁定。' : definition.link && !linkStorageLocked ? '此关系定义已生效。可补充关系存储映射，保存并发布后启用关联查询；关系两端、基数及删除策略保持锁定。' : '此定义已生效。可修改名称、描述和显示标签；数据结构与绑定保持锁定。'}</div>}
       {baselineError && <div className="notice notice-error" role="alert">{baselineError} 读取当前结构后才能追加字段、索引或调整枚举值。</div>}
       {capabilityError && <div className="notice notice-error" role="alert">{capabilityError} 读取迁移能力后才能追加平台字段或索引。</div>}
       {uncertain && <div className="notice notice-error" role="status"><strong>发布结果待确认</strong><p>编辑已暂停。使用同一份已保存内容继续恢复；返回列表后可从模型页的待恢复记录重新进入。</p><span className="muted">阶段：{publication?.status === 'activation_pending' ? '已提交，等待激活' : publication?.status === 'prepare_failed' ? '准备未完成' : '等待确认'}</span></div>}
@@ -354,6 +385,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
             {definition.action && <ActionTargetsEditor selected={callable.targetSchemaIds ?? []} schemas={currentSchemas} categories={categories} onChange={(targetSchemaIds) => update({ action: { ...callable, targetSchemaIds: targetSchemaIds.length ? targetSchemaIds : undefined } })} />}
             <CallableImplementationEditor callable={callable} kind={key} locked={locked} disabled={disabled} functions={currentFunctions} schemas={currentSchemas} onChange={(value) => update({ [key]: value })} diagnostics={visibleDiagnostics} diagnosticFocus={diagnosticFocus} api={api} definitionId={definition.id} />
             <PropertyEditor title="输入参数" properties={callable.input ?? []} enums={currentEnums} locked={locked} onChange={(input) => update({ [key]: { ...callable, input } })} />
+            {definition.action && (recordReadAvailable || callable.recordRead) && <ActionRecordReadEditor action={callable} schemas={currentSchemas} locked={locked} onChange={(recordRead) => update({ action: { ...callable, recordRead } })} />}
             <PropertyEditor title="输出参数" properties={callable.output ?? []} enums={currentEnums} locked={locked} onChange={(output) => update({ [key]: { ...callable, output } })} />
             <CallableTestCasesEditor key={`${definition.tenantId}:${definition.id}`} callable={callable} disabled={disabled} onChange={(testCases) => update({ [key]: { ...callable, testCases: testCases.length ? testCases : undefined } })} />
           </>
@@ -363,15 +395,15 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
           update({ action: { ...definition.action!, sideEffects: implementation.sideEffects, dataWrite: structuredClone(implementation.dataWrite), input: structuredClone(implementation.input ?? []).map((property) => ({ ...property, id: '' })), output: structuredClone(implementation.output ?? []).map((property) => ({ ...property, id: '' })) } })
         }}>从实现函数复制参数声明</button><span className="muted">替换本动作的输入、输出、副作用及业务写入范围。</span></div>}
       </fieldset>
-      {(definition.action || definition.function) && <CallableRunner key={`draft:${definition.tenantId}:${definition.id}:${record?.etag}`} api={api} definitionId={definition.id} tenantId={definition.tenantId} mode="draft" draftEtag={record?.status === 'draft' ? record.etag : undefined} dataWrite={(definition.action ?? definition.function)?.sideEffects === 'dataWrite'} blocked={dirty || disabled || conflict} active={active && !uncertain} onDiagnostics={(result) => void receiveDraftDiagnostics(result)} onDiagnosticFocus={visibleDiagnostics?.length ? (item) => setDiagnosticFocus({ ...item }) : undefined} />}
-      {locked && (definition.action || definition.function) && <CallableRunner key={`${definition.tenantId}:${definition.id}:${currentLink?.etag ?? record?.etag}`} api={api} definitionId={definition.id} tenantId={definition.tenantId} active={active && !uncertain} />}
+      {!suspended && !definition.action?.recordRead && (definition.action || definition.function) && <CallableRunner key={`draft:${definition.tenantId}:${definition.id}:${record?.etag}`} api={api} definitionId={definition.id} tenantId={definition.tenantId} mode="draft" draftEtag={record?.status === 'draft' ? record.etag : undefined} dataWrite={(definition.action ?? definition.function)?.sideEffects === 'dataWrite'} blocked={dirty || disabled || conflict} active={active && !uncertain} onDiagnostics={(result) => void receiveDraftDiagnostics(result)} onDiagnosticFocus={visibleDiagnostics?.length ? (item) => setDiagnosticFocus({ ...item }) : undefined} />}
+      {locked && !suspended && (definition.action || definition.function) && <CallableRunner key={`${definition.tenantId}:${definition.id}:${currentLink?.etag ?? record?.etag}`} api={api} definitionId={definition.id} tenantId={definition.tenantId} active={active && !uncertain} />}
       {definition.schema && <section className="model-editor-panel" {...panelProps('data')}>
         <ModelDataPreview key={definition.id || 'unpublished'} api={api} schemaId={definition.id} active={active && tab === 'data' && !uncertain} hasCurrent={locked} draft={record?.status !== 'active' || dirty} />
       </section>}
       {tab !== 'data' && <>
       <DefinitionDependencies api={api} record={record} dirty={dirty} active={active && !uncertain} />
       {preview && <section className="model-preview"><div className="model-section-heading"><div><h3><FileCode2 size={17} />存储计划预览</h3><p className="muted">预览不会执行 SQL，也不会占用发布状态。</p></div></div>{preview.statements?.length ? <pre>{preview.statements.join('\n\n')}</pre> : <p className="model-inline-empty">此变更没有需要执行的存储语句。</p>}</section>}
-      <div className="model-editor-footer"><span className="muted">{dirty ? '先保存草稿，再预览或发布。' : record?.status === 'active' ? '当前内容已生效，可再次确认或恢复发布。' : '草稿已保存，发布后对业务生效。'}</span><div className="model-inline-actions"><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle className="model-spin" size={16} /> : <FileCode2 size={16} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle className="model-spin" size={16} /> : <Save size={16} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle className="model-spin" size={16} /> : uncertain ? <RefreshCw size={16} /> : <Send size={16} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}<ArrowRight size={15} /></button></div></div>
+      <div className="model-editor-footer"><span className="muted">{suspended ? '恢复定义后可继续编辑。' : dirty ? '先保存草稿，再预览或发布。' : record?.status === 'active' ? '当前内容已生效，可再次确认或恢复发布。' : '草稿已保存，发布后对业务生效。'}</span><div className="model-inline-actions"><button type="button" className="button" disabled={disabled || !record || dirty} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle className="model-spin" size={16} /> : <FileCode2 size={16} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={disabled || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle className="model-spin" size={16} /> : <Save size={16} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || suspended || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle className="model-spin" size={16} /> : uncertain ? <RefreshCw size={16} /> : <Send size={16} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}<ArrowRight size={15} /></button></div></div>
       </>}
     </div>
   </section>

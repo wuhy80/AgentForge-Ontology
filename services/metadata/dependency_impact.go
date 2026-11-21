@@ -64,6 +64,9 @@ func definitionReferenceReasons(d contracts.Definition) map[string][]string {
 		for _, item := range c.DataWrite {
 			add(item.SchemaID, "data-write")
 		}
+		if c.RecordRead != nil {
+			add(c.RecordRead.SchemaID, "record-read")
+		}
 		add(c.FunctionID, "implementation")
 	}
 	for id := range refs {
