@@ -509,6 +509,26 @@ func readMappedProjection(ctx context.Context, tables []*mappedTable, compiled m
 	return result, lastValue, nil
 }
 
+func validateCurrentMappedCatalog(ctx context.Context, current c.CurrentDefinition, tables []*mappedTable) error {
+	if err := validateMappedCatalog(tables); err != nil {
+		return err
+	}
+	if current.Definition.Schema.Mode == "schema_2_db" {
+		for _, table := range tables {
+			remaining, err := mappedTablePlan(ctx, current.Definition, tables, table)
+			if err != nil {
+				return err
+			}
+			if len(remaining) != 0 {
+				return problem(409, "source_drift", "当前来源结构缺少已发布的列或索引，请恢复结构后重试")
+			}
+		}
+	} else if err := validateReverseIndexes(current.Definition, tables); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (h *handler) queryMapped(ctx context.Context, principal c.Principal, current c.CurrentDefinition, decision c.Decision, query c.QuerySpec, entityID, operation string) (c.QueryResult, error) {
 	var result c.QueryResult
 	var compiled mappedCompiledQuery
@@ -522,20 +542,7 @@ func (h *handler) queryMapped(ctx context.Context, principal c.Principal, curren
 			return err
 		}
 		defer closeMappedTables(tables)
-		if err = validateMappedCatalog(tables); err != nil {
-			return err
-		}
-		if current.Definition.Schema.Mode == "schema_2_db" {
-			for _, table := range tables {
-				remaining, err := mappedTablePlan(ctx, current.Definition, tables, table)
-				if err != nil {
-					return err
-				}
-				if len(remaining) != 0 {
-					return problem(409, "source_drift", "当前来源结构缺少已发布的列或索引，请恢复结构后重试")
-				}
-			}
-		} else if err = validateReverseIndexes(current.Definition, tables); err != nil {
+		if err := validateCurrentMappedCatalog(ctx, current, tables); err != nil {
 			return err
 		}
 		if err := prepareMappedWriteProjection(ctx, tables, current); err != nil {

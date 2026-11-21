@@ -38,7 +38,7 @@ func (h *handler) storageImpact(r *http.Request) (c.StorageDefinitionImpact, err
 	if d.ID != id {
 		return out, problem(503, "metadata_unavailable", "当前定义与请求不一致")
 	}
-	if d.Kind == c.KindSchema && d.Schema != nil && d.Schema.Mode == "db_2_schema" && d.Schema.StorageLayout == "single" && d.Schema.StorageBinding != nil {
+	if d.Kind == c.KindSchema && d.Schema != nil && d.Schema.StorageLayout == "single" && d.Schema.StorageBinding != nil {
 		return h.mappedStorageImpact(ctx, tenant, current)
 	}
 	var table string
@@ -48,7 +48,7 @@ func (h *handler) storageImpact(r *http.Request) (c.StorageDefinitionImpact, err
 	case d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil && d.Link.StorageBinding.Mode == "managed":
 		table = linkTableName(id)
 	default:
-		return out, problem(422, "unsupported_storage_impact", "当前仅支持平台托管单表对象、托管关系和反向映射对象")
+		return out, problem(422, "unsupported_storage_impact", "当前仅支持平台托管单表对象、托管关系和外部映射单表对象")
 	}
 	tx, err := h.cfg.Engine.DB().BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
@@ -80,7 +80,7 @@ func (h *handler) mappedStorageImpact(ctx context.Context, tenant string, curren
 			return err
 		}
 		defer closeMappedTables(tables)
-		if err := validateMappedCatalog(tables); err != nil {
+		if err := validateCurrentMappedCatalog(ctx, current, tables); err != nil {
 			return err
 		}
 		primary := tables[0]

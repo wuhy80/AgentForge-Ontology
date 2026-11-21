@@ -364,8 +364,24 @@ func TestMappedForwardPublicationAndInterruptedMultiTableResume(t *testing.T) {
 				t.Fatalf("forward prepare failed: %d %s", response.Code, response.Body)
 			}
 			f.activate(d, operation)
+			impactPath := "/internal/definitions/" + d.ID + "/storage-impact"
+			checkImpact := func(status int, hasData bool) {
+				t.Helper()
+				w := f.request("GET", impactPath, nil, true)
+				if w.Code != status || (status == 200 && mutationDecode[c.StorageDefinitionImpact](t, w).HasData != hasData) {
+					t.Fatalf("forward storage impact: %d %s", w.Code, w.Body)
+				}
+				if status == 409 && !strings.Contains(w.Body.String(), "source_drift") {
+					t.Fatalf("expected source drift: %s", w.Body)
+				}
+			}
+			checkImpact(200, false)
+			f.exec(0, "ALTER TABLE "+f.qualified(0, primary)+" DROP COLUMN department")
+			checkImpact(409, false)
+			f.exec(0, "ALTER TABLE "+f.qualified(0, primary)+" ADD COLUMN department VARCHAR(255) NOT NULL")
 			id := c.NewID()
 			f.exec(0, "INSERT INTO "+f.qualified(0, primary)+" (tenant,id,code,department) VALUES (?,?,?,?)", f.tenant, id, "NEW-1", "D1")
+			checkImpact(200, true)
 			f.exec(1, "INSERT INTO "+f.qualified(1, secondary)+" (tenant,equipment_id,amount) VALUES (?,?,?)", f.tenant, id, "9007199254740993.0000")
 			query := c.QuerySpec{From: c.Source{SchemaID: d.ID}, Select: []string{d.Schema.Properties[0].ID, d.Schema.Properties[2].ID}, Page: c.Page{Limit: 10}}
 			if result := f.query(query, 200); len(result.Data) != 1 || string(result.Data[0].Values[d.Schema.Properties[2].ID]) != `"9007199254740993.0000"` {
