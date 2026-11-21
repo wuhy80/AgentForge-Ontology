@@ -33,3 +33,24 @@ func TestFilePropertyRequiresDedicatedWrite(t *testing.T) {
 		t.Fatal("accepted non-nullable file property")
 	}
 }
+
+func TestParsePropertyFileList(t *testing.T) {
+	id := c.NewID()
+	entry := c.FileSummary{ID: id, Name: "说明.txt", MediaType: "text/plain", Size: 5}
+	encode := func(files []c.FileSummary) json.RawMessage {
+		encoded, _ := json.Marshal(files)
+		return raw(string(encoded))
+	}
+	files, err := parsePropertyFileList(encode([]c.FileSummary{entry}))
+	if err != nil || len(files) != 1 || files[0] != entry {
+		t.Fatalf("file list round trip: %v %v", files, err)
+	}
+	if files, err := parsePropertyFileList(json.RawMessage("null")); err != nil || len(files) != 0 {
+		t.Fatalf("empty file field: %v %v", files, err)
+	}
+	for _, invalid := range []json.RawMessage{raw("{}"), encode([]c.FileSummary{entry, entry}), encode([]c.FileSummary{{Name: entry.Name}})} {
+		if _, err := parsePropertyFileList(invalid); err == nil {
+			t.Fatalf("accepted invalid file list: %s", invalid)
+		}
+	}
+}

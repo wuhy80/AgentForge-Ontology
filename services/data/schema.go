@@ -76,7 +76,7 @@ func validateSchema(d c.Definition) error {
 	}
 	for _, p := range s.Properties {
 		key := nameKey(p.Name)
-		if p.FileKind != "" && ((p.FileKind != c.FilePropertyAttachment && p.FileKind != c.FilePropertyImage) ||
+		if p.FileKind != "" && (!p.FileKind.Valid() ||
 			p.DataType != "longtext" || !p.Nullable || p.Required || p.ReadOnly || len(p.Default) != 0) {
 			return problem(422, "invalid_file_property", "文件属性须使用可空 longtext，且不能必填、只读或设置默认值")
 		}

@@ -12,12 +12,27 @@ import (
 type FilePropertyKind string
 
 const (
-	FilePropertyAttachment FilePropertyKind = "attachment"
-	FilePropertyImage      FilePropertyKind = "image"
+	FilePropertyAttachment     FilePropertyKind = "attachment"
+	FilePropertyImage          FilePropertyKind = "image"
+	FilePropertyAttachmentList FilePropertyKind = "attachment-list"
+	FilePropertyImageList      FilePropertyKind = "image-list"
 )
+
+func (kind FilePropertyKind) Multiple() bool {
+	return kind == FilePropertyAttachmentList || kind == FilePropertyImageList
+}
+
+func (kind FilePropertyKind) Image() bool {
+	return kind == FilePropertyImage || kind == FilePropertyImageList
+}
+
+func (kind FilePropertyKind) Valid() bool {
+	return kind == FilePropertyAttachment || kind == FilePropertyImage || kind.Multiple()
+}
 
 // FileSummary is the public metadata for a file bound to an instance field.
 type FileSummary struct {
+	ID        string `json:"id,omitempty"`
 	Name      string `json:"name"`
 	MediaType string `json:"mediaType"`
 	Size      int64  `json:"size"`
@@ -27,7 +42,7 @@ type FileSummary struct {
 // identifies the detected content type; image decoding and download disposition
 // remain the responsibility of the service that accepts or serves the file.
 func DescribePropertyFile(kind FilePropertyKind, name string, content []byte, maxBytes int64) (FileSummary, error) {
-	if kind != FilePropertyAttachment && kind != FilePropertyImage {
+	if !kind.Valid() {
 		return FileSummary{}, errors.New("文件属性类型无效")
 	}
 	if !utf8.ValidString(name) || len(name) > 255 || name != strings.TrimSpace(name) ||
@@ -40,7 +55,7 @@ func DescribePropertyFile(kind FilePropertyKind, name string, content []byte, ma
 		return FileSummary{}, errors.New("文件大小超出限制")
 	}
 	mediaType := http.DetectContentType(content)
-	if kind == FilePropertyImage {
+	if kind.Image() {
 		switch mediaType {
 		case "image/png", "image/jpeg", "image/gif", "image/webp":
 		default:
