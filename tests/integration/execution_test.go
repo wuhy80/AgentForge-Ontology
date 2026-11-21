@@ -389,6 +389,7 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 		t.Fatal("execution disclosed code or traceback")
 	}
 	verifyMultiLanguageHTTP(t, admin, other, peerClient, execServer.URL, metaServer.URL, publish, savePolicy, policy.Current.Rules, roleID)
+	verifyActionRecordReadHTTP(t, admin, other, execServer.URL, dataServer.URL, publish, savePolicy, policy.Current.Rules, roleID)
 	verifyDataWriteTransactionsHTTP(t, admin, other, execServer.URL, dataServer.URL, publish)
 	verifyTransactionRecoveryHTTP(t, admin, execConfig, roots, dataServer.URL, publish)
 	verifyEnumRuntimeHTTP(t, admin, other, execServer.URL, metaServer.URL, dataServer.URL, publish)
