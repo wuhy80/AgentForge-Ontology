@@ -15,7 +15,7 @@ GITHUB_REPO = 'wuhy80/AgentForge-Ontology'
 
 
 def deploy(run_id, host, port, directory, upload_only):
-    run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{GITHUB_REPO}/actions/runs/{run_id}'], text=True, timeout=30))
+    run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{GITHUB_REPO}/actions/runs/{run_id}'], text=True, encoding='utf-8', timeout=30))
     if run['status'] != 'completed' or run['conclusion'] != 'success' or run['path'] != '.github/workflows/build-linux.yml':
         raise SystemExit('仅接受本仓库 Linux 构建工作流的成功运行')
     revision = run['head_sha']

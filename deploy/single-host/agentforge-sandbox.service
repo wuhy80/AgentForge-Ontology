@@ -4,6 +4,7 @@ After=default.target
 
 [Service]
 Type=notify
+NotifyAccess=all
 Environment=HOME=/var/lib/ontology-sandbox XDG_RUNTIME_DIR=/run/ontology-sandbox
 ExecStart=/usr/bin/dockerd-rootless.sh --config-file=/etc/agentforge-sandbox/daemon.json
 Restart=on-failure
