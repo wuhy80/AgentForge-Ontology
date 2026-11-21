@@ -55,10 +55,37 @@ test('rows reject unsupported graphs, aggregates, names, shapes and injected bin
     (s) => { s.nodes[1].schemaId = '中文名'; }, (s) => { s.joins[0].linkId = '名称'; },
     (s) => { s.joins[0].on = 'condition'; },
   ]) { const s = structuredClone(scope); edit(s); assert.throws(() => dataset().rows(s), DataSetError); }
-  assert.throws(() => dataset().aggregate({ measures: [{ id: 'm0', op: 'count' }] }), DataSetError);
+  assert.throws(() => dataset().aggregate({ measures: [{ id: 'm0', op: 'sum', field: property.id }] }), DataSetError);
   for (const name of ['子.金额', field, `n4.${field}`]) assert.throws(() => dataset().select(name), DataSetError);
   transport.bind = async (query) => { query.rows.nodes[1].alias = 'replacement'; return { query, fields: [property] }; };
   await assert.rejects(dataset().bind(), (error) => error.code === 'invalid_binding');
+});
+
+test('LEFT relation counts bind and page with aggregate result grain', async () => {
+  const { dataset, transport, calls } = fixture();
+  const left = structuredClone(scope);
+  left.joins[0].type = 'left';
+  const count = { id: 'mDetails', name: '明细', dataType: 'int64', readOnly: true };
+  const group = { ...property, nullable: true };
+  transport.bind = async (query) => ({ query, fields: [group, count] });
+  transport.query = async (query) => {
+    calls.push(['query', structuredClone(query)]);
+    const next = !!query.page.cursor;
+    return { aggregateMode: true, data: [], fields: [group, count], hasMore: !next,
+      ...(!next ? { nextCursor: 'count-cursor' } : {}),
+      aggregateRows: [{ values: { [group.id]: next ? '1.000000' : null, [count.id]: next ? '9007199254740993' : '0' } }],
+    };
+  };
+  const bound = await dataset().rows(left).aggregate({
+    groupBy: [group.id], measures: [{ id: count.id, op: 'count', field: 'n1' }],
+  }).bind();
+  const first = await bound.execute();
+  assert.equal(first.result.aggregateRows[0].values[group.id], null);
+  assert.equal(first.result.aggregateRows[0].values[count.id], '0');
+  assert.equal(first.result.rows, undefined);
+  const second = await first.nextPage();
+  assert.equal(second.result.aggregateRows[0].values[count.id], '9007199254740993');
+  assert.deepEqual(calls[1][1], { ...bound.toQuery(), page: { limit: 1, cursor: 'count-cursor' } });
 });
 
 test('row result rejects wrong mode, leaked object shape, missing/changed origins and mismatched values', async () => {

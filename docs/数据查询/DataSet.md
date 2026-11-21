@@ -113,7 +113,7 @@ SDK通过 `rows(scope)` 或fromSpec接受稳定节点/Link计划，关联字段�
 | `{"id":"mDetails","op":"count","field":"n1"}` | 右侧出现次数，缺失右侧计为零 |
 | `{"id":"mObjects","op":"countDistinct","field":"n1"}` | 右侧去重对象数 |
 
-带节点的计数以该角色的实例主键为身份。授权、租户条件和用户筛选在计数前应用。结果沿用聚合响应，计量值为 int64 字符串，最多 20 项。可经公共查询、绑定和个人查询 JSON API 使用。OntologySQL、可视化和 TypeScript SDK 构造入口继续待开发。
+带节点的计数以该角色的实例主键为身份。授权、租户条件和用户筛选在计数前应用。结果沿用聚合响应，计量值为 int64 字符串，最多 20 项。可经公共查询、绑定和个人查询 JSON API 使用，TypeScript SDK 支持 `.rows(scope).aggregate(...)`。OntologySQL 和可视化入口继续待开发。
 
 ## 1. DataSet 的定位
 
