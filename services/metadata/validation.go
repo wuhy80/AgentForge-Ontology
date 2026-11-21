@@ -70,6 +70,13 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		if err := validateProperties(s.Properties, assignIDs); err != nil {
 			return err
 		}
+		for _, p := range s.Properties {
+			if p.FileKind != "" && (s.Mode != "schema_2_db" || s.StorageBinding != nil || p.Mapping != nil ||
+				(p.FileKind != contracts.FilePropertyAttachment && p.FileKind != contracts.FilePropertyImage) ||
+				p.DataType != "longtext" || !p.Nullable || p.Required || p.ReadOnly || len(p.Default) != 0) {
+				return problem(422, "invalid_file_property", "文件属性须为平台托管模型的可空 longtext 属性")
+			}
+		}
 		if err := canonicalStorageMappings(s); err != nil {
 			return err
 		}
@@ -187,6 +194,11 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 		}
 		if err := validateProperties(c.Output, assignIDs); err != nil {
 			return err
+		}
+		for _, p := range append(append([]contracts.Property(nil), c.Input...), c.Output...) {
+			if p.FileKind != "" {
+				return problem(422, "invalid_file_property", "调用参数不能声明文件属性")
+			}
 		}
 		if err := contracts.ValidateCallableTestCases(c); err != nil {
 			return problem(422, "invalid_test_cases", err.Error())

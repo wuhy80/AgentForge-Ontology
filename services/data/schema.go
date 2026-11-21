@@ -41,6 +41,11 @@ func validateSchema(d c.Definition) error {
 		return problem(422, "unsupported", "该定义不是可存储 Schema")
 	}
 	if d.Schema.StorageBinding != nil {
+		for _, p := range d.Schema.Properties {
+			if p.FileKind != "" {
+				return problem(422, "invalid_file_property", "文件属性只支持平台托管模型")
+			}
+		}
 		return validateMappedDefinition(d)
 	}
 	s := d.Schema
@@ -71,6 +76,10 @@ func validateSchema(d c.Definition) error {
 	}
 	for _, p := range s.Properties {
 		key := nameKey(p.Name)
+		if p.FileKind != "" && ((p.FileKind != c.FilePropertyAttachment && p.FileKind != c.FilePropertyImage) ||
+			p.DataType != "longtext" || !p.Nullable || p.Required || p.ReadOnly || len(p.Default) != 0) {
+			return problem(422, "invalid_file_property", "文件属性须使用可空 longtext，且不能必填、只读或设置默认值")
+		}
 		if key == "" || names[key] || utf8.RuneCountInString(p.Name) > 128 || strings.IndexFunc(p.Name, unicode.IsControl) >= 0 {
 			return problem(422, "invalid_schema", "属性 ID 和名称必须唯一且有效")
 		}

@@ -229,3 +229,8 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 ### 托管实例与关系存量检查
 
 `GET /internal/definitions/{id}/storage-impact` 要求内部服务凭据和 `X-Tenant-ID`，返回 `{"hasData":true|false}`。支持当前生效的平台托管单表 Schema 和托管 Link。读取权威定义后，在 Data 只读事务的同一快照内核对存储门禁及摘要，并按租户检查是否存在实例或关系事实。也支持正反向映射单表 Schema，沿用已登记来源及目录校验，只检查主表记录，按来源隔离方式应用精确租户条件。该分支在检查期间持有 Data 门禁锁。映射未就绪返回 409，暂不支持的存储返回 422。结果是检查时的快照，正式删除仍须先关闭准入，再复核存量和依赖。
+## 附件与图片字段
+
+平台托管对象的 `fileKind` 属性通过 `/data/schemas/{schemaId}/instances/{entityId}/files/{fieldId}` 管理。GET 下载，图片可用 `?preview=1` 内联预览。PUT 请求体为文件字节，`name` 查询参数传文件名，DELETE 清除。PUT 和 DELETE 须携带单个强 `If-Match`，成功返回 204 和新 ETag。网关沿用当前会话及 CSRF 校验，服务端重查授权。
+
+单文件上限 4 MiB。图片接受 PNG、JPEG、GIF，最大边长 4096 像素。普通实例写接口拒绝直接修改文件属性。先创建记录，再上传文件。安装或升级时显式应用 `011_data_property_files`。目前覆盖模块测试，真实 MySQL 文件往返与权限联合测试待验收。

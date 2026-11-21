@@ -121,6 +121,9 @@ func buildValues(s *c.Schema, input map[string]json.RawMessage, base map[string]
 			return nil, problem(422, "duplicate_field", "同一属性不能同时按名称和 ID 写入")
 		}
 		bound[p.ID] = true
+		if p.FileKind != "" {
+			return nil, problem(422, "file_property_endpoint_required", "文件属性须通过文件接口修改")
+		}
 		if p.ReadOnly || !fieldAllowed(allowed, p.ID) {
 			return nil, problem(403, "forbidden_field", "属性只读或不允许写入")
 		}

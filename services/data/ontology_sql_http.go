@@ -120,7 +120,7 @@ func (h *handler) executeOntologySQLHTTP(w http.ResponseWriter, r *http.Request)
 func safeQueryProperties(properties []c.Property) []c.Property {
 	out := make([]c.Property, 0, len(properties))
 	for _, p := range properties {
-		out = append(out, c.Property{ID: p.ID, Name: p.Name, DataType: p.DataType, Nullable: p.Nullable, Required: p.Required, ReadOnly: p.ReadOnly, Precision: p.Precision, Scale: p.Scale, EnumID: p.EnumID, EnumValues: p.EnumValues, EnumETag: p.EnumETag})
+		out = append(out, c.Property{ID: p.ID, Name: p.Name, DataType: p.DataType, FileKind: p.FileKind, Nullable: p.Nullable, Required: p.Required, ReadOnly: p.ReadOnly, Precision: p.Precision, Scale: p.Scale, EnumID: p.EnumID, EnumValues: p.EnumValues, EnumETag: p.EnumETag})
 	}
 	return out
 }
@@ -560,7 +560,7 @@ func queryContextModel(d c.Definition, decision c.Decision, category string) c.Q
 			continue
 		}
 		filterable := primarySQLProperty(d, property)
-		model.Fields = append(model.Fields, c.QueryContextField{ID: property.ID, Name: property.Name, DataType: property.DataType, Nullable: property.Nullable, Precision: property.Precision, Scale: property.Scale, Filterable: filterable, Sortable: filterable && property.DataType != "text" && property.DataType != "longtext", EnumID: property.EnumID, EnumValues: property.EnumValues, EnumETag: property.EnumETag})
+		model.Fields = append(model.Fields, c.QueryContextField{ID: property.ID, Name: property.Name, DataType: property.DataType, FileKind: property.FileKind, Nullable: property.Nullable, Precision: property.Precision, Scale: property.Scale, Filterable: filterable && property.FileKind == "", Sortable: filterable && property.DataType != "text" && property.DataType != "longtext", EnumID: property.EnumID, EnumValues: property.EnumValues, EnumETag: property.EnumETag})
 	}
 	return model
 }

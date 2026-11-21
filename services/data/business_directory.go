@@ -196,7 +196,7 @@ func (h *handler) formDefinitionHTTP(w http.ResponseWriter, r *http.Request) {
 		if !fieldAllowed(query.ReadFields, property.ID) {
 			continue
 		}
-		out.Definition.Schema.Properties = append(out.Definition.Schema.Properties, c.FormField{ID: property.ID, Name: property.Name, DataType: property.DataType,
+		out.Definition.Schema.Properties = append(out.Definition.Schema.Properties, c.FormField{ID: property.ID, Name: property.Name, DataType: property.DataType, FileKind: property.FileKind,
 			Required: property.Required, Nullable: property.Nullable, ReadOnly: property.ReadOnly || protectedFields[property.ID] || !operationAllowed || !fieldAllowed(write.WriteFields, property.ID), Precision: property.Precision, Scale: property.Scale, EnumID: property.EnumID, EnumValues: property.EnumValues, EnumETag: property.EnumETag})
 	}
 	for name, previous := range decisions {

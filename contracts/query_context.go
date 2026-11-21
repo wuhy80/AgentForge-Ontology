@@ -16,15 +16,16 @@ type QueryContextModel struct {
 }
 
 type QueryContextField struct {
-	ID         string      `json:"id"`
-	Name       string      `json:"name"`
-	DataType   string      `json:"dataType"`
-	Nullable   bool        `json:"nullable"`
-	Precision  int         `json:"precision,omitempty"`
-	Scale      int         `json:"scale,omitempty"`
-	EnumID     string      `json:"enumId,omitempty"`
-	EnumValues []EnumValue `json:"enumValues,omitempty"`
-	EnumETag   string      `json:"enumEtag,omitempty"`
-	Filterable bool        `json:"filterable"`
-	Sortable   bool        `json:"sortable"`
+	FileKind   FilePropertyKind `json:"fileKind,omitempty"`
+	ID         string           `json:"id"`
+	Name       string           `json:"name"`
+	DataType   string           `json:"dataType"`
+	Nullable   bool             `json:"nullable"`
+	Precision  int              `json:"precision,omitempty"`
+	Scale      int              `json:"scale,omitempty"`
+	EnumID     string           `json:"enumId,omitempty"`
+	EnumValues []EnumValue      `json:"enumValues,omitempty"`
+	EnumETag   string           `json:"enumEtag,omitempty"`
+	Filterable bool             `json:"filterable"`
+	Sortable   bool             `json:"sortable"`
 }
