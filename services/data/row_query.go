@@ -50,14 +50,16 @@ func (p *rowQueryPlan) close() {
 }
 
 func validateRowQueryShape(q c.QuerySpec) error {
-	if q.Aggregate != nil {
-		return problem(422, "aggregate_unsupported", "首批聚合不能混用关联行查询")
-	}
 	if q.Rows == nil || q.Via != nil || len(q.Rows.Joins) < 1 || len(q.Rows.Joins) > maxRowQueryJoins || len(q.Rows.Nodes) != len(q.Rows.Joins)+1 {
 		return problem(422, "invalid_row_query", "关联行查询需要1到4条INNER Link和对应对象节点，不能混用固定实例导航")
 	}
-	if q.Page.Limit < 1 || q.Page.Limit > 100 || len(q.Select) < 1 || len(q.Select) > 100 || len(q.OrderBy) > 1 {
+	if q.Page.Limit < 1 || q.Page.Limit > 100 || (q.Aggregate == nil && len(q.Select) < 1) || len(q.Select) > 100 || len(q.OrderBy) > 1 {
 		return problem(422, "budget_exceeded", "需显式投影、每页1..100行且至多一个排序字段")
+	}
+	if q.Aggregate != nil {
+		if _, err := rowCountFields(q); err != nil {
+			return err
+		}
 	}
 	aliases := map[string]bool{}
 	for i, node := range q.Rows.Nodes {
@@ -485,6 +487,28 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 			from += join + rowTableSQL(target) + " AS " + target.table.quoted(target.node.ID) + " ON " + on
 		}
 	}
+	if q.Aggregate != nil {
+		fields, err := rowCountFields(q)
+		if err != nil {
+			return compiled, err
+		}
+		columns = columns[:0]
+		for _, measure := range q.Aggregate.Measures {
+			expression := "COUNT(*)"
+			if measure.Field != "" {
+				key, _ := rowKey(*rowNodeByID(plan, measure.Field))
+				if measure.Op == "countDistinct" {
+					key = "DISTINCT " + key
+				}
+				expression = "COUNT(" + key + ")"
+			}
+			columns = append(columns, expression)
+		}
+		compiled.Fields = fields
+		compiled.SQL = sourceBind(plan.driver, "SELECT "+strings.Join(columns, ",")+" FROM "+from+" WHERE "+strings.Join(conditions, " AND "))
+		compiled.Args = args
+		return compiled, nil
+	}
 	orderParts := []string{}
 	descending := false
 	if len(q.OrderBy) > 0 {
@@ -785,7 +809,11 @@ func (h *handler) executeRowQuery(ctx context.Context, p c.Principal, q c.QueryS
 			runner = plan.nodes[0].table.db
 		}
 		var err error
-		result, last, err = readRowQuery(ctx, runner, plan, compiled)
+		if q.Aggregate != nil {
+			result, err = readRowCounts(ctx, runner, compiled)
+		} else {
+			result, last, err = readRowQuery(ctx, runner, plan, compiled)
+		}
 		if err != nil {
 			return err
 		}

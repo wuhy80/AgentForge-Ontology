@@ -84,7 +84,7 @@ func savedParameterFields(query *c.QuerySpec, schema *c.Schema, declarations []c
 		}
 	}
 	measureIDs := map[string]bool{}
-	if query.Aggregate != nil {
+	if query.Aggregate != nil && query.Rows == nil {
 		for _, id := range query.Aggregate.GroupBy {
 			if _, exists := fields[id]; !exists {
 				return nil, problem(422, "saved_query_binding_changed", "聚合分组必须引用仍存在的稳定属性ID")

@@ -319,6 +319,9 @@ func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySp
 	if err := validateRelationFilter(req); err != nil {
 		return c.QueryResult{}, err
 	}
+	if req.Rows != nil {
+		return h.executeRowQuery(ctx, p, req)
+	}
 	if req.Aggregate != nil {
 		current, err := h.resolve(ctx, p, req.From)
 		if err != nil {
@@ -329,9 +332,6 @@ func (h *handler) executeQuery(ctx context.Context, p c.Principal, req c.QuerySp
 			return c.QueryResult{}, err
 		}
 		return h.queryAggregate(ctx, p, current, decision, req)
-	}
-	if req.Rows != nil {
-		return h.executeRowQuery(ctx, p, req)
 	}
 	current, err := h.resolve(ctx, p, req.From)
 	if err != nil {

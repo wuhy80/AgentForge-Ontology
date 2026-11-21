@@ -182,6 +182,9 @@ func validateRowBinding(plan *rowQueryPlan, q c.QuerySpec) ([]c.Property, error)
 	if _, _, err := compiler.compile(q.Where, 0); err != nil {
 		return nil, err
 	}
+	if q.Aggregate != nil {
+		return rowCountFields(q)
+	}
 	for _, order := range q.OrderBy {
 		property, err := field(order.Field)
 		if err != nil {

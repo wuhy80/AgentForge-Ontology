@@ -149,6 +149,31 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 				t.Fatalf("left junction null condition: %+v", rows)
 			}
 			left.Where = nil
+			count := left
+			count.Select, count.OrderBy = nil, nil
+			count.Aggregate = &c.AggregateQuery{Measures: []c.AggregateMeasure{
+				{ID: "mRows", Op: "count"}, {ID: "mRoots", Op: "countDistinct", Field: "n0"},
+				{ID: "mDetails", Op: "count", Field: "n1"}, {ID: "mObjects", Op: "countDistinct", Field: "n1"},
+			}}
+			counts := f.query(count, 200)
+			bound := f.request("POST", "/data/query/bind", count, false)
+			if bound.Code != 200 {
+				t.Fatalf("relation count binding: %s", bound.Body)
+			}
+			if !counts.AggregateMode || counts.RowMode || len(counts.AggregateRows) != 1 || counts.HasMore {
+				t.Fatalf("unexpected count result: %+v", counts)
+			}
+			for id, want := range map[string]string{"mRows": "3", "mRoots": "2", "mDetails": "2", "mObjects": "2"} {
+				if string(counts.AggregateRows[0].Values[id]) != string(raw(want)) {
+					t.Fatalf("count %s: %+v", id, counts.AggregateRows)
+				}
+			}
+			count.Where = &c.Expression{Op: "isNull", Field: left.Select[1]}
+			counts = f.query(count, 200)
+			if len(counts.AggregateRows) != 1 || string(counts.AggregateRows[0].Values["mDetails"]) != `"0"` ||
+				string(counts.AggregateRows[0].Values["mRoots"]) != `"1"` {
+				t.Fatalf("null-extended count: %+v", counts)
+			}
 			for _, mode := range []string{"source", "target"} {
 				fk := link
 				fk.ID = c.NewID()
