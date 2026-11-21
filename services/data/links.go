@@ -150,17 +150,21 @@ func externalLinkPredicate(plan *linkPlan, direction, anchor string, originDecis
 	if err != nil {
 		return sqlPredicate{}, err
 	}
-	keyArg, err := mappedKeyArgument(origin, anchor)
-	if err != nil {
-		return sqlPredicate{}, err
-	}
 	originKey, _ := origin.column(origin.keyColumn)
 	targetKey, _ := target.column(target.keyColumn)
 	originID := linkExactColumn(origin, linkAliasColumn(origin, "af_link_origin", origin.keyColumn), originKey)
 	targetID := linkExactColumn(target, target.qualified()+"."+target.quoted(target.keyColumn), targetKey)
-	_, mark := mappedKeySQL(origin)
-	conditions := []string{originID + "=" + mark, "(" + condition + ")"}
-	args := append([]any{keyArg}, authArgs...)
+	conditions := []string{"(" + condition + ")"}
+	args := authArgs
+	if anchor != "" {
+		keyArg, err := mappedKeyArgument(origin, anchor)
+		if err != nil {
+			return sqlPredicate{}, err
+		}
+		_, mark := mappedKeySQL(origin)
+		conditions = append(conditions, originID+"="+mark)
+		args = append(args, keyArg)
+	}
 	if origin.tenantColumn != "" {
 		conditions = append(conditions, linkExactColumn(origin, linkAliasColumn(origin, "af_link_origin", origin.tenantColumn), c.SourceColumn{DataType: "string"})+"="+sourceExactStringParameter(origin))
 		args = append(args, plan.definition.TenantID)

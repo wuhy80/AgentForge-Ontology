@@ -376,6 +376,7 @@ export interface MetadataCapabilities {
 }
 export interface DataCapabilities {
   relationFilter?: 'managed-one-hop'
+  mappedRelationFilter?: boolean
   backend: string
   schemaModes: string[]
   layouts: string[]

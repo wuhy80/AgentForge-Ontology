@@ -125,15 +125,13 @@ func (h *handler) compileBoundQuery(ctx context.Context, p c.Principal, q c.Quer
 		}
 		q, fields = compiled.Bound, compiled.Fields
 	} else {
-		var predicate *sqlPredicate
 		if q.Relation != nil {
 			out.relation, err = h.planRelationFilter(ctx, p, current, q.Relation)
 			if err != nil {
 				return out, err
 			}
-			predicate = &out.relation.predicate
 		}
-		compiled, err := compileQueryPredicate(current.Definition, current.ETag, p, dec, q, h.cfg.CursorSecret, predicate)
+		compiled, err := compileQueryPredicate(current.Definition, current.ETag, p, dec, q, h.cfg.CursorSecret, nil)
 		if err != nil {
 			return out, err
 		}

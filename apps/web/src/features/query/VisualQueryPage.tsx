@@ -116,7 +116,7 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
     api.dataCapabilities(controller.signal).then((value) => {
       if (!controller.signal.aborted) {
         setAggregateAvailable(!!value.aggregates);
-        setRelationAvailable(value.relationFilter === 'managed-one-hop');
+        setRelationAvailable(binding ? value.mappedRelationFilter === true : value.relationFilter === 'managed-one-hop');
       }
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setAggregateCapabilityError(errorMessage(cause)); });
     return () => controller.abort();
@@ -271,7 +271,7 @@ function QueryWorkspace({ api, schema, categories, createIntents, initialEditor,
         {removePending && <div className="notice" role="status"><p>{association?.rows.joins.length === 1 ? '移除后返回单模型对象列表，同一对象只出现一次。现有字段和条件将保留。' : '移除最后一个关联后，仅返回剩余路径的匹配行。现有字段和条件将保留。'}</p><button type="button" className="button" onClick={() => removeAssociation(true)}>确认移除关联</button><button type="button" className="button subtle" onClick={() => setRemovePending(false)}>保留关联</button></div>}
         <section className="query-filter-section"><div className="query-step-title"><span>01</span><h3>筛选条件</h3></div>
           {filterProperties.length > 0 ? <GroupEditor group={editor.filter} properties={filterProperties} onChange={(filter) => change({ filter })} /> : <p className="muted">主表尚未映射可筛选属性。</p>}
-          {!binding && !association && !editor.aggregate && (relationAvailable || editor.relation) && <RelationFilterEditor api={api} schemaId={schema.definition.id} value={editor.relation} onChange={(relation) => change({ relation })} />}
+          {!association && !editor.aggregate && (relationAvailable || editor.relation) && <RelationFilterEditor api={api} schemaId={schema.definition.id} mapped={!!binding} value={editor.relation} onChange={(relation) => change({ relation })} />}
           {readOnly && <p className="muted">{association ? '筛选作用于全部匹配关系行；字段名称包含模型角色。' : '筛选和排序使用主表属性；其他来源的属性可选择返回。'}</p>}
         </section>
         <div className="query-settings-grid">{editor.aggregate ? <AggregateEditor aggregate={editor.aggregate} properties={properties} onChange={(aggregate) => change({ aggregate, ...(editor.sort && !aggregateFields(aggregate, properties).some((field) => field.id === editor.sort) ? { sort: '' } : {}) })} /> : <section><div className="query-step-title"><span>02</span><h3>返回字段</h3><small className="muted">已选 {selectedCount} 项</small></div>

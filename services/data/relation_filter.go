@@ -30,7 +30,6 @@ type relationFilterPlan struct {
 	neighborDecision     c.Decision
 	linkDecision         c.Decision
 	discovery            [3]c.Decision
-	predicate            sqlPredicate
 }
 
 func (h *handler) planRelationFilter(ctx context.Context, p c.Principal, root c.CurrentDefinition, f *c.RelationFilter) (*relationFilterPlan, error) {
@@ -46,10 +45,7 @@ func (h *handler) planRelationFilter(ctx context.Context, p c.Principal, root c.
 	if err != nil {
 		return nil, err
 	}
-	if link.Definition.Link.StorageBinding.Mode != "managed" {
-		return nil, problem(422, "unsupported_relation_filter", "关联筛选当前只支持平台托管 Link")
-	}
-	plan, err := h.planLink(ctx, link.Definition)
+	plan, err := h.logicalLinkPlan(ctx, link.Definition)
 	if err != nil {
 		return nil, err
 	}
@@ -75,20 +71,11 @@ func (h *handler) planRelationFilter(ctx context.Context, p c.Principal, root c.
 	if err != nil {
 		return nil, err
 	}
-	// The existing predicate correlates its returned endpoint with the root.
-	direction := "in"
-	if f.Direction == "in" {
-		direction = "out"
-	}
-	predicate, err := managedLinkPredicate(plan, direction, "", neighborDecision)
-	if err != nil {
+	if err := validateOntologySQLDecision(neighbor.Definition, neighborDecision); err != nil {
 		return nil, err
 	}
-	if f.Operator == "not_exists" {
-		predicate.SQL = "NOT " + predicate.SQL
-	}
 	return &relationFilterPlan{link: link, neighbor: neighbor, root: root, linkPlan: plan,
-		neighborDecision: neighborDecision, linkDecision: linkDecision, discovery: discovery, predicate: predicate}, nil
+		neighborDecision: neighborDecision, linkDecision: linkDecision, discovery: discovery}, nil
 }
 
 func (h *handler) recheckRelationFilter(ctx context.Context, p c.Principal, plan *relationFilterPlan) error {
@@ -124,33 +111,76 @@ func (h *handler) queryRelation(ctx context.Context, p c.Principal, root c.Curre
 	if err != nil {
 		return result, err
 	}
+	physical, err := h.openLinkPlan(ctx, plan.linkPlan)
+	if err != nil {
+		return result, err
+	}
+	defer physical.close()
+	// Link traversal correlates its returned endpoint with the root.
+	direction := "in"
+	if q.Relation.Direction == "in" {
+		direction = "out"
+	}
+	mapped := root.Definition.Schema.StorageBinding != nil
+	var predicate sqlPredicate
+	if mapped {
+		predicate, err = externalLinkPredicate(physical, direction, "", plan.neighborDecision)
+	} else {
+		predicate, err = managedLinkPredicate(physical, direction, "", plan.neighborDecision)
+	}
+	if err != nil {
+		return result, err
+	}
+	if q.Relation.Operator == "not_exists" {
+		predicate.SQL = "NOT " + predicate.SQL
+	}
 	bound := linkBoundDecision(decision, plan.neighborDecision, plan.linkDecision, plan.linkPlan, plan.link)
 	bound.State = digest(struct {
 		State     string
 		Discovery [3]c.Decision
 	}{bound.State, plan.discovery})
-	compiled, err := compileQueryPredicate(root.Definition, root.ETag, p, bound, q, h.cfg.CursorSecret, &plan.predicate)
-	if err != nil {
-		return result, err
-	}
 	var lastValue json.RawMessage
+	var fingerprint string
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
 		if err := h.linkGates(ctx, tx, p, plan.linkPlan, &plan.link); err != nil {
 			return err
 		}
-		var err error
-		result, lastValue, err = readLocalProjection(ctx, tx, compiled, root.Definition.ID)
-		if err != nil {
-			return err
+		if mapped {
+			tables := physical.sourceTables
+			if q.Relation.Direction == "in" {
+				tables = physical.targetTables
+			}
+			if err := prepareMappedWriteProjection(ctx, tables, root); err != nil {
+				return err
+			}
+			compiled, err := compileMappedQueryPredicate(root.Definition, tables, root.ETag, p, bound, q, h.cfg.CursorSecret, "", &predicate)
+			if err != nil {
+				return err
+			}
+			fingerprint = compiled.Fingerprint
+			result, lastValue, err = readMappedProjection(ctx, tables, compiled, root.Definition.ID)
+			if err != nil {
+				return err
+			}
+		} else {
+			compiled, err := compileQueryPredicate(root.Definition, root.ETag, p, bound, q, h.cfg.CursorSecret, &predicate)
+			if err != nil {
+				return err
+			}
+			fingerprint = compiled.Fingerprint
+			result, lastValue, err = readLocalProjection(ctx, tx, compiled, root.Definition.ID)
+			if err != nil {
+				return err
+			}
 		}
-		if err = h.recheck(ctx, p, "instance.query", root.Definition.ID, decision); err != nil {
+		if err := h.recheck(ctx, p, "instance.query", root.Definition.ID, decision); err != nil {
 			return err
 		}
 		return h.recheckRelationFilter(ctx, p, plan)
 	})
 	if err == nil && result.HasMore && len(result.Data) > 0 {
 		result.NextCursor, err = signCursor(h.cfg.CursorSecret, pageCursor{
-			Fingerprint: compiled.Fingerprint, TenantID: p.TenantID, Subject: p.Subject,
+			Fingerprint: fingerprint, TenantID: p.TenantID, Subject: p.Subject,
 			SchemaID: root.Definition.ID, Digest: bareETag(root.ETag), Authorization: digest(bound),
 			LastID: result.Data[len(result.Data)-1].ID, LastValue: lastValue, Expires: time.Now().Add(time.Hour).Unix(),
 		})

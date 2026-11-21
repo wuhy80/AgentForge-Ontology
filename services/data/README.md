@@ -156,7 +156,7 @@ go run ./cmd/server -initialize-mapped-writes -tenant <租户ID> -schema <Schema
 
 `GET /data/capabilities` 新增 `rowQueries=true/maxRowJoins=4/queryPathPlanning=true`；`maxLinkHops=1` 表示既有固定实例via接口，并非INNER关联行上限。路径规划仅查授权元数据，使用候选不跳过运行时物理和权限校验。
 
-`relationFilter=managed-one-hop` 表示查询、绑定和个人保存查询 API 支持[单跳关联存在性筛选](../../docs/数据查询/DataSet.md#单跳关联存在性筛选2026-11-20)。
+`relationFilter=managed-one-hop` 和 `mappedRelationFilter=true` 分别表示托管与同源映射关系支持[单跳关联存在性筛选](../../docs/数据查询/DataSet.md#单跳关联存在性筛选2026-11-20)。绑定和保存验证逻辑计划，执行时检查实际来源及映射目录。
 
 ## 正确性与限制
 

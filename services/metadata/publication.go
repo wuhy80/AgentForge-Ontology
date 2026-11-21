@@ -382,7 +382,7 @@ func (h *handler) commitPublication(ctx context.Context, pub *publicationRow) er
 		}
 		raw, _ := json.Marshal(pub.candidate)
 		_, key, _ := normalizeName(pub.candidate.Name)
-		if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET current_json=?,current_digest=?,draft_json=NULL,draft_digest='',status='active',name=?,name_key=? WHERE tenant_id=? AND id=?", string(raw), pub.digest, pub.candidate.Name, []byte(key), pub.p.TenantID, pub.p.DefinitionID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET current_json=?,current_digest=?,draft_json=NULL,draft_digest='',status='active',name=?,name_key=?,group_id=? WHERE tenant_id=? AND id=?", string(raw), pub.digest, pub.candidate.Name, []byte(key), pub.candidate.GroupID, pub.p.TenantID, pub.p.DefinitionID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM af_meta_dependencies WHERE tenant_id=? AND source_id=?", pub.p.TenantID, pub.p.DefinitionID); err != nil {

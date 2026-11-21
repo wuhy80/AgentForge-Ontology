@@ -63,8 +63,10 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /metadata/callables/{id}", h.wrap(h.describeCallable))
 	mux.HandleFunc("POST /metadata/categories", h.wrap(h.createCategory))
 	mux.HandleFunc("GET /metadata/categories", h.wrap(h.listCategories))
+	mux.HandleFunc("PUT /metadata/categories/{id}", h.wrap(h.renameOrganization("category")))
 	mux.HandleFunc("POST /metadata/groups", h.wrap(h.createGroup))
 	mux.HandleFunc("GET /metadata/groups", h.wrap(h.listGroups))
+	mux.HandleFunc("PUT /metadata/groups/{id}", h.wrap(h.renameOrganization("group")))
 	mux.HandleFunc("POST /metadata/definitions", h.wrap(h.createDefinition))
 	mux.HandleFunc("GET /metadata/definitions", h.wrap(h.listDefinitions))
 	mux.HandleFunc("GET /metadata/resolve", h.wrap(h.resolve))
@@ -471,8 +473,8 @@ func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, p contracts.
 		if err := matchHeader(r, expected); err != nil {
 			return err
 		}
-		if row.d.Kind != d.Kind || row.d.CategoryID != d.CategoryID || row.d.GroupID != d.GroupID {
-			return problem(422, "unsupported_change", "首批不支持定义改变类型或组织归属")
+		if row.d.Kind != d.Kind || row.d.CategoryID != d.CategoryID {
+			return problem(422, "unsupported_change", "定义不能改变类型或跨分类移动")
 		}
 		if err := validateOrg(r.Context(), tx, d); err != nil {
 			return err

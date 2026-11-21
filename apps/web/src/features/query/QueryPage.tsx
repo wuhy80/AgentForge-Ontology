@@ -5,7 +5,7 @@ import type { DefinitionRecord, Organization, SavedQueryInput } from '../../lib/
 import { compileQuery, errorMessage } from './query';
 import { compileRowQuery, queryToSQLDraft } from './ontologySql';
 import { assertVisualBindings, loadRowContext } from './visualRows';
-import { isManagedRelation } from './RelationFilterEditor';
+import { supportsRelationFilter } from './RelationFilterEditor';
 import { VisualQueryPage } from './VisualQueryPage';
 import type { VisualDraft } from './VisualQueryPage';
 import { OntologySQLWorkspace } from './OntologySQLWorkspace';
@@ -98,7 +98,7 @@ function QueryModes({ initialDraft, remember, ...props }: Props & { initialDraft
             const links = await props.api.schemaLinks(model.schemaId, controller.signal);
             if (!active.current || request !== modeRequest.current) return;
             if (visualDraft.current !== current) throw new Error('查询配置已改变，请重新转换');
-            relationEntry = links.find((link) => isManagedRelation(link) && link.linkRef.id === relation.linkId && link.direction === relation.direction)?.name;
+            relationEntry = links.find((link) => supportsRelationFilter(link, !!current.schema.definition.schema?.storageBinding) && link.linkRef.id === relation.linkId && link.direction === relation.direction)?.name;
           }
           const converted = queryToSQLDraft(query, model, rowContext, relationEntry);
           if (query.rows || query.relation) {

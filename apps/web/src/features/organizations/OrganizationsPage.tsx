@@ -16,6 +16,7 @@ const forbidden = (cause: unknown) => cause instanceof ApiError && (cause.status
 
 export function OrganizationsPage({ api, categories, categoryId, onSelectCategory, onRefresh }: Props) {
   const [name, setName] = useState('')
+  const [renaming, setRenaming] = useState<Organization>()
   const [busy, setBusy] = useState<'create' | 'refresh'>()
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -27,7 +28,7 @@ export function OrganizationsPage({ api, categories, categoryId, onSelectCategor
   scope.current.api = api
   useEffect(() => {
     scope.current.mounted = true
-    setName(''); setBusy(undefined); setError(''); setMessage(''); setUnavailable(false)
+    setName(''); setRenaming(undefined); setBusy(undefined); setError(''); setMessage(''); setUnavailable(false)
     operation.current = undefined
     return () => { scope.current.mounted = false }
   }, [api])
@@ -43,22 +44,22 @@ export function OrganizationsPage({ api, categories, categoryId, onSelectCategor
     const active = () => scope.current.mounted && scope.current.api === api && operation.current === job
     setBusy(kind); setError(''); setMessage('')
     try {
-      const category = kind === 'create' ? await api.createCategory(trimmed) : undefined
+      const category = kind === 'create' ? (renaming ? await api.renameOrganization('categories', renaming, trimmed) : await api.createCategory(trimmed)) : undefined
       if (!active()) return
-      if (category) { setName(''); setMessage(`分类“${category.name}”已创建。`) }
+      if (category) { setName(''); setRenaming(undefined); setMessage(`分类“${category.name}”已${renaming ? '重命名' : '创建'}。`) }
       try {
         await onRefresh()
       } catch (cause) {
         if (active()) {
           setUnavailable(true)
-          setError(category ? `分类已创建，但目录刷新失败：${messageOf(cause)}请刷新目录后继续。` : messageOf(cause))
-          if (category) onSelectCategory(category.id)
+          setError(category ? `分类已${renaming ? '重命名' : '创建'}，但目录刷新失败：${messageOf(cause)}请刷新目录后继续。` : messageOf(cause))
+          if (category && !renaming) onSelectCategory(category.id)
         }
         return
       }
       if (!active()) return
       setUnavailable(false); setRevision((value) => value + 1)
-      if (category) onSelectCategory(category.id)
+      if (category && !renaming) onSelectCategory(category.id)
     } catch (cause) {
       if (!active()) return
       setError(messageOf(cause))
@@ -77,7 +78,8 @@ export function OrganizationsPage({ api, categories, categoryId, onSelectCategor
         <div className="organizations-section-heading"><div><Folder size={19} /><h2 id="organizations-categories-title">业务分类</h2></div><span className="badge">{categories.length} 个</span></div>
         <p className="organizations-section-description muted">选择分类后，工作台会同步切换到该分类。</p>
         {categories.length ? <ul className="organizations-category-list">{categories.map((category) => <li key={category.id}><button type="button" aria-pressed={category.id === categoryId} disabled={!!busy} className={category.id === categoryId ? 'is-selected' : ''} onClick={() => onSelectCategory(category.id)}><span className="organizations-category-icon"><Folder size={18} /></span><span className="organizations-category-name">{category.name}</span>{category.id === categoryId ? <span className="organizations-current-label">当前分类</span> : <ChevronRight size={16} />}</button></li>)}</ul> : <div className="organizations-inline-empty"><FolderPlus size={27} /><strong>还没有业务分类</strong><p className="muted">先创建分类，再添加分组与业务定义。</p></div>}
-        <form className="organizations-create" onSubmit={(event) => { void run('create', event) }}><label>新分类名称<input className="field" value={name} maxLength={128} disabled={!!busy} onChange={(event) => setName(event.target.value)} placeholder="例如：生产管理" /></label><button type="submit" className="button primary" disabled={!!busy || !name.trim()}>{busy === 'create' ? <LoaderCircle size={16} className="organizations-spin" /> : <Plus size={16} />}创建分类</button></form>
+        {current && !renaming && <button type="button" className="button subtle" disabled={!!busy} onClick={() => { setRenaming(current); setName(current.name) }}>重命名当前分类</button>}
+        <form className="organizations-create" onSubmit={(event) => { void run('create', event) }}><label>{renaming ? `分类“${renaming.name}”的新名称` : '新分类名称'}<input className="field" value={name} maxLength={128} disabled={!!busy} onChange={(event) => setName(event.target.value)} placeholder="例如：生产管理" /></label><button type="submit" className="button primary" disabled={!!busy || !name.trim()}>{busy === 'create' ? <LoaderCircle size={16} className="organizations-spin" /> : <Plus size={16} />}{renaming ? '保存分类名称' : '创建分类'}</button>{renaming && <button type="button" className="button subtle" disabled={!!busy} onClick={() => { setRenaming(undefined); setName('') }}>取消重命名</button>}</form>
       </section>
       {current ? <GroupsForCategory key={current.id} api={api} category={current} revision={revision} disabled={!!busy} onForbidden={denied} /> : <section className="card organizations-no-category empty-state"><Layers2 size={32} /><h2>请选择一个分类</h2><p className="muted">分类下的分组将显示在这里。</p></section>}
     </div>}
@@ -89,6 +91,7 @@ function GroupsForCategory({ api, category, revision, disabled, onForbidden }: {
 }) {
   const [state, setState] = useState<{ api: ApiClient; groups: Organization[]; loading: boolean; error: string }>({ api, groups: [], loading: true, error: '' })
   const [name, setName] = useState('')
+  const [renaming, setRenaming] = useState<Organization>()
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [reload, setReload] = useState(0)
@@ -101,7 +104,7 @@ function GroupsForCategory({ api, category, revision, disabled, onForbidden }: {
     return () => { scope.current.mounted = false }
   }, [])
   useEffect(() => {
-    operation.current = undefined; setBusy(false); setName(''); setMessage('')
+    operation.current = undefined; setBusy(false); setName(''); setRenaming(undefined); setMessage('')
   }, [api])
   useEffect(() => {
     const controller = new AbortController(); request.current = controller
@@ -127,11 +130,11 @@ function GroupsForCategory({ api, category, revision, disabled, onForbidden }: {
     setBusy(true); setMessage('')
     const active = () => scope.current.mounted && scope.current.api === api && operation.current === job
     try {
-      const group = await api.createGroup(category.id, trimmed)
+      const group = renaming ? await api.renameOrganization('groups', renaming, trimmed) : await api.createGroup(category.id, trimmed)
       if (!active()) return
       request.current?.abort()
-      setName(''); setState({ api, groups: [], loading: true, error: '' }); setReload((value) => value + 1)
-      setMessage(`分组“${group.name}”已创建。`)
+      setName(''); setRenaming(undefined); setState({ api, groups: [], loading: true, error: '' }); setReload((value) => value + 1)
+      setMessage(`分组“${group.name}”已${renaming ? '重命名' : '创建'}。`)
     } catch (cause) {
       if (!active()) return
       request.current?.abort()
@@ -146,7 +149,7 @@ function GroupsForCategory({ api, category, revision, disabled, onForbidden }: {
     <p className="organizations-section-description muted">分组用于归置业务定义，分类内五类定义共享业务名称。</p>
     {visible.error && <div className="notice notice-error organizations-notice" role="alert">{visible.error}<button type="button" className="button subtle" disabled={busy || disabled} onClick={() => setReload((value) => value + 1)}>重新读取分组</button></div>}
     {message && <div className="notice notice-success organizations-notice" role="status"><Check size={16} />{message}</div>}
-    {visible.loading ? <div className="organizations-inline-empty" role="status"><LoaderCircle size={26} className="organizations-spin" /><p className="muted">正在读取当前分类的分组…</p></div> : visible.error ? <div className="organizations-inline-empty"><Layers2 size={27} /><p className="muted">当前分组未能读取，请重新读取后继续。</p></div> : visible.groups.length ? <ul className="organizations-group-list">{visible.groups.map((group) => <li key={group.id}><span className="organizations-group-icon"><Layers2 size={19} /></span><div><strong>{group.name}</strong><span className="muted">{category.name}</span></div></li>)}</ul> : <div className="organizations-inline-empty"><Layers2 size={28} /><strong>当前分类还没有分组</strong><p className="muted">创建分组后，即可在其中维护业务定义。</p></div>}
-    <form className="organizations-create" onSubmit={(event) => { void create(event) }}><label>新分组名称<input className="field" value={name} maxLength={128} disabled={busy || disabled} onChange={(event) => setName(event.target.value)} placeholder="例如：基础资料" /></label><button type="submit" className="button primary" disabled={busy || disabled || !name.trim()}>{busy ? <LoaderCircle size={16} className="organizations-spin" /> : <Plus size={16} />}创建分组</button></form>
+    {visible.loading ? <div className="organizations-inline-empty" role="status"><LoaderCircle size={26} className="organizations-spin" /><p className="muted">正在读取当前分类的分组…</p></div> : visible.error ? <div className="organizations-inline-empty"><Layers2 size={27} /><p className="muted">当前分组未能读取，请重新读取后继续。</p></div> : visible.groups.length ? <ul className="organizations-group-list">{visible.groups.map((group) => <li key={group.id}><span className="organizations-group-icon"><Layers2 size={19} /></span><div><strong>{group.name}</strong><span className="muted">{category.name}</span></div><button type="button" className="button subtle" disabled={busy || disabled} aria-label={`重命名分组 ${group.name}`} onClick={() => { setRenaming(group); setName(group.name) }}>重命名</button></li>)}</ul> : <div className="organizations-inline-empty"><Layers2 size={28} /><strong>当前分类还没有分组</strong><p className="muted">创建分组后，即可在其中维护业务定义。</p></div>}
+    <form className="organizations-create" onSubmit={(event) => { void create(event) }}><label>{renaming ? `分组“${renaming.name}”的新名称` : '新分组名称'}<input className="field" value={name} maxLength={128} disabled={busy || disabled} onChange={(event) => setName(event.target.value)} placeholder="例如：基础资料" /></label><button type="submit" className="button primary" disabled={busy || disabled || !name.trim()}>{busy ? <LoaderCircle size={16} className="organizations-spin" /> : <Plus size={16} />}{renaming ? '保存分组名称' : '创建分组'}</button>{renaming && <button type="button" className="button subtle" disabled={busy || disabled} onClick={() => { setRenaming(undefined); setName('') }}>取消重命名</button>}</form>
   </section>
 }

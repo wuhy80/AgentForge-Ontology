@@ -90,11 +90,11 @@ SDK通过 `rows(scope)` 或fromSpec接受稳定节点/Link计划，关联字段�
 
 ### 单跳关联存在性筛选（2026-11-20）
 
-根对象 `QuerySpec` 可加一个 `relation: {"linkId":"<Link UUID>","direction":"out","operator":"not_exists"}`。方向从 `from` 指定的根模型出发，`out` 指向 Link 目标端，`in` 指向源端。首批支持平台默认 MySQL 存储的托管 Link，包括自关联。筛选可与根对象 `where`、投影、排序和游标分页组合，每个匹配根对象只返回一次。固定实例 `via`、关联行 `rows`、聚合及外部映射 Link 不支持组合或使用该筛选。
+根对象 `QuerySpec` 可加一个 `relation: {"linkId":"<Link UUID>","direction":"out","operator":"not_exists"}`。方向从 `from` 指定的根模型出发，`out` 指向 Link 目标端，`in` 指向源端。支持平台托管 Link 及两端主表与关系位于同一来源的外部中间表和外键映射。筛选可与根对象 `where`、投影、排序和游标分页组合，每个匹配根对象只返回一次。固定实例 `via`、关联行 `rows`、聚合与此筛选互斥。
 
 服务端逐项校验两端定义的 `definition.read`、`instance.query`，以及 Link 的 `definition.read`、`link.query`。`exists` 表示至少有一个通过关联端行权限的邻居；`not_exists` 表示没有可见邻居。租户限制和关联端行条件都在存在性子查询内执行，分页前应用。权限不足返回错误；仅在行策略隐藏邻居时将其排除。绑定与个人保存查询仅验证元数据和当前授权，执行时重新授权，分页游标绑定筛选条件及执行上下文。
 
-公开能力值为 `relationFilter=managed-one-hop`。可经查询、绑定和个人保存查询 API 使用，TypeScript SDK 通过 `DataSet.fromSpec` 接入。文本和可视化入口分别见 [OntologySQL](OntologySQL.md#单跳关系存在性)及[工作台](可视化查询编辑器.md#单跳关联存在性筛选)。其他存储及邻居业务条件仍待扩展。
+公开能力值 `relationFilter=managed-one-hop` 与 `mappedRelationFilter=true` 分别标识托管和外部映射支持。可经查询、绑定和个人保存查询 API 使用，TypeScript SDK 通过 `DataSet.fromSpec` 接入。文本和可视化入口分别见 [OntologySQL](OntologySQL.md#单跳关系存在性)及[工作台](可视化查询编辑器.md#单跳关联存在性筛选)。邻居业务条件仍待扩展。
 
 ## 1. DataSet 的定位
 

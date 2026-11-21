@@ -24,7 +24,23 @@ describe('classification and definition-group management', () => {
     expect(screen.getByRole('button', { name: /生产管理/ }).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByRole('button', { name: /采购管理/ }))
     expect(onSelectCategory).toHaveBeenCalledWith(categories[1].id)
-    expect(screen.queryByRole('button', { name: /重命名|删除/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /删除/ })).toBeNull()
+    expect(screen.getByRole('button', { name: '重命名当前分类' })).toBeTruthy()
+  })
+
+  it('renames the selected category and refreshes its existing ID', async () => {
+    const renameOrganization = vi.fn().mockResolvedValue({ ...categories[0], name: '新目录' })
+    const onRefresh = vi.fn().mockResolvedValue(undefined)
+    const onSelectCategory = vi.fn()
+    const api = { listGroups: vi.fn().mockResolvedValue([]), renameOrganization } as unknown as ApiClient
+    render(<OrganizationsPage api={api} categories={categories} categoryId={categories[0].id} onSelectCategory={onSelectCategory} onRefresh={onRefresh} />)
+    fireEvent.click(screen.getByRole('button', { name: '重命名当前分类' }))
+    fireEvent.change(screen.getByRole('textbox', { name: /的新名称/ }), { target: { value: '新目录' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存分类名称' }))
+    await screen.findByText('分类“新目录”已重命名。')
+    expect(renameOrganization).toHaveBeenCalledWith('categories', categories[0], '新目录')
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+    expect(onSelectCategory).not.toHaveBeenCalled()
   })
 
   it('aborts an old category request and ignores its late result after a switch', async () => {

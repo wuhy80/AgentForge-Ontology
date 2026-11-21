@@ -4,11 +4,13 @@ import type { QuerySpec, SchemaLink } from '../../lib/types';
 import { errorMessage } from './query';
 
 const linkKey = (link: SchemaLink) => `${link.linkRef.id}:${link.direction}`;
-export const isManagedRelation = (link: SchemaLink) => link.storageMode === 'managed' && link.hasStorageBinding !== false;
+export const supportsRelationFilter = (link: SchemaLink, mapped: boolean) => link.hasStorageBinding !== false &&
+  (mapped ? link.storageMode === 'junction' || link.storageMode === 'foreign_key' : link.storageMode === 'managed');
 
-export function RelationFilterEditor({ api, schemaId, value, onChange }: {
+export function RelationFilterEditor({ api, schemaId, mapped, value, onChange }: {
   api: ApiClient;
   schemaId: string;
+  mapped: boolean;
   value: QuerySpec['relation'];
   onChange: (value: QuerySpec['relation']) => void;
 }) {
@@ -18,12 +20,12 @@ export function RelationFilterEditor({ api, schemaId, value, onChange }: {
   useEffect(() => {
     const controller = new AbortController();
     api.schemaLinks(schemaId, controller.signal).then((items) => {
-      if (!controller.signal.aborted) setLinks(items.filter(isManagedRelation));
+      if (!controller.signal.aborted) setLinks(items.filter((item) => supportsRelationFilter(item, mapped)));
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setError(errorMessage(cause));
     });
     return () => controller.abort();
-  }, [api, schemaId]);
+  }, [api, schemaId, mapped]);
 
   if (links?.length === 0 && !value) return null;
   const selected = value ? `${value.linkId}:${value.direction}` : '';

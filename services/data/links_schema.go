@@ -61,7 +61,7 @@ func (p *linkPlan) close() {
 	closeMappedTables(p.targetTables)
 }
 
-func (h *handler) planLink(ctx context.Context, definition c.Definition) (*linkPlan, error) {
+func (h *handler) logicalLinkPlan(ctx context.Context, definition c.Definition) (*linkPlan, error) {
 	if err := validateLinkDefinition(definition); err != nil {
 		return nil, err
 	}
@@ -94,6 +94,24 @@ func (h *handler) planLink(ctx context.Context, definition c.Definition) (*linkP
 	if sb == nil || tb == nil || sb.DataSourceID != tb.DataSourceID || sb.DataSourceID != b.DataSourceID {
 		return nil, problem(422, "cross_source_link_unsupported", "外部 Link 当前仅支持两端主表和关系表位于同一数据源，跨数据源关系明确拒绝")
 	}
+	return p, nil
+}
+
+func (h *handler) planLink(ctx context.Context, definition c.Definition) (*linkPlan, error) {
+	p, err := h.logicalLinkPlan(ctx, definition)
+	if err != nil {
+		return nil, err
+	}
+	return h.openLinkPlan(ctx, p)
+}
+
+func (h *handler) openLinkPlan(ctx context.Context, p *linkPlan) (*linkPlan, error) {
+	definition := p.definition
+	b := definition.Link.StorageBinding
+	if b.Mode == "managed" {
+		return p, nil
+	}
+	var err error
 	fail := func(err error) (*linkPlan, error) { p.close(); return nil, err }
 	p.sourceTables, err = h.mappedTables(ctx, p.source.Definition, false)
 	if err != nil {

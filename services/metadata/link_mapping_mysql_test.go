@@ -132,6 +132,40 @@ func TestMySQLLinkMappingLifecycleAndIsolation(t *testing.T) {
 		return record
 	}
 	source := schema(tenant, category.ID, group.ID, "笔记", true)
+	var destination c.Organization
+	decode(request("POST", "/metadata/groups", tenant, "", map[string]string{"name": "待整理", "categoryId": category.ID}), 201, &destination)
+	renamePath := "/metadata/groups/" + destination.ID
+	rename := map[string]string{"name": "已整理", "previousName": destination.Name}
+	decode(request("PUT", renamePath, otherTenant, "", rename), 404, nil)
+	var renamed c.Organization
+	decode(request("PUT", renamePath, tenant, "", rename), 200, &renamed)
+	decode(request("PUT", renamePath, tenant, "", rename), 200, nil)
+	decode(request("PUT", renamePath, tenant, "", map[string]string{"name": "其他名称", "previousName": destination.Name}), 409, nil)
+	if renamed.ID != destination.ID || renamed.CategoryID != category.ID || renamed.Name != "已整理" {
+		t.Fatalf("rename changed directory identity: %+v", renamed)
+	}
+	renameCategory := map[string]string{"name": "关系管理", "previousName": category.Name}
+	decode(request("PUT", "/metadata/categories/"+category.ID, tenant, "", renameCategory), 200, &renamed)
+	if renamed.ID != category.ID || renamed.Name != "关系管理" {
+		t.Fatalf("category rename changed directory identity: %+v", renamed)
+	}
+	move := source.Definition
+	move.GroupID = otherGroup.ID
+	sourcePath := "/metadata/definitions/" + source.Definition.ID
+	decode(request("PUT", sourcePath+"/draft", tenant, source.ETag, move), 404, nil)
+	move.GroupID = destination.ID
+	var moved c.CurrentDefinition
+	decode(request("PUT", sourcePath+"/draft", tenant, source.ETag, move), 200, &moved)
+	var published c.CurrentDefinition
+	decode(request("GET", sourcePath, tenant, "", nil), 200, &published)
+	if published.Definition.GroupID != group.ID {
+		t.Fatal("draft move changed the active definition")
+	}
+	publish(tenant, moved)
+	decode(request("GET", sourcePath, tenant, "", nil), 200, &published)
+	if published.Definition.GroupID != destination.ID || published.Definition.ID != source.Definition.ID {
+		t.Fatalf("published move changed definition identity: %+v", published)
+	}
 	target := schema(tenant, category.ID, group.ID, "标签", true)
 	draftEndpoint := schema(tenant, category.ID, group.ID, "未发布", false)
 	foreign := schema(otherTenant, otherCategory.ID, otherGroup.ID, "外租户", true)

@@ -242,6 +242,9 @@ export class ApiClient {
   createGroup(categoryId: string, name: string): Promise<Organization> {
     return this.request('/api/metadata/groups', { method: 'POST', body: { categoryId, name } })
   }
+  renameOrganization(kind: 'categories' | 'groups', organization: Organization, name: string): Promise<Organization> {
+    return this.request(`/api/metadata/${kind}/${encodeURIComponent(organization.id)}`, { method: 'PUT', body: { name, previousName: organization.name } })
+  }
   async listDataSources(signal?: AbortSignal, selectable = false): Promise<DataSource[]> {
     return (await this.request<Page<DataSource>>(`/api/data/sources${selectable ? '?view=select' : ''}`, { signal })).data
   }

@@ -246,11 +246,7 @@ func (h *handler) analyzeOntologySQL(r *http.Request, p c.Principal, req c.Ontol
 			_, err = compileAggregateQuery(definition, current.ETag, p, dec, *out.Query, h.cfg.CursorSecret)
 		} else {
 			out.Query.Relation = relation
-			var predicate *sqlPredicate
-			if relationPlan != nil {
-				predicate = &relationPlan.predicate
-			}
-			if _, err = compileQueryPredicate(definition, current.ETag, p, dec, *out.Query, h.cfg.CursorSecret, predicate); err == nil {
+			if _, err = compileQueryPredicate(definition, current.ETag, p, dec, *out.Query, h.cfg.CursorSecret, nil); err == nil {
 				err = validateOntologySQLCapabilities(definition, dec, *out.Query)
 			}
 		}

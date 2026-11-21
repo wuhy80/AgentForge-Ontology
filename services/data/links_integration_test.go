@@ -66,7 +66,7 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 			publish(link)
 			f.authorize = func(request c.AuthorizationRequest) c.Decision {
 				decision := f.decision
-				if request.Kind == c.KindLink {
+				if request.Kind == c.KindLink || request.Operation == "definition.read" {
 					return decision
 				}
 				if request.ResourceID == source.ID {
@@ -115,6 +115,24 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 			f.query(query, 422)
 			query.Via.Direction = "out"
 			f.query(query, 422)
+			filter := c.QuerySpec{From: c.Source{SchemaID: target.ID}, Relation: &c.RelationFilter{
+				LinkID: link.ID, Direction: "in", Operator: "exists",
+			}, Select: []string{target.Schema.Properties[0].ID}, Page: c.Page{Limit: 1}}
+			first = f.query(filter, 200)
+			if len(first.Data) != 1 || first.Data[0].ID != "10" || first.NextCursor == "" {
+				t.Fatalf("mapped relation filter first page: %+v", first)
+			}
+			filter.Page.Cursor = first.NextCursor
+			second = f.query(filter, 200)
+			if len(second.Data) != 1 || second.Data[0].ID != "11" || second.HasMore {
+				t.Fatalf("mapped relation filter continuation: %+v", second)
+			}
+			filter.Page.Cursor = ""
+			filter.Relation.Operator = "not_exists"
+			negative := f.query(filter, 200)
+			if len(negative.Data) != 1 || negative.Data[0].ID != "13" || negative.HasMore {
+				t.Fatalf("mapped relation filter negative direction: %+v", negative)
+			}
 			for _, mode := range []string{"source", "target"} {
 				fk := link
 				fk.ID = c.NewID()
@@ -155,6 +173,12 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 				}
 				if response := f.request("POST", "/data/links/"+fk.ID+"/instances", c.LinkWriteRequest{SourceID: c.NewID(), TargetID: c.NewID()}, false); response.Code != 422 {
 					t.Fatal("external relation write accepted")
+				}
+				filter.Relation.LinkID = fk.ID
+				filter.Relation.Operator = "exists"
+				got := f.query(filter, 200)
+				if len(got.Data) != 1 || got.Data[0].ID != "10" || got.HasMore != (mode == "source") {
+					t.Fatalf("foreign key relation filter (%s): %+v", mode, got)
 				}
 			}
 			// A cardinality stronger than the catalog's unique constraints is rejected.
