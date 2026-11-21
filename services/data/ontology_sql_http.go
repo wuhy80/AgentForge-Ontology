@@ -148,10 +148,6 @@ func (h *handler) analyzeOntologySQL(r *http.Request, p c.Principal, req c.Ontol
 		return out, nil
 	}
 	if len(stmt.Joins) > 0 {
-		if len(stmt.Measures) > 0 || len(stmt.GroupBy) > 0 {
-			out.Diagnostics = append(out.Diagnostics, sqlDiagnostic("aggregate_unsupported", "聚合首批不支持JOIN LINK", stmt.SourceRange))
-			return out, nil
-		}
 		return h.analyzeRowOntologySQL(r, p, req, stmt)
 	}
 	current, err := h.resolveOntologySQLSource(r, p, stmt.SourceCategory, stmt.SourceSchema, req.DefaultCategoryID)

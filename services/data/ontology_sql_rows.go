@@ -213,7 +213,9 @@ func bindRowOntologySQL(stmt *ontologySQLStatement, scope *ontologySQLRowScope, 
 		b.analysis.Fields = append(b.analysis.Fields, property)
 	}
 	q.Where = b.expression(stmt.Where, 0)
-	if stmt.Order != nil {
+	if len(stmt.Measures) != 0 || len(stmt.GroupBy) != 0 {
+		b.bindRowCount(&q)
+	} else if stmt.Order != nil {
 		property, found := b.field(*stmt.Order)
 		if found {
 			if property.DataType == "text" || property.DataType == "longtext" {
@@ -232,6 +234,49 @@ func bindRowOntologySQL(stmt *ontologySQLStatement, scope *ontologySQLRowScope, 
 		b.analysis.Query = &q
 	}
 	return b.analysis
+}
+
+func (b *ontologySQLBinder) bindRowCount(q *c.QuerySpec) {
+	stmt := b.statement
+	if stmt.Order != nil || len(stmt.GroupBy) != len(q.Select) {
+		b.fail("invalid_row_aggregate", "关联计数按分组字段排序，投影须与 GROUP BY 一致", stmt.SourceRange)
+		return
+	}
+	aggregate := &c.AggregateQuery{}
+	for i, field := range stmt.GroupBy {
+		property, ok := b.field(field)
+		if !ok {
+			return
+		}
+		if property.ID != q.Select[i] || property.DataType == "text" || property.DataType == "longtext" {
+			b.fail("invalid_row_aggregate", "分组字段须按投影顺序书写并支持分组", field.Range)
+			return
+		}
+		aggregate.GroupBy = append(aggregate.GroupBy, property.ID)
+	}
+	for i, measure := range stmt.Measures {
+		m := c.AggregateMeasure{ID: fmt.Sprintf("m%d", i), Op: measure.Op, Name: measure.Name}
+		if measure.Field != nil && measure.Field.Qualifier == "" {
+			for _, node := range b.rowScope.Nodes {
+				if nameKey(node.Alias) == nameKey(measure.Field.Name) {
+					m.Field = node.ID
+					break
+				}
+			}
+		}
+		if measure.Field != nil && m.Field == "" {
+			b.fail("invalid_row_aggregate", "关联计数的参数须为对象别名", measure.Range)
+			return
+		}
+		aggregate.Measures = append(aggregate.Measures, m)
+	}
+	q.Select, q.Aggregate = []string{}, aggregate
+	fields, err := rowCountFields(*q)
+	if err != nil {
+		b.fail("invalid_row_aggregate", "关联统计只支持 COUNT(*)、COUNT(对象别名) 或 COUNT(DISTINCT 对象别名)", stmt.SourceRange)
+		return
+	}
+	b.analysis.Fields = append(b.analysis.Fields, fields...)
 }
 
 func (h *handler) analyzeRowOntologySQL(r *http.Request, p c.Principal, req c.OntologySQLRequest, stmt *ontologySQLStatement) (c.OntologySQLAnalysis, error) {

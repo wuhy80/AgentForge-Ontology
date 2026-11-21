@@ -45,9 +45,6 @@ func (h *handler) compileSavedQuery(r *http.Request, p c.Principal, request c.Sa
 	var err error
 	var relation *c.RelationFilter
 	if len(statement.Joins) != 0 {
-		if len(statement.Measures) != 0 || len(statement.GroupBy) != 0 {
-			return out, problem(422, "aggregate_unsupported", "聚合不支持JOIN LINK")
-		}
 		binder.rowScope, err = h.rowSQLScope(r, p, statement, request.DefaultCategoryID)
 		if err != nil {
 			var binding *ontologySQLBindingError

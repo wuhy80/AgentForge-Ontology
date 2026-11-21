@@ -177,6 +177,7 @@ export function queryToSQLDraft(query: QuerySpec, model: QueryContextModel, cont
 }
 
 export function queryToEditor(query: QuerySpec, model: QueryContextModel, context?: RowQueryContext): QueryEditor {
+  if (query.rows && query.aggregate) throw new Error('关联计数请继续在 OntologySQL 中编辑');
   if (query.rows && query.relation) throw new Error('关联存在性筛选仅用于根对象明细');
   if (query.rows && context) {
     if (query.from.schemaId !== query.rows.nodes[0]?.schemaId || query.via) throw new Error('关联查询起点无效');

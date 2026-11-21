@@ -28,8 +28,18 @@ func TestSavedQuerySQLCompileInnerRowsKeepsScopedASTParameters(t *testing.T) {
 	if out.Query.Rows == nil || len(out.Query.Rows.Joins) != 2 || len(out.Parameters) != 1 || out.Parameters[0].DataType != "decimal" || out.Query.Where.Args[0].Field != "n1."+testFieldPrice || out.Query.Where.Args[0].Parameter != "下限" || len(out.Query.Where.Args[0].Value) != 0 || string(out.Query.Where.Args[1].Value) != `"固定文本"` || out.Query.OrderBy[0].Field != "n2."+testFieldPrice {
 		t.Fatalf("row AST parameter identity/type lost: %+v", out)
 	}
+	count := `SELECT "e"."设备编码", COUNT(DISTINCT "e"), COUNT("w") FROM "生产管理"."设备" AS "e" LEFT JOIN LINK "e"."工单" AS "w" WHERE "e"."设备编码" = :编码 GROUP BY "e"."设备编码" LIMIT 1`
+	w = callOntologySQL(t, app, "POST", "/data/saved-queries/compile", c.SavedQueryCompileRequest{Text: count})
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.Query.Rows == nil || out.Query.Rows.Joins[0].Type != "left" ||
+		out.Query.Aggregate == nil || len(out.Query.Aggregate.Measures) != 2 || out.Query.Aggregate.Measures[0].Op != "countDistinct" ||
+		out.Query.Aggregate.Measures[0].Field != "n0" || out.Query.Aggregate.Measures[1].Field != "n1" ||
+		len(out.Query.Select) != 0 || len(out.Parameters) != 1 || out.Parameters[0].Name != "编码" {
+		t.Fatalf("invalid relation count binding: %d %s", w.Code, w.Body)
+	}
 	for _, invalid := range []string{
-		`SELECT "e"."设备编码", COUNT(*) FROM "生产管理"."设备" AS "e" JOIN LINK "e"."工单" AS "w" GROUP BY "e"."设备编码" LIMIT 1`,
+		strings.Replace(count, `COUNT("w")`, `COUNT("w"."编号")`, 1),
+		strings.Replace(count, `COUNT("w")`, `SUM("w"."金额")`, 1),
+		strings.Replace(count, `LIMIT 1`, `ORDER BY "e"."设备编码" LIMIT 1`, 1),
 		strings.Replace(text, `"工单" AS "w"`, `"不存在" AS "w"`, 1),
 		strings.Replace(text, `"w"."编号" = '固定文本'`, `"l"."计数" = :下限`, 1),
 		strings.Replace(text, `"w"."金额" >= :下限`, `"w"."金额" IN (:下限)`, 1),

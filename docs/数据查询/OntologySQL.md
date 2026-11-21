@@ -246,6 +246,18 @@ LIMIT 25;
 
 平台托管关系、同源中间表和外键映射均可用 `LEFT JOIN LINK 根别名.方向入口名 AS 右侧别名` 表达单跳左关联。保留主对象，右侧缺失时返回空值；结果与权限规则见[单跳左关联](DataSet.md#托管单跳左关联)。
 
+### 关联计数
+
+```sql
+SELECT "e"."部门", COUNT(DISTINCT "e") AS "设备数", COUNT("w") AS "工单数"
+FROM "设备" AS "e"
+LEFT JOIN LINK "e"."工单" AS "w"
+GROUP BY "e"."部门"
+LIMIT 25;
+```
+
+关联查询可使用 `COUNT(*)`、`COUNT("对象别名")` 和 `COUNT(DISTINCT "对象别名")`。分组字段须与普通投影的顺序完全一致；结果按分组字段排序。分析、执行及个人 SQL 模板编译复用[同库关联计数](DataSet.md#同库关联计数)。关联计数暂在 SQL 模式编辑。
+
 | 语义 | 共享计划必须保留的区别 |
 | --- | --- |
 | 普通 SELECT 与 JOIN LINK | 显式扁平行结果，保留参与对象、边及路径身份；不能用 EXISTS 替换会影响行数的 JOIN |
