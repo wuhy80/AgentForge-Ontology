@@ -96,6 +96,12 @@ SDK通过 `rows(scope)` 或fromSpec接受稳定节点/Link计划，关联字段�
 
 公开能力值 `relationFilter=managed-one-hop` 与 `mappedRelationFilter=true` 分别标识托管和外部映射支持。可经查询、绑定和个人保存查询 API 使用，TypeScript SDK 通过 `DataSet.fromSpec` 接入。文本和可视化入口分别见 [OntologySQL](OntologySQL.md#单跳关系存在性)及[工作台](可视化查询编辑器.md#单跳关联存在性筛选)。邻居业务条件仍待扩展。
 
+### 托管单跳左关联
+
+单条平台托管 Link 的关联行查询可在 `rows.joins[0]` 声明 `type: "left"`，OntologySQL 写作 `LEFT JOIN LINK`，省略类型沿用 INNER。右侧行权限及租户条件在补空前执行。没有可见匹配时保留一条左侧记录，右侧字段为 JSON `null`，`entities` 只返回左侧来源。根对象和可见关联的组合共同参与稳定分页。用户编写的 `WHERE` 在关联后过滤结果。
+
+只开放单跳托管 Link，与多跳、外部映射及聚合的组合仍待开发。
+
 ## 1. DataSet 的定位
 
 2026-11-08可视化入口已接入上述关联行与聚合协议，并与OntologySQL在受支持范围双向转换；编辑操作、参数固化和结果粒度提示唯一见[可视化查询编辑器](可视化查询编辑器.md)。个人模板复用保存查询接口，首批TypeScript链式SDK沿上节公共绑定与查询协议实现；其他SDK及复杂组合继续分期。

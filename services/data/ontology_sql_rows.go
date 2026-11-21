@@ -127,6 +127,9 @@ func (h *handler) rowSQLScope(r *http.Request, p c.Principal, stmt *ontologySQLS
 			return nil, sqlScopeFailure("ambiguous_link", "关系入口不唯一，请使用 VIA 分类.Link主名 DIRECTION OUT/IN 明确关系及方向", join.Range)
 		}
 		selected := matches[0]
+		if join.Type == "left" && selected.link.Current.Definition.Link.StorageBinding.Mode != "managed" {
+			return nil, sqlScopeFailure("unsupported_row_join", "LEFT Link 首批只支持平台托管关系", join.Range)
+		}
 		target, err := h.current(r.Context(), p.TenantID, selected.target)
 		if err != nil {
 			return nil, err
@@ -150,7 +153,7 @@ func (h *handler) rowSQLScope(r *http.Request, p c.Principal, stmt *ontologySQLS
 		}
 		id := fmt.Sprintf("n%d", index+1)
 		scope.Plan.Nodes = append(scope.Plan.Nodes, c.RowQueryNode{ID: id, Alias: join.Alias, SchemaID: target.Definition.ID})
-		scope.Plan.Joins = append(scope.Plan.Joins, c.RowQueryJoin{From: origin.ID, To: id, LinkID: selected.link.Current.Definition.ID, Direction: selected.direction})
+		scope.Plan.Joins = append(scope.Plan.Joins, c.RowQueryJoin{Type: join.Type, From: origin.ID, To: id, LinkID: selected.link.Current.Definition.ID, Direction: selected.direction})
 		scope.Nodes = append(scope.Nodes, ontologySQLScopeNode{ID: id, Alias: join.Alias, Current: target, Decision: targetDecision})
 	}
 	for _, node := range scope.Nodes {
@@ -181,6 +184,9 @@ func (b *ontologySQLBinder) rowField(field ontologySQLField) (c.Property, bool) 
 			}
 			bound := property
 			bound.ID, bound.Name = node.ID+"."+property.ID, node.Alias+"."+property.Name
+			if len(b.rowScope.Plan.Joins) == 1 && b.rowScope.Plan.Joins[0].Type == "left" && b.rowScope.Plan.Joins[0].To == node.ID {
+				bound.Required, bound.Nullable = false, true
+			}
 			selected = &bound
 		}
 	}

@@ -256,6 +256,38 @@ func TestRowQueryManagedSelfLinkIntegration(t *testing.T) {
 	if len(rows) != 1 || rows[0].Entities[4].InstanceID != ids[0] {
 		t.Fatalf("four-link self-query failed: %+v", rows)
 	}
+	t.Run("left link", func(t *testing.T) {
+		left := q
+		left.Rows = &c.RowQuery{Nodes: q.Rows.Nodes[:2], Joins: []c.RowQueryJoin{q.Rows.Joins[0]}}
+		left.Rows.Joins[0].Type = "left"
+		left.Select = []string{"n0." + property.ID, "n1." + property.ID}
+		result := allRowPages(t, f, left)
+		if len(result) != 3 {
+			t.Fatalf("LEFT must preserve all three roots: %+v", result)
+		}
+		for _, row := range result {
+			if row.Entities[0].InstanceID == ids[2] && (len(row.Entities) != 1 || string(row.Values[left.Select[1]]) != "null") {
+				t.Fatalf("unmatched row must have null fields and no target identity: %+v", row)
+			}
+		}
+		f.authorize = func(request c.AuthorizationRequest) c.Decision {
+			decision := f.decision
+			if request.Operation == "instance.query" {
+				decision.RowFilter = &c.Expression{Op: "eq", Field: property.ID, Value: raw("可见")}
+			}
+			return decision
+		}
+		t.Cleanup(func() { f.authorize = nil })
+		result = allRowPages(t, f, left)
+		if len(result) != 2 {
+			t.Fatalf("LEFT should retain visible roots only: %+v", result)
+		}
+		for _, row := range result {
+			if row.Entities[0].InstanceID == ids[1] && (len(row.Entities) != 1 || string(row.Values[left.Select[1]]) != "null") {
+				t.Fatalf("hidden right side changed root row or leaked: %+v", row)
+			}
+		}
+	})
 	t.Run("Action current record", func(t *testing.T) {
 		action := c.Definition{ID: c.NewID(), TenantID: f.tenant, Kind: c.KindAction, Action: &c.Callable{
 			SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python"}, TargetSchemaIDs: []string{definition.ID},

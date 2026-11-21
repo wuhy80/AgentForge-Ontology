@@ -153,7 +153,7 @@ export function VisualRelations(props: Props) {
 
   return <section className="visual-relations" aria-label="关联查询配置">
     <div className="query-section-heading"><div><Link2 size={18} /><h3>{rows ? `关联明细 · ${rows.joins.length} 条 Link` : '关联查询'}</h3></div>
-      <button type="button" className="button" disabled={(rows?.joins.length ?? 0) >= 4} onClick={() => setOpen((value) => !value)}><Plus size={14} />添加关联</button></div>
+      <button type="button" className="button" disabled={(rows?.joins.length ?? 0) >= 4 || rows?.joins.some((join) => join.type === 'left')} onClick={() => setOpen((value) => !value)}><Plus size={14} />添加关联</button></div>
     <p className="muted">{rows ? '每行是一组匹配对象；同一对象可能出现多行。字段和条件按模型角色区分，结果只读。' : '先选择返回字段，再沿现有 Link 关联其他模型；添加后按匹配关系逐行展示。'}</p>
     {rows && <><ol className="visual-role-list">{rows.nodes.map((node, index) => {
       const join = rows.joins[index - 1], link = context?.links.find((item) => item.id === join?.linkId);

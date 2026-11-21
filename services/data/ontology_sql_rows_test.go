@@ -143,7 +143,7 @@ WHERE "工单"."金额" >= :下限 ORDER BY "产线"."编号" ASC LIMIT 7;`
 		t.Fatal(diagnostics)
 	}
 	for _, invalid := range []string{
-		`SELECT "设备编码" FROM "设备" LEFT JOIN LINK "设备"."工单" AS "工单";`,
+		`SELECT "设备编码" FROM "设备" LEFT JOIN LINK "设备"."工单" AS "工单" JOIN LINK "工单"."产线" AS "产线";`,
 		`SELECT "设备编码" FROM "设备" JOIN LINK "设备" VIA "生产管理"."设备工单" DIRECTION BOTH AS "工单";`,
 		`SELECT "设备编码" FROM "设备" JOIN LINK "设备"."工单" AS "工单" ON TRUE;`,
 		`SELECT "设备编码" FROM "设备"` + strings.Repeat(` JOIN LINK "设备"."工单" AS "工单"`, 5),

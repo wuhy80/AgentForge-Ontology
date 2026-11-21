@@ -81,6 +81,9 @@ func (h *handler) resolveRowBinding(ctx context.Context, p c.Principal, q c.Quer
 			return nil, problem(422, "invalid_link_endpoint", "关联方向或关系端点与对象节点不一致")
 		}
 		sb, tb, lb := origin.current.Definition.Schema.StorageBinding, target.current.Definition.Schema.StorageBinding, link.StorageBinding
+		if join.Type == "left" && lb.Mode != "managed" {
+			return nil, problem(422, "unsupported_row_join", "LEFT Link 首批只支持平台托管关系")
+		}
 		if lb.Mode == "managed" {
 			if sb != nil || tb != nil {
 				return nil, problem(422, "unsupported_link_mapping", "平台关联表仅支持平台默认存储对象")
@@ -97,6 +100,9 @@ func rowBindingSchema(plan *rowQueryPlan) *c.Schema {
 	schema := &c.Schema{}
 	for _, node := range plan.nodes {
 		for _, property := range node.current.Definition.Schema.Properties {
+			if leftRowTarget(plan, node.node.ID) {
+				property.Required, property.Nullable = false, true
+			}
 			property.ID = node.node.ID + "." + property.ID
 			property.Name = node.node.Alias + "." + property.Name
 			schema.Properties = append(schema.Properties, property)

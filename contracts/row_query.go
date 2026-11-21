@@ -18,6 +18,7 @@ type RowQueryNode struct {
 }
 
 type RowQueryJoin struct {
+	Type      string `json:"type,omitempty"`
 	From      string `json:"from"`
 	To        string `json:"to"`
 	LinkID    string `json:"linkId"`

@@ -68,6 +68,9 @@ func validateRowQueryShape(q c.QuerySpec) error {
 		aliases[alias] = true
 	}
 	for i, join := range q.Rows.Joins {
+		if join.Type != "" && (join.Type != "left" || len(q.Rows.Joins) != 1) {
+			return problem(422, "unsupported_row_join", "LEFT Link 首批只支持单跳")
+		}
 		validFrom := false
 		for j := 0; j <= i; j++ {
 			validFrom = validFrom || join.From == q.Rows.Nodes[j].ID
@@ -77,6 +80,18 @@ func validateRowQueryShape(q c.QuerySpec) error {
 		}
 	}
 	return nil
+}
+
+func leftRowTarget(plan *rowQueryPlan, node string) bool {
+	return len(plan.edges) == 1 && plan.edges[0].join.Type == "left" && plan.edges[0].join.To == node
+}
+
+func rowCursorKey(plan *rowQueryPlan, node rowQueryNode) (string, string) {
+	column, mark := rowKey(node)
+	if leftRowTarget(plan, node.node.ID) {
+		column = "COALESCE(" + column + ", '')"
+	}
+	return column, mark
 }
 
 func (h *handler) planRowQuery(ctx context.Context, p c.Principal, q c.QuerySpec) (*rowQueryPlan, error) {
@@ -273,7 +288,7 @@ func rowKeyArguments(plan *rowQueryPlan, keys []string) ([]any, error) {
 	args := []any{}
 	for i, node := range plan.nodes {
 		if node.platformStorage() {
-			if !uuidPattern.MatchString(keys[i]) {
+			if !uuidPattern.MatchString(keys[i]) && !(keys[i] == "" && leftRowTarget(plan, node.node.ID)) {
 				return nil, problem(422, "invalid_cursor", "关联游标对象标识不合法")
 			}
 			args = append(args, keys[i])
@@ -292,11 +307,11 @@ func rowKeysAfter(plan *rowQueryPlan, keyArgs []any) (string, []any) {
 	for i, node := range plan.nodes {
 		terms := []string{}
 		for j := 0; j < i; j++ {
-			column, mark := rowKey(plan.nodes[j])
+			column, mark := rowCursorKey(plan, plan.nodes[j])
 			terms = append(terms, column+"="+mark)
 			args = append(args, keyArgs[j])
 		}
-		column, mark := rowKey(node)
+		column, mark := rowCursorKey(plan, node)
 		terms = append(terms, column+">"+mark)
 		args = append(args, keyArgs[i])
 		parts = append(parts, "("+strings.Join(terms, " AND ")+")")
@@ -315,6 +330,9 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 			copy := property
 			copy.ID = id
 			copy.Name = node.node.Alias + "." + property.Name
+			if leftRowTarget(plan, node.node.ID) {
+				copy.Required, copy.Nullable = false, true
+			}
 			allProperties = append(allProperties, copy)
 			properties[id] = copy
 			owners[id] = node
@@ -363,7 +381,13 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 		return compiled, err
 	}
 	conditions, args := []string{"(" + user + ")"}, userArgs
+	var rightConditions []string
+	var rightArgs []any
 	for _, node := range plan.nodes {
+		nodeConditions, nodeArgs := &conditions, &args
+		if leftRowTarget(plan, node.node.ID) {
+			nodeConditions, nodeArgs = &rightConditions, &rightArgs
+		}
 		if node.table.tenantColumn != "" {
 			column := rowColumn(node, node.table.tenantColumn)
 			mark := "?"
@@ -371,16 +395,16 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 				column = linkExactColumn(node.table, column, c.SourceColumn{DataType: "string"})
 				mark = sourceExactStringParameter(node.table)
 			}
-			conditions = append(conditions, column+"="+mark)
-			args = append(args, p.TenantID)
+			*nodeConditions = append(*nodeConditions, column+"="+mark)
+			*nodeArgs = append(*nodeArgs, p.TenantID)
 		}
 		authCompiler := expressionCompiler{schema: node.current.Definition.Schema, allowed: []string{"*"}, column: func(property c.Property) (string, error) { return rowFieldColumn(node, property, true) }, parameter: mappedParameter(plan.driver)}
 		condition, authArgs, e := authCompiler.compile(node.decision.RowFilter, 0)
 		if e != nil {
 			return compiled, e
 		}
-		conditions = append(conditions, "("+condition+")")
-		args = append(args, authArgs...)
+		*nodeConditions = append(*nodeConditions, "("+condition+")")
+		*nodeArgs = append(*nodeArgs, authArgs...)
 	}
 	from := rowTableSQL(plan.nodes[0]) + " AS " + plan.nodes[0].table.quoted(plan.nodes[0].node.ID)
 	for _, edge := range plan.edges {
@@ -388,6 +412,9 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 		originKey, _ := rowKey(origin)
 		targetKey, _ := rowKey(target)
 		binding := edge.current.Definition.Link.StorageBinding
+		if edge.join.Type == "left" && binding.Mode != "managed" {
+			return compiled, problem(422, "unsupported_row_join", "LEFT Link 首批只支持平台托管关系")
+		}
 		if binding.Mode == "managed" || binding.Mode == "junction" {
 			edgeAlias := "e" + target.node.ID
 			fromColumn, toColumn := "source_id", "target_id"
@@ -409,6 +436,15 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 				targetKeyColumn, _ := target.table.column(target.table.keyColumn)
 				fromEdge = linkExactColumn(origin.table, fromEdge, originKeyColumn)
 				toEdge = linkExactColumn(target.table, toEdge, targetKeyColumn)
+			}
+			if edge.join.Type == "left" {
+				// Join only visible edges and targets before null-extending the root.
+				from += " LEFT JOIN (" + tableName + " AS " + quoteID(edgeAlias) +
+					" JOIN " + rowTableSQL(target) + " AS " + quoteID(target.node.ID) +
+					" ON " + toEdge + "=" + targetKey + " AND " + strings.Join(rightConditions, " AND ") +
+					") ON " + fromEdge + "=" + originKey + " AND " + quoteID(edgeAlias) + ".`tenant_id`=?"
+				args = append(append(rightArgs, p.TenantID), args...)
+				continue
 			}
 			from += " JOIN " + tableName + " AS " + quoteID(edgeAlias) + " ON " + fromEdge + "=" + originKey
 			from += " JOIN " + rowTableSQL(target) + " AS " + quoteID(target.node.ID) + " ON " + toEdge + "=" + targetKey
@@ -477,7 +513,7 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 		}
 	}
 	for _, node := range plan.nodes {
-		column, _ := rowKey(node)
+		column, _ := rowCursorKey(plan, node)
 		orderParts = append(orderParts, column+" ASC")
 	}
 	bound := q
@@ -660,6 +696,10 @@ func readRowQuery(ctx context.Context, runner rowQueryRunner, plan *rowQueryPlan
 		keys := []string{}
 		for i, node := range plan.nodes {
 			var id string
+			if values[i] == nil && leftRowTarget(plan, node.node.ID) {
+				keys = append(keys, "")
+				continue
+			}
 			if node.platformStorage() {
 				id = dbString(values[i])
 				if !uuidPattern.MatchString(id) {

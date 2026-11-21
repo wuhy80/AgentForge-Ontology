@@ -245,6 +245,7 @@ type ontologySQLAggregate struct {
 	Range c.SQLRange
 }
 type ontologySQLJoin struct {
+	Type                                               string
 	FromAlias, Entry, Category, Name, Direction, Alias string
 	Range                                              c.SQLRange
 }
@@ -492,8 +493,14 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 	if p.accept("AS") {
 		s.Alias = p.identifier().Text
 	}
-	for p.accept("JOIN") && len(p.diagnostics) == 0 {
-		join := ontologySQLJoin{Range: p.tokens[p.index-1].Range}
+	for len(p.diagnostics) == 0 {
+		join := ontologySQLJoin{Range: p.peek().Range}
+		if p.accept("LEFT") {
+			join.Type = "left"
+			p.expect("JOIN")
+		} else if !p.accept("JOIN") {
+			break
+		}
 		p.expect("LINK")
 		join.FromAlias = p.identifier().Text
 		if p.accept(".") {
@@ -520,6 +527,11 @@ func parseOntologySQL(text string) (*ontologySQLStatement, []c.SQLDiagnostic) {
 		s.Joins = append(s.Joins, join)
 		if len(s.Joins) > 4 {
 			p.fail("budget_exceeded", "关系行查询最多支持 4 个 Link", join.Range)
+		}
+	}
+	for _, join := range s.Joins {
+		if join.Type == "left" && len(s.Joins) != 1 {
+			p.fail("unsupported_row_join", "LEFT Link 首批只支持单跳", join.Range)
 		}
 	}
 	if p.accept("WHERE") {
@@ -632,7 +644,7 @@ func formatOntologySQL(text string) (string, []c.SQLDiagnostic) {
 			}
 			continue
 		}
-		if depth == 0 && t.Kind == "word" && (t.Text == "FROM" || t.Text == "JOIN" || t.Text == "WHERE" || t.Text == "GROUP" || t.Text == "ORDER" || t.Text == "LIMIT") {
+		if depth == 0 && t.Kind == "word" && (t.Text == "FROM" || t.Text == "LEFT" || (t.Text == "JOIN" && previous != "LEFT") || t.Text == "WHERE" || t.Text == "GROUP" || t.Text == "ORDER" || t.Text == "LIMIT") {
 			newline()
 		}
 		if t.Kind == "punctuation" {

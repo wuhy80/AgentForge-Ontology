@@ -27,7 +27,10 @@ export function rowQueryModel(rows: RowQuery, context: RowQueryContext, allowInc
     }
     // The row executor supports primary-table attributes only. Context marks
     // those attributes filterable; external projection-only attributes stay out.
-    return model.fields.filter((field) => field.filterable).map((field) => ({ ...field, id: `${node.id}.${field.id}`, name: `${node.alias}.${field.name}` }));
+    return model.fields.filter((field) => field.filterable).map((field) => ({
+      ...field, id: `${node.id}.${field.id}`, name: `${node.alias}.${field.name}`,
+      ...(rows.joins[index - 1]?.type === 'left' ? { nullable: true, required: false } : {}),
+    }));
   });
   const root = context.models.find((model) => model.schemaId === rows.nodes[0].schemaId)!;
   return { ...root, fields };
@@ -149,7 +152,7 @@ export function queryToSQL(query: QuerySpec, model: QueryContextModel, bindValue
     const from = query.rows!.nodes.find((node) => node.id === join.from)!;
     const to = query.rows!.nodes.find((node) => node.id === join.to)!;
     const link = context!.links.find((item) => item.id === join.linkId)!;
-    return `\nJOIN LINK ${quoteIdentifier(from.alias)} VIA ${quoteIdentifier(link.category)}.${quoteIdentifier(link.name)} DIRECTION ${join.direction.toUpperCase()} AS ${quoteIdentifier(to.alias)}`;
+    return `\n${join.type === 'left' ? 'LEFT ' : ''}JOIN LINK ${quoteIdentifier(from.alias)} VIA ${quoteIdentifier(link.category)}.${quoteIdentifier(link.name)} DIRECTION ${join.direction.toUpperCase()} AS ${quoteIdentifier(to.alias)}`;
   }).join('') ?? '';
   const groupBy = aggregate?.groupBy?.length ? `\nGROUP BY ${aggregate.groupBy.map((id) => reference(id).text).join(', ')}` : '';
   const sort = order ? aggregate?.measures.some((measure) => measure.id === order.field) ? quoteIdentifier(outputs.find((item) => item.id === order.field)!.name) : reference(order.field).text : '';

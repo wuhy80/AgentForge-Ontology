@@ -27,7 +27,7 @@ export interface AggregateMeasure { readonly id: string; readonly op: AggregateO
 export interface AggregateQuery { readonly groupBy?: readonly string[]; readonly measures: readonly AggregateMeasure[] }
 export interface Order { readonly field: string; readonly direction: 'asc' | 'desc' }
 export interface RowQueryNode { readonly id: string; readonly schemaId: string; readonly alias: string }
-export interface RowQueryJoin { readonly from: string; readonly to: string; readonly linkId: string; readonly direction: 'out' | 'in' }
+export interface RowQueryJoin { readonly type?: 'left'; readonly from: string; readonly to: string; readonly linkId: string; readonly direction: 'out' | 'in' }
 /** Each INNER Link introduces one new object occurrence, including self/branch joins. */
 export interface RowQuery { readonly nodes: readonly RowQueryNode[]; readonly joins: readonly RowQueryJoin[] }
 export interface RelationFilter {

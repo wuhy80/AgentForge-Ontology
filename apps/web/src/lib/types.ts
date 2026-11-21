@@ -326,7 +326,7 @@ export interface QuerySpec {
 }
 export interface Instance { id: string; schemaId: string; values: Values; etag: string }
 export interface RowQueryNode { id: string; schemaId: string; alias: string }
-export interface RowQueryJoin { from: string; to: string; linkId: string; direction: 'out' | 'in' }
+export interface RowQueryJoin { type?: 'left'; from: string; to: string; linkId: string; direction: 'out' | 'in' }
 export interface RowQuery { nodes: RowQueryNode[]; joins: RowQueryJoin[] }
 export interface QueryRowEntity { nodeId: string; schemaId: string; instanceId: string }
 export interface QueryRow { id: string; values: Values; entities: QueryRowEntity[] }

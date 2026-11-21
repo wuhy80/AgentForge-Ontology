@@ -102,10 +102,11 @@ function rowScope(input: unknown): RowQuery {
     aliases.add(normalized); return { id, schemaId, alias };
   });
   const joins = edges.map((input, index) => {
-    const edge = record(input); keys(edge, ['from', 'to', 'linkId', 'direction']);
+    const edge = record(input); keys(edge, ['from', 'to', 'linkId', 'direction', 'type']);
+    if (edge.type !== undefined && (edge.type !== 'left' || edges.length !== 1)) fail('LEFT Link 当前只支持单跳');
     const from = text(edge.from, '关联起点'), to = text(edge.to, '关联终点'), linkId = text(edge.linkId, 'Link标识');
     if (!nodes.slice(0, index + 1).some((node) => node.id === from) || to !== nodes[index + 1].id || !uuid.test(linkId) || edge.direction !== 'out' && edge.direction !== 'in') fail('每条INNER Link须按明确方向关联一个新节点');
-    return { from, to, linkId, direction: edge.direction as 'out' | 'in' };
+    return { from, to, linkId, direction: edge.direction as 'out' | 'in', ...(edge.type === 'left' ? { type: 'left' as const } : {}) };
   });
   return { nodes, joins };
 }
@@ -204,14 +205,17 @@ function result(input: unknown, query: QuerySpec): QueryResult {
   const rows = query.rows ? array(value.rows, 'invalid_response').map((input) => {
     const row = record(input, 'invalid_response'); keys(row, ['id', 'values', 'entities'], 'invalid_response');
     const entries = array(row.entities, 'invalid_response');
-    if (entries.length !== query.rows!.nodes.length) fail('关联行必须包含所有对象来源', 'invalid_response');
+    const missingRight = query.rows!.joins[0].type === 'left' && entries.length === 1;
+    if (!missingRight && entries.length !== query.rows!.nodes.length) fail('关联行必须包含所有对象来源', 'invalid_response');
     const entities = entries.map((input, index) => {
       const entity = record(input, 'invalid_response'); keys(entity, ['nodeId', 'schemaId', 'instanceId'], 'invalid_response');
       const node = query.rows!.nodes[index];
       if (entity.nodeId !== node.id || entity.schemaId !== node.schemaId) fail('关联行对象来源与绑定节点不一致', 'invalid_response');
       return { nodeId: node.id, schemaId: node.schemaId, instanceId: text(entity.instanceId, '对象标识', 'invalid_response') };
     });
-    return { id: text(row.id, '关联行标识', 'invalid_response'), values: values(row.values), entities };
+    const rowValues = values(row.values);
+    if (missingRight && Object.entries(rowValues).some(([key, value]) => key.startsWith('n1.') && value !== null)) fail('缺失对象的关联字段须为空', 'invalid_response');
+    return { id: text(row.id, '关联行标识', 'invalid_response'), values: rowValues, entities };
   }) : undefined;
   if ((rows?.length ?? aggregateRows?.length ?? data.length) > query.page.limit) fail('查询结果超过每页预算', 'invalid_response');
   const cursor = value.nextCursor === undefined ? undefined : text(value.nextCursor, '分页游标', 'invalid_response');
