@@ -298,9 +298,10 @@ type Decision struct {
 }
 
 type Error struct {
-	FieldID string `json:"fieldId,omitempty"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	ClientKey string `json:"clientKey,omitempty"`
+	FieldID   string `json:"fieldId,omitempty"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
 }
 
 func NewID() string {

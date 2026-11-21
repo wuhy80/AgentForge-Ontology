@@ -441,6 +441,10 @@ func applyWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, opera
 		}
 		out, err := applyMutation(ctx, store, item.current, item.request, item.decisions, command, seen[id])
 		if err != nil {
+			var detail *apiError
+			if errors.As(err, &detail) && detail.fieldID != "" {
+				return c.WriteTransactionResult{}, &transactionFieldError{cause: err, clientKey: command.ClientKey}
+			}
 			return c.WriteTransactionResult{}, err
 		}
 		completed[out.ClientKey] = out
@@ -494,10 +498,23 @@ func replayWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, oper
 	return result, nil
 }
 
+type transactionFieldError struct {
+	cause     error
+	clientKey string
+}
+
+func (e *transactionFieldError) Error() string { return e.cause.Error() }
+func (e *transactionFieldError) Unwrap() error { return e.cause }
+
 func transactionFailure(err error) (*c.Error, bool) {
 	var api *apiError
 	if errors.As(err, &api) && api.status >= 400 && api.status < 500 {
-		return &c.Error{Code: api.code, Message: api.message}, true
+		result := &c.Error{Code: api.code, Message: api.message}
+		var field *transactionFieldError
+		if errors.As(err, &field) {
+			result.FieldID, result.ClientKey = api.fieldID, field.clientKey
+		}
+		return result, true
 	}
 	var db *mysql.MySQLError
 	if errors.As(err, &db) {
