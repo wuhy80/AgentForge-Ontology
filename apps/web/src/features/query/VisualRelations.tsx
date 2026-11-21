@@ -12,6 +12,7 @@ import type { VisualRowsDraft } from './visualRows';
 type Props = {
   api: ApiClient; schema: DefinitionRecord; categories: Organization[]; editor: QueryEditor;
   rows?: RowQuery; context?: RowQueryContext;
+  leftAvailable?: boolean;
   onApply: (draft: VisualRowsDraft) => void;
   onRename: (id: string, alias: string) => void;
   onRemove: () => void;
@@ -126,15 +127,20 @@ export function VisualRelations(props: Props) {
     } finally { if (!pending.signal.aborted && current === generation.current) setBusy(false); }
   }
 
-  async function apply(candidate: QueryPathCandidate) {
+  async function apply(candidate: QueryPathCandidate, left = false) {
     if (!proposal) return;
     controller.current?.abort(); const pending = new AbortController(); controller.current = pending;
     const current = ++generation.current;
     setBusy(true); setError('');
     try {
       const added = appendVisualPath({ rows, editor }, candidate, proposal.context);
+      if (left) {
+        if (added.rows.joins.length !== 1) throw new Error('左关联只支持单跳');
+        added.rows.joins[0].type = 'left';
+      }
       const expected = compileRowQuery(added.rows, added.context, added.editor);
-      const request = { text: candidate.text, parameters: proposal.parameters, defaultCategoryId: schema.definition.categoryId, requestId: crypto.randomUUID() };
+      const draft = left ? queryToSQLDraft(expected, added.context.models[0], added.context) : undefined;
+      const request = { text: draft?.text ?? candidate.text, parameters: draft?.parameters ?? proposal.parameters, defaultCategoryId: schema.definition.categoryId, requestId: crypto.randomUUID() };
       const analysis = await api.analyzeOntologySQL(request, pending.signal);
       await checkResponse(request, analysis);
       if (pending.signal.aborted || current !== generation.current) return;
@@ -176,7 +182,9 @@ export function VisualRelations(props: Props) {
         {proposal.truncated && <p role="status">规划未完成，请缩小范围或选择中间模型后重试。</p>}
         {!proposal.candidates.length && !proposal.message && <p>当前可用关系无法连接目标模型。</p>}
         {!proposal.truncated && proposal.candidates.map((candidate, index) => <article key={candidate.id}><strong>路径 {index + 1} · 从 {candidate.fromAlias} 接入</strong><ol>{candidate.steps.map((step, stepIndex) => <li key={stepIndex}>{step.fromAlias} → {step.category} / {step.name}（{step.direction === 'out' ? '正向' : '反向'}）→ {step.target.name} · 角色 {step.toAlias}</li>)}</ol>
-          <button type="button" className="button" disabled={busy} onClick={() => void apply(candidate)}>采用关联路径 {index + 1}</button></article>)}
+          <button type="button" className="button" disabled={busy} onClick={() => void apply(candidate)}>采用关联路径 {index + 1}</button>
+          {props.leftAvailable && !rows && candidate.steps.length === 1 && <button type="button" className="button subtle" disabled={busy} onClick={() => void apply(candidate, true)}>保留无匹配的主对象 · 路径 {index + 1}</button>}
+        </article>)}
       </div>}
     </div>}
     {error && <div className="notice notice-error" role="alert">{error}</div>}

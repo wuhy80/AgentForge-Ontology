@@ -18,11 +18,11 @@ const modelFor = (schemaId: string) => models.find((model) => model.schemaId ===
 function queryFor(request: OntologySQLRequest): QuerySpec {
   const root = /FROM "业务"\."([^"]+)" AS "([^"]+)"/.exec(request.text)!
   const nodes: RowQueryNode[] = [{ id: 'n0', schemaId: models.find((model) => model.name === root[1])!.schemaId, alias: root[2] }]
-  const joins = Array.from(request.text.matchAll(/JOIN LINK "([^"]+)" VIA "业务"\."([^"]+)" DIRECTION (OUT|IN) AS "([^"]+)"/g), ([, fromAlias, linkName, direction, alias]) => {
+  const joins = Array.from(request.text.matchAll(/(LEFT )?JOIN LINK "([^"]+)" VIA "业务"\."([^"]+)" DIRECTION (OUT|IN) AS "([^"]+)"/g), ([, left, fromAlias, linkName, direction, alias]) => {
     const link = links.find((item) => item.name === linkName)!, from = nodes.find((node) => node.alias === fromAlias)!
     const to = `n${nodes.length}`
     nodes.push({ id: to, alias, schemaId: direction === 'OUT' ? link.targetSchemaId : link.sourceSchemaId })
-    return { from: from.id, to, linkId: link.id, direction: direction.toLowerCase() as 'out' | 'in' }
+    return { ...(left ? { type: 'left' as const } : {}), from: from.id, to, linkId: link.id, direction: direction.toLowerCase() as 'out' | 'in' }
   })
   const reference = (alias: string, name: string) => {
     const node = nodes.find((item) => item.alias === alias)!, field = modelFor(node.schemaId).fields.find((item) => item.name === name)!
@@ -56,7 +56,7 @@ async function fixture(page: Page, relationFilter = false) {
     if (method === 'GET') {
       if (path === '/api/metadata/auth/session') return reply({ user: { id: 'reader', tenantId, username: 'reader', displayName: '查询用户', administrator: false, enabled: true, roleIds: [], etag: 'user' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture' })
       if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
-      if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'], rowQueries: true, maxRowJoins: 4, savedQueries: true, ...(relationFilter ? { relationFilter: 'managed-one-hop' } : {}) })
+      if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'], rowQueries: true, leftRowQueries: true, maxRowJoins: 4, savedQueries: true, ...(relationFilter ? { relationFilter: 'managed-one-hop' } : {}) })
       if (relationFilter && path === '/api/metadata/schemas/orders/links') return reply({ data: [{ linkRef: { id: 'order-customer' }, direction: 'out', name: '客户', storageMode: 'managed', hasStorageBinding: true }] })
       if (path === '/api/data/sources') return reply({ data: [], hasMore: false })
       if (path === '/api/metadata/auth/connections') return reply({ data: [], hasMore: false })
@@ -113,7 +113,7 @@ async function fixture(page: Page, relationFilter = false) {
   })
   return state
 }
-async function addCustomer(page: Page) {
+async function addCustomer(page: Page, left = false) {
   await page.getByRole('tab', { name: '可视化查询', exact: true }).click()
   await page.getByRole('checkbox', { name: '金额', exact: true }).check()
   await page.getByRole('button', { name: '添加关联', exact: true }).click()
@@ -121,12 +121,24 @@ async function addCustomer(page: Page) {
   await expect(target.getByRole('option', { name: '业务 / 客户', exact: true })).toBeAttached()
   await target.selectOption('customers')
   await page.getByRole('button', { name: '查找关联路径', exact: true }).click()
-  await page.getByRole('button', { name: '采用关联路径 1', exact: true }).click()
+  await page.getByRole('button', { name: left ? '保留无匹配的主对象 · 路径 1' : '采用关联路径 1', exact: true }).click()
   await expect(page.getByRole('checkbox', { name: '客户.名称', exact: true })).toBeVisible()
 }
 const isolated = (state: Awaited<ReturnType<typeof fixture>>) => { expect(state.errors).toEqual([]); expect(state.unexpected).toEqual([]) }
 async function setSQL(page: Page, text: string) { await page.getByLabel('OntologySQL 编辑器', { exact: true }).click(); await page.keyboard.press('ControlOrMeta+A'); await page.keyboard.insertText(text) }
 async function editorText(page: Page) { return (await page.getByLabel('OntologySQL 编辑器', { exact: true }).locator('.cm-line').allTextContents()).join('\n') }
+
+test('从可视化创建左关联并保留 SQL 类型', async ({ page }) => {
+  const state = await fixture(page)
+  await page.goto('/#query')
+  await addCustomer(page, true)
+  await expect(page.getByRole('button', { name: '添加关联', exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: '运行查询', exact: true }).click()
+  await expect.poll(() => state.queries[0]?.rows?.joins[0].type).toBe('left')
+  await page.getByRole('tab', { name: 'OntologySQL', exact: true }).click()
+  await expect.poll(() => editorText(page)).toContain('LEFT JOIN LINK')
+  isolated(state)
+})
 
 test('单跳无关联筛选保存并在可视化和 SQL 间往返', async ({ page }) => {
   const state = await fixture(page, true)

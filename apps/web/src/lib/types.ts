@@ -378,6 +378,7 @@ export interface MetadataCapabilities {
   enumReferences?: boolean
 }
 export interface DataCapabilities {
+  leftRowQueries?: boolean
   relationFilter?: 'managed-one-hop'
   mappedRelationFilter?: boolean
   backend: string
