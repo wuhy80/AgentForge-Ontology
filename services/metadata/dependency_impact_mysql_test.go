@@ -39,12 +39,16 @@ func TestMySQLDefinitionDependencyImpact(t *testing.T) {
 	checks := map[string]int{}
 	var failure error
 	revokeID := ""
+	var onAuthorize func(c.AuthorizationRequest)
 	api := NewHandler(Config{Engine: engine, ServiceToken: strings.Repeat("s", 32), Authorizer: authorizerFunc(func(_ context.Context, _ c.Principal, req c.AuthorizationRequest) (c.Decision, error) {
 		if failure != nil {
 			return c.Decision{}, failure
 		}
 		key := req.Operation + ":" + req.ResourceID
 		checks[key]++
+		if onAuthorize != nil {
+			onAuthorize(req)
+		}
 		return c.Decision{Allow: !denied[key] && !(req.ResourceID == revokeID && checks[key] > 1)}, nil
 	})})
 	definition := func(kind c.Kind, name string) c.Definition {
@@ -156,6 +160,25 @@ func TestMySQLDefinitionDependencyImpact(t *testing.T) {
 	revokeID = link.ID
 	request(url, tenant, 409)
 	revokeID = ""
+	for _, tc := range []struct {
+		id     string
+		hidden bool
+		want   int
+	}{{schema.ID, false, 409}, {link.ID, false, 409}, {link.ID, true, 200}} {
+		checks = map[string]int{}
+		denied = map[string]bool{"definition.read:" + tc.id: tc.hidden}
+		onAuthorize = func(req c.AuthorizationRequest) {
+			if req.ResourceID != fn.ID || checks["definition.read:"+fn.ID] != 2 {
+				return
+			}
+			if _, err := engine.DB().Exec("UPDATE af_meta_definitions SET current_digest=? WHERE tenant_id=? AND id=?", c.NewID(), tenant, tc.id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		request(url, tenant, tc.want)
+	}
+	onAuthorize = nil
+	denied = map[string]bool{}
 	failure = errors.New("OPA unavailable")
 	request(url, tenant, 503)
 	failure = nil

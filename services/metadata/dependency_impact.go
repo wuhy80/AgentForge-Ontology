@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 
 	"github.com/wuhy80/AgentForge-Ontology/contracts"
 )
@@ -161,6 +162,52 @@ func (h *handler) impactSnapshot(ctx context.Context, tenant string) ([]impactDe
 	return result, nil
 }
 
+// Read only the identities already exposed by the report. Hidden references
+// do not affect whether a visible report is rejected.
+func (h *handler) verifyImpactDigests(ctx context.Context, tenant string, visible []impactDefinition) error {
+	expected := make(map[string]map[string]string, len(visible))
+	args := []any{tenant}
+	for _, item := range visible {
+		summary := item.summary
+		if expected[summary.ID] == nil {
+			expected[summary.ID] = map[string]string{}
+			args = append(args, summary.ID)
+		}
+		expected[summary.ID][summary.View] = summary.ETag
+	}
+	rows, err := h.db.QueryContext(ctx, `SELECT id,current_json IS NOT NULL,current_digest,draft_json IS NOT NULL,draft_digest
+ FROM af_meta_definitions WHERE tenant_id=? AND id IN (?`+strings.Repeat(",?", len(args)-2)+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	changed := func() error {
+		return problem(409, "dependency_context_changed", "依赖中的定义已变化，请重新读取")
+	}
+	for rows.Next() {
+		var id, current, draft string
+		var hasCurrent, hasDraft bool
+		if err := rows.Scan(&id, &hasCurrent, &current, &hasDraft, &draft); err != nil {
+			return err
+		}
+		views := expected[id]
+		if digest, ok := views["current"]; ok && (!hasCurrent || digest != current) {
+			return changed()
+		}
+		if digest, ok := views["draft"]; ok && (!hasDraft || digest != draft) {
+			return changed()
+		}
+		delete(expected, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(expected) != 0 {
+		return changed()
+	}
+	return nil
+}
+
 func (h *handler) dependencyImpact(w http.ResponseWriter, r *http.Request, p contracts.Principal) error {
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
@@ -243,6 +290,9 @@ func (h *handler) dependencyImpact(w http.ResponseWriter, r *http.Request, p con
 			}
 			return err
 		}
+	}
+	if err := h.verifyImpactDigests(r.Context(), p.TenantID, visible); err != nil {
+		return err
 	}
 	writeJSON(w, 200, result)
 	return nil
