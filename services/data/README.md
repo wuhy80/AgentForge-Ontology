@@ -228,4 +228,4 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 
 ### 托管实例与关系存量检查
 
-`GET /internal/definitions/{id}/storage-impact` 要求内部服务凭据和 `X-Tenant-ID`，返回 `{"hasData":true|false}`。支持当前生效的平台托管单表 Schema 和托管 Link。读取权威定义后，在 Data 只读事务的同一快照内核对存储门禁及摘要，并按租户检查是否存在实例或关系事实。映射未就绪返回 409，暂不支持的存储返回 422。结果是检查时的快照，正式删除仍须先关闭准入，再复核存量和依赖。
+`GET /internal/definitions/{id}/storage-impact` 要求内部服务凭据和 `X-Tenant-ID`，返回 `{"hasData":true|false}`。支持当前生效的平台托管单表 Schema 和托管 Link。读取权威定义后，在 Data 只读事务的同一快照内核对存储门禁及摘要，并按租户检查是否存在实例或关系事实。也支持反向映射单表 Schema，沿用已登记来源及目录校验，只检查主表记录，按来源隔离方式应用精确租户条件。该分支在检查期间持有 Data 门禁锁。映射未就绪返回 409，暂不支持的存储返回 422。结果是检查时的快照，正式删除仍须先关闭准入，再复核存量和依赖。

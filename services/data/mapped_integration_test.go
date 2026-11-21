@@ -288,6 +288,24 @@ func TestMappedSourceIntegration(t *testing.T) {
 			if read.Code != 200 || !strings.Contains(read.Body.String(), "9007199254740993.0000") {
 				t.Fatalf("mapped single read failed: %d %s", read.Code, read.Body)
 			}
+			impactPath := "/internal/definitions/" + d.ID + "/storage-impact"
+			checkImpact := func(want bool) {
+				t.Helper()
+				response := f.request("GET", impactPath, nil, true)
+				if response.Code != 200 || mutationDecode[c.StorageDefinitionImpact](t, response).HasData != want {
+					t.Fatalf("mapped storage impact: HTTP %d %s", response.Code, response.Body)
+				}
+			}
+			checkImpact(true)
+			f.exec(0, "DELETE FROM "+f.qualified(0, primary)+" WHERE id IN (1,2,3)")
+			checkImpact(false)
+			for i, code := range []string{"P_1", "P_2", "P_3"} {
+				department := "D1"
+				if i == 2 {
+					department = "D2"
+				}
+				f.exec(0, "INSERT INTO "+f.qualified(0, primary)+" (tenant,id,code,department) VALUES (?,?,?,?)", f.tenant, i+1, code, department)
+			}
 			if denied := f.request("GET", "/data/schemas/"+d.ID+"/instances/99", nil, false); denied.Code != 404 {
 				t.Fatal("other tenant became an alias in single read")
 			}
