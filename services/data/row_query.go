@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -269,6 +270,7 @@ type rowCompiledQuery struct {
 	Sort               *c.Property
 	Fingerprint        string
 	Limit              int
+	Offset             int
 }
 type rowCursorValues struct {
 	Keys []string        `json:"keys"`
@@ -493,6 +495,26 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 			return compiled, err
 		}
 		columns = columns[:0]
+		groupColumns := make([]string, 0, len(q.Aggregate.GroupBy))
+		groupFields := make([]c.Property, 0, len(q.Aggregate.GroupBy))
+		groups := map[string]bool{}
+		for _, id := range q.Aggregate.GroupBy {
+			property, ok := properties[id]
+			if !ok || groups[id] || property.DataType == "text" || property.DataType == "longtext" {
+				return compiled, problem(422, "invalid_row_aggregate", "分组字段必须存在、唯一且支持分组")
+			}
+			if !fieldAllowed(allowed, id) {
+				return compiled, problem(403, "forbidden_field", "无权使用关联分组字段")
+			}
+			column, err := columnFor(property, true)
+			if err != nil {
+				return compiled, err
+			}
+			groups[id] = true
+			groupColumns = append(groupColumns, column)
+			groupFields = append(groupFields, property)
+		}
+		columns = append(columns, groupColumns...)
 		for _, measure := range q.Aggregate.Measures {
 			expression := "COUNT(*)"
 			if measure.Field != "" {
@@ -504,10 +526,26 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 			}
 			columns = append(columns, expression)
 		}
-		compiled.Fields = fields
-		compiled.SQL = sourceBind(plan.driver, "SELECT "+strings.Join(columns, ",")+" FROM "+from+" WHERE "+strings.Join(conditions, " AND "))
+		compiled.Fields = append(groupFields, fields...)
+		statement := "SELECT " + strings.Join(columns, ",") + " FROM " + from + " WHERE " + strings.Join(conditions, " AND ")
+		if len(groupColumns) > 0 {
+			statement += " GROUP BY " + strings.Join(groupColumns, ",")
+			order := make([]string, len(groupColumns))
+			for i := range order {
+				order[i] = strconv.Itoa(i+1) + " ASC"
+				if plan.driver == "postgresql" {
+					order[i] += " NULLS FIRST"
+				}
+			}
+			statement += " ORDER BY " + strings.Join(order, ",") + " LIMIT " + strconv.Itoa(c.MaxAggregateGroups+1)
+		}
+		compiled.SQL = sourceBind(plan.driver, statement)
 		compiled.Args = args
-		return compiled, nil
+		token := q.Page.Cursor
+		q.Page.Cursor = ""
+		compiled.Fingerprint = digest([]any{q, plan.physical})
+		compiled.Offset, err = rowCountOffset(p, plan, token, compiled.Fingerprint, secret)
+		return compiled, err
 	}
 	orderParts := []string{}
 	descending := false
@@ -821,6 +859,9 @@ func (h *handler) executeRowQuery(ctx context.Context, p c.Principal, q c.QueryS
 	})
 	if err != nil {
 		return c.QueryResult{}, err
+	}
+	if q.Aggregate != nil {
+		return pageRowCounts(p, plan, compiled, h.cfg.CursorSecret, result)
 	}
 	if result.HasMore && len(result.Rows) > 0 {
 		value, _ := json.Marshal(last)

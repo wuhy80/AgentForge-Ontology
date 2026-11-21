@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"time"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
 
 func rowCountFields(q c.QuerySpec) ([]c.Property, error) {
 	a := q.Aggregate
-	if len(a.GroupBy) != 0 || len(q.Select) != 0 || len(q.OrderBy) != 0 || q.Page.Cursor != "" ||
+	if len(a.GroupBy) > c.MaxAggregateGroupFields || len(q.Select) != 0 || len(q.OrderBy) != 0 ||
 		len(a.Measures) == 0 || len(a.Measures) > c.MaxAggregateMeasures {
-		return nil, problem(422, "unsupported_row_aggregate", "关联计数需要空投影，当前只支持不分组的计数")
+		return nil, problem(422, "unsupported_row_aggregate", "关联计数需要空投影且最多三个分组字段，按分组字段排序")
 	}
 	fields := make([]c.Property, 0, len(a.Measures))
 	seen := map[string]bool{}
@@ -46,26 +47,69 @@ func readRowCounts(ctx context.Context, runner rowQueryRunner, compiled rowCompi
 		return c.QueryResult{}, err
 	}
 	defer rows.Close()
-	if !rows.Next() {
-		if err := rows.Err(); err != nil {
+	out := c.QueryResult{Data: []c.Instance{}, Fields: compiled.Fields, AggregateMode: true, AggregateRows: []c.AggregateRow{}}
+	budget, err := newQueryBudget(safeQueryProperties(compiled.Fields))
+	if err != nil {
+		return c.QueryResult{}, err
+	}
+	for rows.Next() {
+		if len(out.AggregateRows) >= c.MaxAggregateGroups {
+			return c.QueryResult{}, problem(422, "aggregate_group_budget", "关联计数超过分组预算，请缩小查询范围")
+		}
+		values, dest := make([]any, len(compiled.Fields)), make([]any, len(compiled.Fields))
+		for i := range values {
+			dest[i] = &values[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return c.QueryResult{}, err
 		}
-		return c.QueryResult{}, problem(503, "invalid_row_aggregate", "关联计数没有返回汇总结果")
+		if err := budget.checkDatabaseRow(values); err != nil {
+			return c.QueryResult{}, err
+		}
+		item := c.AggregateRow{Values: make(map[string]json.RawMessage, len(values))}
+		for i, field := range compiled.Fields {
+			raw, err := mappedRawValue(field, values[i])
+			if err != nil {
+				return c.QueryResult{}, err
+			}
+			item.Values[field.ID] = raw
+		}
+		if err := budget.add(item); err != nil {
+			return c.QueryResult{}, err
+		}
+		out.AggregateRows = append(out.AggregateRows, item)
 	}
-	counts, dest := make([]int64, len(compiled.Fields)), make([]any, len(compiled.Fields))
-	for i := range counts {
-		dest[i] = &counts[i]
+	return out, rows.Err()
+}
+
+func rowCountOffset(p c.Principal, plan *rowQueryPlan, token, fingerprint, secret string) (int, error) {
+	if token == "" {
+		return 0, nil
 	}
-	if err := rows.Scan(dest...); err != nil {
-		return c.QueryResult{}, err
+	cursor, err := parseBoundCursor(secret, token, false)
+	if err != nil {
+		return 0, err
 	}
-	if err := rows.Close(); err != nil {
-		return c.QueryResult{}, err
+	start, err := strconv.Atoi(cursor.LastID)
+	if err != nil || start < 1 || start > c.MaxAggregateGroups || cursor.TenantID != p.TenantID ||
+		cursor.Subject != p.Subject || cursor.SchemaID != plan.nodes[0].node.SchemaID || cursor.Digest != plan.definitions ||
+		cursor.Authorization != plan.authorization || cursor.Fingerprint != fingerprint || len(cursor.LastValue) != 0 {
+		return 0, problem(422, "invalid_cursor", "关联统计条件或授权已改变，请重新运行")
 	}
-	values := make(map[string]json.RawMessage, len(counts))
-	for i, count := range counts {
-		values[compiled.Fields[i].ID] = json.RawMessage(strconv.Quote(strconv.FormatInt(count, 10)))
+	return start, nil
+}
+
+func pageRowCounts(p c.Principal, plan *rowQueryPlan, compiled rowCompiledQuery, secret string, result c.QueryResult) (c.QueryResult, error) {
+	start := min(compiled.Offset, len(result.AggregateRows))
+	end := min(start+compiled.Limit, len(result.AggregateRows))
+	result.HasMore = end < len(result.AggregateRows)
+	result.AggregateRows = result.AggregateRows[start:end]
+	if !result.HasMore {
+		return result, nil
 	}
-	return c.QueryResult{Data: []c.Instance{}, Fields: compiled.Fields, AggregateMode: true,
-		AggregateRows: []c.AggregateRow{{Values: values}}}, nil
+	var err error
+	result.NextCursor, err = signCursor(secret, pageCursor{Fingerprint: compiled.Fingerprint, TenantID: p.TenantID,
+		Subject: p.Subject, SchemaID: plan.nodes[0].node.SchemaID, Digest: plan.definitions, Authorization: plan.authorization,
+		LastID: strconv.Itoa(end), Expires: time.Now().Add(15 * time.Minute).Unix()})
+	return result, err
 }

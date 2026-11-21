@@ -183,7 +183,27 @@ func validateRowBinding(plan *rowQueryPlan, q c.QuerySpec) ([]c.Property, error)
 		return nil, err
 	}
 	if q.Aggregate != nil {
-		return rowCountFields(q)
+		measures, err := rowCountFields(q)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range q.Aggregate.GroupBy {
+			property, err := field(id)
+			if err != nil {
+				return nil, err
+			}
+			if seen[id] || property.DataType == "text" || property.DataType == "longtext" {
+				return nil, problem(422, "invalid_row_aggregate", "分组字段必须唯一且支持分组")
+			}
+			seen[id] = true
+			node := rowNodeByID(plan, strings.SplitN(id, ".", 2)[0])
+			property.ID, property.Name = id, node.node.Alias+"."+property.Name
+			if leftRowTarget(plan, node.node.ID) {
+				property.Required, property.Nullable = false, true
+			}
+			fields = append(fields, property)
+		}
+		return append(fields, measures...), nil
 	}
 	for _, order := range q.OrderBy {
 		property, err := field(order.Field)

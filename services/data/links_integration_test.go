@@ -174,6 +174,22 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 				string(counts.AggregateRows[0].Values["mRoots"]) != `"1"` {
 				t.Fatalf("null-extended count: %+v", counts)
 			}
+			count.Where = nil
+			count.Aggregate.GroupBy = []string{left.Select[1]}
+			firstGroup := f.query(count, 200)
+			if len(firstGroup.AggregateRows) != 1 || firstGroup.NextCursor == "" ||
+				string(firstGroup.AggregateRows[0].Values[left.Select[1]]) != "null" ||
+				string(firstGroup.AggregateRows[0].Values["mDetails"]) != `"0"` {
+				t.Fatalf("unmatched group: %+v", firstGroup)
+			}
+			count.Page.Cursor = firstGroup.NextCursor
+			lastGroup := f.query(count, 200)
+			if len(lastGroup.AggregateRows) != 1 || lastGroup.HasMore ||
+				string(lastGroup.AggregateRows[0].Values["mDetails"]) != `"2"` {
+				t.Fatalf("visible group: %+v", lastGroup)
+			}
+			count.Aggregate.GroupBy = []string{left.Select[0]}
+			f.query(count, 422)
 			for _, mode := range []string{"source", "target"} {
 				fk := link
 				fk.ID = c.NewID()

@@ -104,7 +104,7 @@ SDK通过 `rows(scope)` 或fromSpec接受稳定节点/Link计划，关联字段�
 
 ### 同库关联计数
 
-根对象使用 `rows` 指定同库关联范围，`select` 为空，`aggregate.measures` 声明计数指标。当前仅支持无分组、无排序、无游标的单个结果行。
+根对象使用 `rows` 指定同库关联范围，`select` 为空，`aggregate.measures` 声明计数指标。可在 `aggregate.groupBy` 指定最多三个有权读取的 `节点ID.字段ID`。结果按分组字段升序排列，空值在前，支持签名游标分页。超过 1000 个分组时整份拒绝。
 
 | 指标写法 | 计数单位 |
 | --- | --- |
@@ -113,7 +113,7 @@ SDK通过 `rows(scope)` 或fromSpec接受稳定节点/Link计划，关联字段�
 | `{"id":"mDetails","op":"count","field":"n1"}` | 右侧出现次数，缺失右侧计为零 |
 | `{"id":"mObjects","op":"countDistinct","field":"n1"}` | 右侧去重对象数 |
 
-带节点的计数以该角色的实例主键为身份。授权、租户条件和用户筛选在计数前应用。结果沿用聚合响应，计量值为 int64 字符串，最多 20 项。可经公共查询、绑定和个人查询 JSON API 使用。分组以及 OntologySQL、可视化和 TypeScript SDK 构造入口继续待开发。
+带节点的计数以该角色的实例主键为身份。授权、租户条件和用户筛选在计数前应用。结果沿用聚合响应，计量值为 int64 字符串，最多 20 项。可经公共查询、绑定和个人查询 JSON API 使用。OntologySQL、可视化和 TypeScript SDK 构造入口继续待开发。
 
 ## 1. DataSet 的定位
 
