@@ -10,10 +10,11 @@ export function ActionRecordReadEditor({ action, schemas, locked, onChange }: {
   const input = (action.input ?? []).filter((parameter) => parameter.id && parameter.dataType === 'uuid' && parameter.required && !parameter.nullable && parameter.default === undefined)
   const read = action.recordRead
   const schema = available.find(({ definition }) => definition.id === read?.schemaId)?.definition.schema
-  if (!read && (locked || !action.runtime || action.sideEffects !== 'none')) return null
+  if (!read && (locked || !action.runtime || !['none', 'dataWrite'].includes(action.sideEffects))) return null
   return <section className="model-editor-panel">
     <h3>读取当前记录</h3>
     <p className="muted">发布后按调用者权限读取声明字段。源码从输入「当前记录」按字段 ID 取值。</p>
+    {action.sideEffects === 'dataWrite' && <p className="muted">选择读取模型后，写入范围限定为更新本次读取的记录。</p>}
     <div className="form-grid">
       <label>读取模型<select className="field" disabled={locked} value={read?.schemaId ?? ''} onChange={(event) => onChange(event.target.value ? { schemaId: event.target.value, instanceInputId: input[0]?.id ?? '', fieldIds: [] } : undefined)}>
         <option value="">不读取</option>

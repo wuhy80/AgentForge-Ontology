@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
+	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 )
 
-func verifyActionRecordReadHTTP(t *testing.T, admin, other *executionHTTP, executionURL, dataURL string,
+func verifyActionRecordReadHTTP(t *testing.T, admin, other *executionHTTP, principal c.User, executionURL, dataURL string,
 	publish func(c.Definition) c.CurrentDefinition, savePolicy func([]c.PermissionRule), base []c.PermissionRule, role string,
 ) {
 	model := publish(c.Definition{Kind: c.KindSchema, Name: "执行读取验收记录", Schema: &c.Schema{
@@ -83,6 +84,64 @@ func verifyActionRecordReadHTTP(t *testing.T, admin, other *executionHTTP, execu
 			map[string]string{"If-Match": `"` + changed.ETag + `"`}, 200, &reverted)
 		row = reverted
 		t.Logf("%s current-record invocation, authorization, replay and stale-result checks passed", runtime.language)
+	}
+	writer := publish(c.Definition{Kind: c.KindAction, Name: "读取后更新记录", Action: &c.Callable{
+		SideEffects: "dataWrite", TargetSchemaIDs: []string{model.Definition.ID},
+		DataWrite:  []c.DataWriteCapability{{SchemaID: model.Definition.ID, Operations: []string{"update"}}},
+		Input:      []c.Property{{ID: "anchor", Name: "实例", DataType: "uuid", Required: true}},
+		Output:     []c.Property{{Name: "结果", DataType: "int64", Required: true}},
+		RecordRead: &c.ActionRecordRead{SchemaID: model.Definition.ID, InstanceInputID: "anchor", FieldIDs: []string{value}},
+		Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 30, Source: fmt.Sprintf(
+			"def main(inputs, ctx):\n    v = str(int(inputs['当前记录'][%q]) + 1)\n    ctx.data.update(%q, inputs['实例'], {%q: v}, '\"current-record\"', 'update')\n    return {'结果': v}\n",
+			value, model.Definition.ID, value)},
+	}})
+	intent := c.InvocationRequest{DefinitionID: writer.Definition.ID, Input: map[string]json.RawMessage{"anchor": raw(row.ID)}}
+	var session c.SessionCheck
+	for _, cookie := range admin.cookies {
+		if cookie.Name == platform.SessionCookieName {
+			session = c.SessionCheck{Token: cookie.Value, Method: "POST", CSRFToken: admin.csrf, Origin: executionOrigin}
+		}
+	}
+	var snapshot c.ActionRecordSnapshot
+	internalHeaders := map[string]string{"Authorization": "Bearer " + serviceToken}
+	admin.request("POST", dataURL+"/internal/execution/current-record", c.ActionRecordReadRequest{
+		Session: session, ActionID: writer.Definition.ID, DefinitionDigest: writer.ETag, InstanceID: row.ID,
+		TenantID: principal.TenantID, SubjectID: principal.ID,
+	}, internalHeaders, 200, &snapshot)
+	headers := map[string]string{"Idempotency-Key": c.NewID()}
+	var written, replay c.Invocation
+	admin.request("POST", path, intent, headers, 201, &written)
+	if written.Status != "succeeded" || written.Transaction == nil || !written.Transaction.Committed ||
+		string(written.Output[writer.Definition.Action.Output[0].ID]) != `"9007199254740994"` {
+		t.Fatalf("read and write did not commit: %+v", written)
+	}
+	admin.request("POST", path, intent, headers, 200, &replay)
+	if replay.ID != written.ID {
+		t.Fatal("read and write replay ran the Action again")
+	}
+	var stored c.Instance
+	admin.request("GET", instances+"/"+row.ID, nil, nil, 200, &stored)
+	if stored.ETag == row.ETag || string(stored.Values[value]) != `"9007199254740994"` {
+		t.Fatalf("record update missing or repeated: %+v", stored)
+	}
+	invocationID := c.NewID()
+	var stale c.WriteTransactionResult
+	admin.request("POST", dataURL+"/internal/execution/transactions", c.ExecutionTransactionRequest{
+		Session: session, InvocationID: invocationID, DefinitionID: writer.Definition.ID, ImplementationID: writer.Definition.ID,
+		DefinitionDigest: writer.ETag, ImplementationDigest: writer.ETag,
+		RecordRead: &c.ExecutionRecordWriteGuard{InstanceID: row.ID, ETag: snapshot.ETag, Authorization: snapshot.Authorization},
+		Transaction: c.WriteTransactionRequest{IdempotencyKey: "execution:" + invocationID, Operations: []c.TransactionOperation{{
+			Operation: "update", SchemaID: model.Definition.ID, ID: row.ID, ClientKey: "stale",
+			IfMatch: `"` + snapshot.ETag + `"`, Values: map[string]json.RawMessage{value: raw("0")},
+		}}},
+	}, internalHeaders, 200, &stale)
+	if stale.Committed || stale.Status != "failed" || stale.Error == nil || stale.Error.Code != "precondition_failed" {
+		t.Fatalf("stale record guard did not terminate safely: %+v", stale)
+	}
+	var unaffected c.Instance
+	admin.request("GET", instances+"/"+row.ID, nil, nil, 200, &unaffected)
+	if unaffected.ETag != stored.ETag || string(unaffected.Values[value]) != string(stored.Values[value]) {
+		t.Fatal("stale transaction modified the record")
 	}
 	savePolicy(base)
 }

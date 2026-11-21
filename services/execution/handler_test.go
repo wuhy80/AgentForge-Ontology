@@ -238,6 +238,46 @@ type recordReadFixture struct {
 	read func(c.ActionRecordReadRequest) (c.ActionRecordSnapshot, error)
 }
 
+func TestActionRecordWriteUsesSnapshotETagAndRecoversReceipt(t *testing.T) {
+	f, store, runner := dataFixture()
+	a := f.fn
+	a.Kind, a.ID, a.Action, a.Function = c.KindAction, "record-write", a.Function, nil
+	a.Action.Input = []c.Property{{ID: "anchor", Name: "实例", DataType: "uuid", Required: true}}
+	a.Action.TargetSchemaIDs = []string{"schema"}
+	a.Action.DataWrite[0].Operations = []string{"update"}
+	a.Action.RecordRead = &c.ActionRecordRead{SchemaID: "schema", InstanceInputID: "anchor", FieldIDs: []string{"field"}}
+	f.meta.set(a)
+	const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	runner.result.Operations[0].Operation = "update"
+	runner.result.Operations[0].ID = id
+	runner.result.Operations[0].IfMatch = `"untrusted-runner-etag"`
+	snapshot := c.ActionRecordSnapshot{ETag: "original", Authorization: "auth", Values: map[string]json.RawMessage{"field": json.RawMessage(`"before"`)}}
+	calls := 0
+	client := recordReadFixture{read: func(c.ActionRecordReadRequest) (c.ActionRecordSnapshot, error) { return snapshot, nil },
+		DataTransactionClient: dataClientFunc(func(_ context.Context, r c.ExecutionTransactionRequest) (c.WriteTransactionResult, error) {
+			calls++
+			if r.RecordRead == nil || r.RecordRead.InstanceID != id || r.RecordRead.Authorization != "auth" ||
+				r.Transaction.Operations[0].IfMatch != `"original"` {
+				t.Fatal("durable request lost the prefetch constraint")
+			}
+			if calls == 1 {
+				snapshot.ETag = "after-write"
+				return c.WriteTransactionResult{}, errors.New("lost response")
+			}
+			if !r.Lookup {
+				t.Fatal("receipt lookup retried the mutation")
+			}
+			return c.WriteTransactionResult{Atomic: true, Committed: true, Status: "committed"}, nil
+		})}
+	setDataHandler(f, store, runner, client)
+	body := `{"definitionId":"record-write","input":{"anchor":"` + id + `"}}`
+	pending := invocation(t, request(f.h, "POST", "/execution/invocations", "write-current", body), 202)
+	done := invocation(t, request(f.h, "GET", "/execution/invocations/"+pending.ID, "", ""), 200)
+	if done.Status != "succeeded" || runner.calls.Load() != 1 || calls != 2 {
+		t.Fatalf("unexpected transaction recovery: %+v", done)
+	}
+}
+
 func (f recordReadFixture) ReadActionRecord(_ context.Context, request c.ActionRecordReadRequest) (c.ActionRecordSnapshot, error) {
 	return f.read(request)
 }

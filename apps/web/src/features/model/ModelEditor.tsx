@@ -385,7 +385,11 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
             {definition.action && <ActionTargetsEditor selected={callable.targetSchemaIds ?? []} schemas={currentSchemas} categories={categories} onChange={(targetSchemaIds) => update({ action: { ...callable, targetSchemaIds: targetSchemaIds.length ? targetSchemaIds : undefined } })} />}
             <CallableImplementationEditor callable={callable} kind={key} locked={locked} disabled={disabled} functions={currentFunctions} schemas={currentSchemas} onChange={(value) => update({ [key]: value })} diagnostics={visibleDiagnostics} diagnosticFocus={diagnosticFocus} api={api} definitionId={definition.id} />
             <PropertyEditor title="输入参数" properties={callable.input ?? []} enums={currentEnums} locked={locked} onChange={(input) => update({ [key]: { ...callable, input } })} />
-            {definition.action && (recordReadAvailable || callable.recordRead) && <ActionRecordReadEditor action={callable} schemas={currentSchemas} locked={locked} onChange={(recordRead) => update({ action: { ...callable, recordRead } })} />}
+            {definition.action && (recordReadAvailable || callable.recordRead) && <ActionRecordReadEditor action={callable} schemas={currentSchemas} locked={locked} onChange={(recordRead) => update({
+              action: { ...callable, recordRead, ...(recordRead && callable.sideEffects === 'dataWrite' ? {
+                dataWrite: [{ schemaId: recordRead.schemaId, operations: ['update'] }],
+              } : {}) },
+            })} />}
             <PropertyEditor title="输出参数" properties={callable.output ?? []} enums={currentEnums} locked={locked} onChange={(output) => update({ [key]: { ...callable, output } })} />
             <CallableTestCasesEditor key={`${definition.tenantId}:${definition.id}`} callable={callable} disabled={disabled} onChange={(testCases) => update({ [key]: { ...callable, testCases: testCases.length ? testCases : undefined } })} />
           </>

@@ -63,7 +63,11 @@ ctx.data.create(明细SchemaID, {数量字段ID: "1"}, "detail",
 
 无副作用的独立源码 Action 可声明 `recordRead: {schemaId, instanceInputId, fieldIds}`。模型须是已关联的平台托管 Schema；先保存一个无默认值的必填 UUID 输入，再按稳定 ID 选择最多 16 个字段。只支持浏览器会话调用当前态。输入名「当前记录」是保留名，Python、JavaScript 和 Go 沿现有输入协议以该名称取得按字段 ID 索引的 JSON 对象。长正文和超过 32 KiB 的记录快照拒绝读取。
 
-Execution 在启动前通过 Data 预取授权字段。容器仅收到字段值，Execution 持久化快照摘要供复核。重放和读取历史结果会重新校验权限、记录 ETag 和字段值的摘要，记录变更后须重新调用。调用代码仍可按声明产生业务输出。读取后写入、Function 绑定、草稿试运行、外部连接、任意动态查询及跨来源读取仍待扩展。
+Execution 在启动前通过 Data 预取授权字段。容器仅收到字段值，Execution 持久化快照摘要供复核。只读调用重放和读取历史结果会重新校验权限、记录 ETag 和字段值的摘要，记录变更后须重新调用。Function 绑定、草稿试运行、外部连接、任意动态查询及跨来源读取仍待扩展。
+
+#### 读取后更新同一记录
+
+独立源码 Action 可同时声明 `recordRead`、`sideEffects=dataWrite` 及同一 Schema 的单项 `update` 写入能力。每次调用可暂存一次更新，记录 ID 必须与读取参数一致。三语言沿用现有 update SDK 签名，If-Match 参数可传完整带引号的占位字符串 `"current-record"`，Execution 持久化计划前以实际读取的强 ETag 替换该参数。Data 在事务内验证并发凭证与当前写入权限，提交前复核读取授权。状态查询与原请求重试复用持久化计划和原事务回执，避免脚本重跑。
 
 ### 受控数据能力扩展（2026-11-16，候选）
 

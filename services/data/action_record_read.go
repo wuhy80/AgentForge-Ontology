@@ -97,7 +97,7 @@ func (h *handler) readActionRecord(ctx context.Context, p c.Principal, request c
 		if err != nil {
 			return err
 		}
-		snapshot = c.ActionRecordSnapshot{ETag: instance.ETag, Values: instance.Values}
+		snapshot = c.ActionRecordSnapshot{ETag: instance.ETag, Values: instance.Values, Authorization: digest(decision)}
 		if encoded, err := json.Marshal(snapshot); err != nil || len(encoded) > c.MaxActionRecordBytes {
 			return problem(422, "record_read_budget", "当前记录超过读取预算")
 		}

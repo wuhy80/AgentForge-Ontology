@@ -93,12 +93,19 @@ type ScriptExecutionResult struct {
 // Data revalidates the original session, current definitions and capabilities;
 // the service credential by itself never authorizes business writes.
 type ExecutionTransactionRequest struct {
-	Session              SessionCheck            `json:"session"`
-	InvocationID         string                  `json:"invocationId"`
-	DefinitionID         string                  `json:"definitionId"`
-	DefinitionDigest     string                  `json:"definitionDigest"`
-	ImplementationID     string                  `json:"implementationId"`
-	ImplementationDigest string                  `json:"implementationDigest"`
-	Lookup               bool                    `json:"lookup,omitempty"`
-	Transaction          WriteTransactionRequest `json:"transaction"`
+	Session              SessionCheck               `json:"session"`
+	InvocationID         string                     `json:"invocationId"`
+	DefinitionID         string                     `json:"definitionId"`
+	DefinitionDigest     string                     `json:"definitionDigest"`
+	ImplementationID     string                     `json:"implementationId"`
+	ImplementationDigest string                     `json:"implementationDigest"`
+	Lookup               bool                       `json:"lookup,omitempty"`
+	Transaction          WriteTransactionRequest    `json:"transaction"`
+	RecordRead           *ExecutionRecordWriteGuard `json:"recordRead,omitempty"`
+}
+
+type ExecutionRecordWriteGuard struct {
+	InstanceID    string `json:"instanceId"`
+	ETag          string `json:"etag"`
+	Authorization string `json:"authorization"`
 }

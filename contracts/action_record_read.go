@@ -25,8 +25,9 @@ type ActionRecordReadRequest struct {
 }
 
 type ActionRecordSnapshot struct {
-	ETag   string                     `json:"etag"`
-	Values map[string]json.RawMessage `json:"values"`
+	ETag          string                     `json:"etag"`
+	Values        map[string]json.RawMessage `json:"values"`
+	Authorization string                     `json:"authorization,omitempty"`
 }
 
 func ValidateActionRecordRead(d Definition) error {
@@ -39,9 +40,13 @@ func ValidateActionRecordRead(d Definition) error {
 	}
 	read := a.RecordRead
 	if d.Kind != KindAction || a.Runtime == nil || a.FunctionID != "" || a.ArtifactRef != "" ||
-		a.SideEffects != "none" || len(a.DataWrite) != 0 || read.SchemaID == "" ||
+		(a.SideEffects != "none" && a.SideEffects != "dataWrite") || read.SchemaID == "" ||
 		!slices.Contains(a.TargetSchemaIDs, read.SchemaID) || len(read.FieldIDs) == 0 || len(read.FieldIDs) > 16 {
-		return errors.New("读取声明需要无副作用的独立源码 Action、已关联模型及 1 至 16 个字段")
+		return errors.New("读取声明需要独立源码 Action、已关联模型及 1 至 16 个字段")
+	}
+	if a.SideEffects == "dataWrite" && (len(a.DataWrite) != 1 || a.DataWrite[0].SchemaID != read.SchemaID ||
+		len(a.DataWrite[0].Operations) != 1 || a.DataWrite[0].Operations[0] != "update") {
+		return errors.New("读取后写入只允许更新同一模型的当前记录")
 	}
 	seen := map[string]bool{}
 	for _, id := range read.FieldIDs {

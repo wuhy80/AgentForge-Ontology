@@ -439,7 +439,11 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		if err != nil {
 			return err
 		}
-		record.RecordReadDigest = digest(snapshot)
+		record.RecordReadDigest = actionRecordDigest(snapshot)
+		if rootCallable.SideEffects == "dataWrite" {
+			record.RecordReadETag = snapshot.ETag
+			record.RecordReadAuthorization = snapshot.Authorization
+		}
 		runnerInput = make(map[string]json.RawMessage, len(namedInput)+1)
 		for key, value := range namedInput {
 			runnerInput[key] = value
@@ -482,7 +486,7 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	var runErr error
 	if rootCallable.SideEffects == "dataWrite" {
 		var execution c.ScriptExecutionResult
-		execution, runErr = h.cfg.Runner.(DataRunner).RunWithData(runCtx, runtime, namedInput, imageID)
+		execution, runErr = h.cfg.Runner.(DataRunner).RunWithData(runCtx, runtime, runnerInput, imageID)
 		output, operations = execution.Output, execution.Operations
 	} else {
 		output, runErr = h.cfg.Runner.Run(runCtx, runtime, runnerInput, imageID)
@@ -578,7 +582,7 @@ func (h *handler) checkRecord(ctx context.Context, r *http.Request, p c.Principa
 		if err != nil {
 			return err
 		}
-		if record.RecordReadDigest == "" || digest(snapshot) != record.RecordReadDigest {
+		if record.Transaction == nil && (record.RecordReadDigest == "" || actionRecordDigest(snapshot) != record.RecordReadDigest) {
 			return problem(409, "record_changed", "当前记录已改变，请重新调用")
 		}
 	}

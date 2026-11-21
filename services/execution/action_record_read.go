@@ -72,13 +72,7 @@ func (h *handler) actionRecordSnapshot(ctx context.Context, r *http.Request, rec
 	if check.AccessToken != "" || check.Token == "" {
 		return out, problem(403, "connection_scope_denied", "当前记录读取仅开放浏览器会话")
 	}
-	var instanceID string
-	for _, p := range record.Root.Action.Input {
-		if p.ID == read.InstanceInputID {
-			_ = json.Unmarshal(record.Input[p.Name], &instanceID)
-			break
-		}
-	}
+	instanceID := actionRecordInstanceID(record)
 	if instanceID == "" {
 		return out, problem(422, "invalid_record_read", "缺少当前记录实例参数")
 	}
@@ -98,4 +92,23 @@ func (h *handler) actionRecordSnapshot(ctx context.Context, r *http.Request, rec
 		}
 	}
 	return out, nil
+}
+
+func actionRecordInstanceID(record Record) string {
+	read := record.Root.Action.RecordRead
+	for _, p := range record.Root.Action.Input {
+		if p.ID == read.InstanceInputID {
+			var id string
+			_ = json.Unmarshal(record.Input[p.Name], &id)
+			return id
+		}
+	}
+	return ""
+}
+
+func actionRecordDigest(snapshot c.ActionRecordSnapshot) string {
+	// Authorization is checked afresh by Data. Keep existing read-only
+	// invocation digests compatible with snapshots from before write guards.
+	snapshot.Authorization = ""
+	return digest(snapshot)
 }

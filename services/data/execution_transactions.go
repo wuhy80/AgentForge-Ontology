@@ -114,6 +114,32 @@ func (h *handler) checkExecutionTransaction(ctx context.Context, p c.Principal, 
 	if rootCall == nil || implCall == nil || rootCall.SideEffects != "dataWrite" || implCall.SideEffects != "dataWrite" || implCall.Runtime == nil || implCall.ArtifactRef != "" || implCall.FunctionID != "" || c.ValidateScriptRuntime(implCall.Runtime) != nil {
 		return problem(422, "invalid_execution_context", "定义未声明可执行的数据写入实现")
 	}
+	if rootCall.RecordRead != nil {
+		guard := body.RecordRead
+		if c.ValidateActionRecordRead(root.Definition) != nil || guard == nil || !uuidPattern.MatchString(guard.InstanceID) ||
+			guard.ETag == "" || guard.Authorization == "" || len(body.Transaction.Operations) != 1 {
+			return problem(403, "data_scope_denied", "缺少有效的当前记录写入约束")
+		}
+		op := body.Transaction.Operations[0]
+		if op.Operation != "update" || op.SchemaID != rootCall.RecordRead.SchemaID || op.ID != guard.InstanceID ||
+			op.IfMatch != `"`+guard.ETag+`"` {
+			return problem(403, "data_scope_denied", "事务只能更新原读取记录")
+		}
+		decision, err := h.authorize(ctx, p, "instance.read", op.SchemaID)
+		if err != nil {
+			return err
+		}
+		if !body.Lookup && digest(decision) != guard.Authorization {
+			return problem(403, "authorization_changed", "读取权限已改变，不能提交原记录更新")
+		}
+		for _, field := range rootCall.RecordRead.FieldIDs {
+			if !fieldAllowed(decision.ReadFields, field) {
+				return problem(403, "record_fields_unavailable", "声明字段不可读取")
+			}
+		}
+	} else if body.RecordRead != nil {
+		return problem(403, "data_scope_denied", "调用定义未声明当前记录读取")
+	}
 	if root.Definition.ID != implementation.Definition.ID && (root.Definition.Kind != c.KindAction || rootCall.FunctionID != implementation.Definition.ID || rootCall.Runtime != nil || rootCall.ArtifactRef != "" || implementation.Definition.Kind != c.KindFunction) {
 		return problem(422, "invalid_execution_context", "Action实现绑定不一致")
 	}

@@ -138,6 +138,16 @@ func allowsDataWrite(callable *c.Callable, op c.TransactionOperation) bool {
 }
 
 func (h *handler) prepareDataTransaction(w http.ResponseWriter, r *http.Request, p c.Principal, record Record, operations []c.TransactionOperation) error {
+	if record.Root.Action != nil && record.Root.Action.RecordRead != nil {
+		read := record.Root.Action.RecordRead
+		if len(operations) != 1 || operations[0].Operation != "update" || operations[0].SchemaID != read.SchemaID ||
+			operations[0].ID != actionRecordInstanceID(record) || record.RecordReadETag == "" || record.RecordReadAuthorization == "" {
+			record.Invocation.Status, record.Invocation.Output = "failed", nil
+			record.Invocation.Error = &c.Error{Code: "data_scope_denied", Message: "读取后写入仅允许更新本次读取的记录"}
+			return h.finish(w, r, p, record, 201)
+		}
+		operations[0].IfMatch = `"` + record.RecordReadETag + `"`
+	}
 	if len(operations) > c.MaxBulkWriteItems {
 		record.Invocation.Status, record.Invocation.Output = "failed", nil
 		record.Invocation.Error = &c.Error{Code: "invalid_write_plan", Message: "事务最多包含100个写操作"}
@@ -150,10 +160,10 @@ func (h *handler) prepareDataTransaction(w http.ResponseWriter, r *http.Request,
 			return h.finish(w, r, p, record, 201)
 		}
 	}
+	record.Transaction = &c.WriteTransactionRequest{IdempotencyKey: "execution:" + record.Invocation.ID, Operations: operations}
 	if err := h.checkRecord(r.Context(), r, p, record); err != nil {
 		return err
 	}
-	record.Transaction = &c.WriteTransactionRequest{IdempotencyKey: "execution:" + record.Invocation.ID, Operations: operations}
 	record.PreparedOutput, record.Invocation.Output = record.Invocation.Output, nil
 	record.Invocation.Status = "committing"
 	record.Invocation.Transaction = &c.InvocationTransaction{Status: "pending", OperationCount: len(operations)}
@@ -185,6 +195,9 @@ func (h *handler) resolveDataTransaction(w http.ResponseWriter, r *http.Request,
 		return err
 	}
 	request := c.ExecutionTransactionRequest{Session: check, InvocationID: record.Invocation.ID, DefinitionID: record.Root.ID, DefinitionDigest: digest(record.Root), ImplementationID: record.Implementation.ID, ImplementationDigest: digest(record.Implementation), Transaction: *record.Transaction, Lookup: lookup}
+	if record.Root.Action != nil && record.Root.Action.RecordRead != nil {
+		request.RecordRead = &c.ExecutionRecordWriteGuard{InstanceID: actionRecordInstanceID(record), ETag: record.RecordReadETag, Authorization: record.RecordReadAuthorization}
+	}
 	var result c.WriteTransactionResult
 	if !dataTransactionsConfigured(h.cfg.DataTransactions) {
 		err = problem(503, "data_transactions_unavailable", "数据事务服务未配置")
