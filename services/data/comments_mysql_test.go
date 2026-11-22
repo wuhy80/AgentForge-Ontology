@@ -39,6 +39,16 @@ func TestMySQLRecordComments(t *testing.T) {
 	if got := workspaceInbox(); len(got) != 1 || got[0].RecordID != row.ID || got[0].ID != out.Data[1].ID {
 		t.Fatalf("unexpected workspace inbox: %+v", got)
 	}
+	f.mu.Lock()
+	f.policy["instance.read"] = c.Decision{Allow: false}
+	f.mu.Unlock()
+	if got := workspaceInbox(); len(got) != 0 {
+		t.Fatal("reply remained visible after record permission was revoked")
+	}
+	f.call("PUT", inbox+"/"+out.Data[1].ID, nil, "", 403)
+	f.mu.Lock()
+	delete(f.policy, "instance.read")
+	f.mu.Unlock()
 	type unreadCount struct{ Unread int }
 	if got := mutationDecode[unreadCount](t, f.call("GET", inbox, nil, "", 200)); got.Unread != 1 {
 		t.Fatalf("unread count: %d", got.Unread)

@@ -136,6 +136,12 @@ func main() {
                 ('POST', '/api/metadata/auth/login', '/metadata/auth/login'),
                 ('POST', '/api/ontoapp-ontology/metadata/auth/login', '/metadata/auth/login'),
                 ('GET', '/api/ontoapp-ontology/metadata/auth/session', '/metadata/auth/session'),
+                ('GET', '/api/ontoapp-ontology/metadata/auth/mention-accounts?prefix=review', '/metadata/auth/mention-accounts?prefix=review'),
+                ('GET', '/api/ontoapp-ontology/data/inbox/comment-replies?cursor=next', '/data/inbox/comment-replies?cursor=next'),
+                ('PUT', '/api/ontoapp-ontology/data/schemas/model/instances/record/comment-replies/reply', '/data/schemas/model/instances/record/comment-replies/reply'),
+                ('POST', '/api/data/schemas/model/instances/record/comments', '/data/schemas/model/instances/record/comments'),
+                ('PATCH', '/api/data/schemas/model/instances/record/comments/reply', '/data/schemas/model/instances/record/comments/reply'),
+                ('GET', '/api/data/schemas/model/instances/record/files/field?fileId=sample', '/data/schemas/model/instances/record/files/field?fileId=sample'),
                 ('GET', '/api/ontoapp-ontology/metadata/definitions/test?operation=patch', '/data/schemas/test/form?operation=patch'),
                 ('GET', '/api/ontoapp-ontology/metadata/definitions/a%2Db', '/data/schemas/a-b/form'),
                 ('GET', '/api/ontoapp-ontology/data/query/context?limit=50', '/data/query/context?limit=50'),
@@ -165,6 +171,8 @@ func main() {
                 ('GET', '/api/data/sources/source/tables/a%20b', '/data/sources/source/tables/a%20b'),
                 ('GET', '/api/ontoapp/workspace', '/api/ontoapp/workspace'),
             ]:
+                # Keep route coverage below the shared API limiter budget.
+                time.sleep(0.06)
                 forwarded_headers = dict(headers)
                 status, response_headers, value = request(method, path, forwarded_headers)
                 assert status == 200, (method, path, status)
