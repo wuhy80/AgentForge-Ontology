@@ -367,6 +367,7 @@ export interface MetadataCapabilities {
   callableLifecycle?: 'pure-only'
   callableLifecyclePreview?: boolean
   enumLifecycle?: boolean
+  managedLinkLifecycle?: boolean
   actionRecordRead?: boolean
   dependencyImpact?: 'direct-definitions'
   definitions: Kind[]

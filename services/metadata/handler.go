@@ -199,7 +199,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p contrac
 	if err := h.authorize(r.Context(), p, "definition.read", "", ""); err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active", "disabled"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "callableLifecycle": "pure-only", "callableLifecyclePreview": true, "enumLifecycle": true, "actionRecordRead": true, "schemaInheritance": false, "dbToSchema": true})
+	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active", "disabled"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "disable": false, "callableLifecycle": "pure-only", "callableLifecyclePreview": true, "enumLifecycle": true, "managedLinkLifecycle": true, "actionRecordRead": true, "schemaInheritance": false, "dbToSchema": true})
 	return nil
 }
 

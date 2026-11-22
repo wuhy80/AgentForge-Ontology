@@ -156,6 +156,9 @@ func (h *handler) savedQueriesSaveHTTP(update bool) http.HandlerFunc {
 		now := time.Now().UTC().Truncate(time.Microsecond)
 		out := c.SavedQuery{SavedQuerySummary: c.SavedQuerySummary{ID: id, Name: input.Name, ETag: digest([]any{p.TenantID, p.Subject, id, c.NewID(), input}), CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano)}, Source: input.Source, Query: input.Query, Parameters: input.Parameters}
 		err = h.cfg.Engine.WithTx(r.Context(), func(tx *sql.Tx) error {
+			if err := h.lockSavedQueryLinks(r, tx, p.TenantID, input.Query); err != nil {
+				return err
+			}
 			if update {
 				var actual string
 				var created time.Time
