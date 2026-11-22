@@ -38,13 +38,25 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 			}
 		}
 	}()
-	var savedEnumReference, impactOverBudget atomic.Bool
+	var savedEnumReference, impactOverBudget, loseStorageResponse, storagePaused atomic.Bool
 	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if impactOverBudget.Load() && (strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") || strings.HasSuffix(r.URL.Path, "/saved-query-impact")) {
 			writeJSON(w, 422, c.Error{Code: "saved_query_impact_budget", Message: "internal details"})
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") {
+			var command c.ManagedLinkLifecycle
+			if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
+				w.WriteHeader(400)
+				return
+			}
+			if !command.Preview {
+				storagePaused.Store(!command.Restore)
+				if loseStorageResponse.Swap(false) {
+					w.WriteHeader(502)
+					return
+				}
+			}
 			w.WriteHeader(204)
 			return
 		}
@@ -110,13 +122,29 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	schemaPath := "/metadata/definitions/" + lifecycleSchema.Definition.ID
 	request("GET", schemaPath+"/disable-preview", lifecycleSchema.ETag, nil, 200, nil)
 	var schemaState c.CurrentDefinition
+	loseStorageResponse.Store(true)
+	request("POST", schemaPath+"/disable", lifecycleSchema.ETag, nil, 503, nil)
+	request("GET", schemaPath, "", nil, 200, &schemaState)
+	if schemaState.Status != "active" || !storagePaused.Load() {
+		t.Fatalf("unexpected state after losing pause acknowledgement: %s, paused=%t", schemaState.Status, storagePaused.Load())
+	}
 	request("POST", schemaPath+"/disable", lifecycleSchema.ETag, nil, 200, &schemaState)
 	if schemaState.Status != "disabled" || schemaState.Definition.ID != lifecycleSchema.Definition.ID {
 		t.Fatalf("unexpected disabled Schema: %+v", schemaState)
 	}
+	loseStorageResponse.Store(true)
+	request("POST", schemaPath+"/restore", lifecycleSchema.ETag, nil, 503, nil)
+	request("GET", schemaPath, "", nil, 200, &schemaState)
+	if schemaState.Status != "disabled" || storagePaused.Load() {
+		t.Fatalf("unexpected state after losing restore acknowledgement: %s, paused=%t", schemaState.Status, storagePaused.Load())
+	}
 	request("POST", schemaPath+"/restore", lifecycleSchema.ETag, nil, 200, &schemaState)
 	if schemaState.Status != "active" {
 		t.Fatalf("unexpected restored Schema: %+v", schemaState)
+	}
+	var events int
+	if err := engine.DB().QueryRow("SELECT COUNT(*) FROM af_meta_outbox WHERE tenant_id=? AND object_id=? AND event_type IN ('definition.disabled','definition.restored')", tenant, lifecycleSchema.Definition.ID).Scan(&events); err != nil || events != 2 {
+		t.Fatalf("lifecycle retry produced %d events, want 2: %v", events, err)
 	}
 	enum := create(c.Definition{Kind: c.KindEnum, Name: "验收枚举", Enum: &c.Enum{Values: []c.EnumValue{{Code: "in", Label: "有效"}}}})
 	publish(enum, 200)
