@@ -237,6 +237,8 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 
 平台托管对象的 `fileKind` 属性通过 `/data/schemas/{schemaId}/instances/{entityId}/files/{fieldId}` 管理。GET 下载，图片可用 `?preview=1` 内联预览。PUT 请求体为文件字节，`name` 查询参数传文件名，DELETE 清除。PUT 和 DELETE 须携带单个强 `If-Match`，成功返回 204 和新 ETag。网关沿用当前会话及 CSRF 校验，服务端重查授权。
 
+文件修改使用 `instance.patch` 的写字段授权。2026-11-22 云上验收发现旧制品使用错误的权限键拒绝上传，修复后隔离 MySQL 验证无写字段授权返回 403、授权上传刷新 ETag、下载内容一致及按列表文件 ID 删除成功。
+
 单文件上限 4 MiB。图片接受 PNG、JPEG、GIF，最大边长 4096 像素。普通实例写接口拒绝直接修改文件属性。先创建记录，再上传文件。安装或升级时显式应用 `011_data_property_files`。目前覆盖模块测试，真实 MySQL 文件往返与权限联合测试待验收。
 普通实体写入的属性类型、枚举值或可写必填属性校验失败时，Data 可在 HTTP 422 错误中返回稳定 `fieldId`。缺少未授权字段时保留通用错误。
 

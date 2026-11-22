@@ -181,7 +181,7 @@ func (h *handler) writePropertyFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, problem(404, "not_found", "实例不存在或不可访问"))
 		return
 	}
-	relevant := decisions.relevant("instance.update")
+	relevant := decisions.relevant(mutationPermission("update"))
 	for _, dec := range relevant {
 		if !fieldAllowed(dec.WriteFields, field.ID) {
 			writeError(w, problem(403, "forbidden_field", "不允许修改此属性"))
