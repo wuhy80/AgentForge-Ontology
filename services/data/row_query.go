@@ -474,8 +474,19 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 				args = append(rightArgs, args...)
 				continue
 			}
-			from += " JOIN " + tableName + " AS " + quoteID(edgeAlias) + " ON " + fromEdge + "=" + originKey
-			from += " JOIN " + rowTableSQL(target) + " AS " + quoteID(target.node.ID) + " ON " + toEdge + "=" + targetKey
+			edgeIndex, targetIndex := "", ""
+			if binding.Mode == "managed" && len(plan.edges) > 1 && q.Aggregate == nil {
+				// Follow the bound endpoint through the tenant-prefixed indexes.
+				// A covering edge scan can otherwise be chosen for every root.
+				index := "edge_pair"
+				if edge.join.Direction == "in" {
+					index = "edge_reverse"
+				}
+				edgeIndex = " FORCE INDEX FOR JOIN (" + quoteID(index) + ")"
+				targetIndex = " FORCE INDEX FOR JOIN (PRIMARY)"
+			}
+			from += " JOIN " + tableName + " AS " + quoteID(edgeAlias) + edgeIndex + " ON " + fromEdge + "=" + originKey
+			from += " JOIN " + rowTableSQL(target) + " AS " + quoteID(target.node.ID) + targetIndex + " ON " + toEdge + "=" + targetKey
 			if edgeTenant != "" {
 				conditions = append(conditions, edgeTenant)
 				args = append(args, p.TenantID)
