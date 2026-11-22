@@ -26,7 +26,9 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		}
 		return w
 	}
-	invoke(false, true, 204)
+	if w := invoke(false, true, 204); w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("lifecycle preview must not be cached")
+	}
 	ctx := context.Background()
 	tx, err := f.engine.DB().BeginTx(ctx, nil)
 	if err != nil {
@@ -90,7 +92,9 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		t.Fatalf("budget failure changed storage gate: status=%q err=%v", status, err)
 	}
 	clearBudgetRows()
-	invoke(false, true, 204)
+	if w := invoke(false, true, 204); w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("lifecycle preview must not be cached")
+	}
 	invoke(false, false, 204)
 	f.call("POST", "/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: mutationValues("blocked")}, "", 409)
 	invoke(true, false, 204)

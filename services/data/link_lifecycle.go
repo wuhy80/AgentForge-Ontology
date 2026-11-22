@@ -29,7 +29,7 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	ctx := r.Context()
-	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
+	check := func(tx *sql.Tx) error {
 		statement := "SELECT definition,digest,status FROM af_data_gates WHERE tenant_id=? AND definition_id=?"
 		if !command.Preview {
 			statement += " FOR UPDATE"
@@ -87,7 +87,22 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			_, err = tx.ExecContext(ctx, "UPDATE af_data_gates SET status=? WHERE tenant_id=? AND definition_id=?", next, tenant, id)
 		}
 		return err
-	})
+	}
+	if command.Preview {
+		w.Header().Set("Cache-Control", "no-store")
+		tx, beginErr := h.cfg.Engine.DB().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted, ReadOnly: true})
+		if beginErr != nil {
+			writeError(w, beginErr)
+			return
+		}
+		defer tx.Rollback()
+		err = check(tx)
+		if err == nil {
+			err = tx.Commit()
+		}
+	} else {
+		err = h.cfg.Engine.WithTx(ctx, check)
+	}
 	if err != nil {
 		writeError(w, err)
 		return
