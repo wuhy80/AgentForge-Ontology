@@ -10,6 +10,56 @@ import (
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
 
+func TestMySQLManagedSchemaLifecycle(t *testing.T) {
+	f := newMutationFixture(t)
+	id := f.current.Definition.ID
+	invoke := func(restore, preview bool, expected int) {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/internal/definitions/"+id+"/managed-storage-lifecycle",
+			bytes.NewReader(mustMutationJSON(t, c.ManagedLinkLifecycle{Digest: f.current.ETag, Restore: restore, Preview: preview})))
+		req.Header.Set("Authorization", "Bearer "+f.core.cfg.ServiceToken)
+		req.Header.Set("X-Tenant-ID", f.p.TenantID)
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, req)
+		if w.Code != expected {
+			t.Errorf("lifecycle HTTP %d, want %d: %s", w.Code, expected, w.Body)
+		}
+	}
+	invoke(false, true, 204)
+	ctx := context.Background()
+	tx, err := f.engine.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := f.core.gate(ctx, tx, f.p, f.current); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		invoke(false, false, 204)
+	}()
+	select {
+	case <-done:
+		t.Fatal("schema pause bypassed the writer gate")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("schema pause did not proceed after writer released the gate")
+	}
+	f.call("POST", "/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: mutationValues("blocked")}, "", 409)
+	invoke(true, false, 204)
+	f.create("restored")
+	invoke(false, true, 409)
+	invoke(false, false, 409)
+}
+
 func TestMySQLManagedLinkLifecycleFencesWrites(t *testing.T) {
 	f, link := newTransactionLinkSQLFixture(t, "1:N")
 	invoke := func(command c.ManagedLinkLifecycle) *httptest.ResponseRecorder {

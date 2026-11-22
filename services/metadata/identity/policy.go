@@ -36,13 +36,33 @@ func (s *Store) HasCallablePolicyReference(ctx context.Context, tx *sql.Tx, tena
 	operation := string(kind) + ".invoke"
 	hasReference := func(rules []contracts.PermissionRule) bool {
 		for _, rule := range rules {
-			if rule.ResourceID == id && (rule.Operation == operation || kind == contracts.KindLink && strings.HasPrefix(rule.Operation, "link.")) {
+			if rule.ResourceID == id && (rule.Operation == operation ||
+				kind == contracts.KindLink && strings.HasPrefix(rule.Operation, "link.") ||
+				kind == contracts.KindSchema && strings.HasPrefix(rule.Operation, "instance.")) {
+				return true
+			}
+			if kind == contracts.KindSchema && (policyReferencesSchema(rule.RowFilter, id) || policyReferencesSchema(rule.NewRowFilter, id)) {
 				return true
 			}
 		}
 		return false
 	}
 	return hasReference(policy.Current.Rules) || policy.Draft != nil && hasReference(policy.Draft.Rules), nil
+}
+
+func policyReferencesSchema(expression *contracts.Expression, id string) bool {
+	if expression == nil {
+		return false
+	}
+	if ref := expression.ValueRef; ref != nil && ref.Source == "object" && ref.SchemaID == id {
+		return true
+	}
+	for i := range expression.Args {
+		if policyReferencesSchema(&expression.Args[i], id) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) getPolicy(w http.ResponseWriter, r *http.Request) error {
@@ -277,7 +297,7 @@ func validatePolicy(ctx context.Context, tx *sql.Tx, tenant string, policy contr
 		schema, exists := schemas[rule.ResourceID]
 		if !exists {
 			var raw string
-			if err := tx.QueryRowContext(ctx, "SELECT current_json FROM af_meta_definitions WHERE tenant_id=? AND id=? AND kind='schema' AND current_json IS NOT NULL", tenant, rule.ResourceID).Scan(&raw); err != nil {
+			if err := tx.QueryRowContext(ctx, "SELECT current_json FROM af_meta_definitions WHERE tenant_id=? AND id=? AND kind='schema' AND status='active' AND current_json IS NOT NULL", tenant, rule.ResourceID).Scan(&raw); err != nil {
 				if err == sql.ErrNoRows {
 					return problem(422, "invalid_policy_resource", "数据授权必须绑定当前租户已生效的对象模型")
 				}

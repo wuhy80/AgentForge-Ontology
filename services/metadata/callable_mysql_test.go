@@ -40,6 +40,10 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	}()
 	var savedEnumReference atomic.Bool
 	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") {
+			w.WriteHeader(204)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/saved-query-impact") {
 			writeJSON(w, 200, c.SavedQueryDefinitionImpact{Referenced: savedEnumReference.Load()})
 			return
@@ -95,6 +99,21 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	function := create(executableFunction())
 	publish(function, 200)
 	functionPath := "/metadata/definitions/" + function.Definition.ID
+	lifecycleDefinition := validSchema()
+	lifecycleDefinition.Name = "生命周期验收对象"
+	lifecycleSchema := create(lifecycleDefinition)
+	publish(lifecycleSchema, 200)
+	schemaPath := "/metadata/definitions/" + lifecycleSchema.Definition.ID
+	request("GET", schemaPath+"/disable-preview", lifecycleSchema.ETag, nil, 200, nil)
+	var schemaState c.CurrentDefinition
+	request("POST", schemaPath+"/disable", lifecycleSchema.ETag, nil, 200, &schemaState)
+	if schemaState.Status != "disabled" || schemaState.Definition.ID != lifecycleSchema.Definition.ID {
+		t.Fatalf("unexpected disabled Schema: %+v", schemaState)
+	}
+	request("POST", schemaPath+"/restore", lifecycleSchema.ETag, nil, 200, &schemaState)
+	if schemaState.Status != "active" {
+		t.Fatalf("unexpected restored Schema: %+v", schemaState)
+	}
 	enum := create(c.Definition{Kind: c.KindEnum, Name: "验收枚举", Enum: &c.Enum{Values: []c.EnumValue{{Code: "in", Label: "有效"}}}})
 	publish(enum, 200)
 	enumPath := "/metadata/definitions/" + enum.Definition.ID

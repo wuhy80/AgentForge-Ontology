@@ -58,8 +58,10 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 				callable = d.Function
 			}
 			managedLink := d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil && d.Link.StorageBinding.Mode == "managed"
-			if !managedLink && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
-				return problem(422, "unsupported_lifecycle", "当前支持 Enum、平台托管关系及无副作用的 Action 和 Function")
+			managedSchema := d.Kind == c.KindSchema && d.Schema != nil && d.Schema.Mode == "schema_2_db" && d.Schema.StorageLayout == "single" && d.Schema.StorageBinding == nil
+			managedStorage := managedLink || managedSchema
+			if !managedStorage && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
+				return problem(422, "unsupported_lifecycle", "当前支持 Enum、托管单表 Schema、平台托管关系及无副作用的 Action 和 Function")
 			}
 			if row.draft.Valid {
 				return problem(409, "lifecycle_draft_exists", "请先处理已保存的草稿")
@@ -84,7 +86,7 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 					if err := h.checkEnumDisable(ctx, tx, p.TenantID, id); err != nil {
 						return err
 					}
-				} else if !managedLink {
+				} else if !managedStorage {
 					var referenced bool
 					err = tx.QueryRowContext(ctx, `SELECT
  EXISTS (SELECT 1 FROM af_meta_dependencies WHERE tenant_id=? AND target_id=?) OR
@@ -107,7 +109,7 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 					}
 				}
 			}
-			if managedLink {
+			if managedStorage {
 				if err := h.checkManagedLinkLifecycle(ctx, tx, d, row.currentDigest, restore, preview); err != nil {
 					return err
 				}
@@ -161,18 +163,29 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 	policies := h.cfg.CallablePolicyReferences
 	checkPolicy := func(lock bool) error {
 		if policies == nil {
-			return problem(503, "policy_impact_unavailable", "无法复核关系授权")
+			return problem(503, "policy_impact_unavailable", "无法复核定义相关策略")
 		}
 		referenced, err := policies.HasCallablePolicyReference(ctx, tx, d.TenantID, d.ID, d.Kind, lock)
 		if err != nil {
 			return err
 		}
 		if referenced {
-			return problem(409, "definition_policy_in_use", "仍有定向策略引用此关系")
+			return problem(409, "definition_policy_in_use", "仍有策略引用此定义")
 		}
 		return nil
 	}
 	if !restore {
+		if d.Kind == c.KindSchema {
+			definitions, err := readImpactSnapshot(ctx, tx, d.TenantID)
+			if err != nil {
+				return err
+			}
+			for _, definition := range definitions {
+				if len(definition.refs[d.ID]) != 0 {
+					return problem(409, "definition_in_use", "当前或草稿定义仍引用此对象模型")
+				}
+			}
+		}
 		if err := checkPolicy(false); err != nil {
 			return err
 		}
@@ -184,7 +197,7 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 	defer cancel()
 	body, _ := json.Marshal(c.ManagedLinkLifecycle{Digest: digest, Restore: restore, Preview: preview})
 	req, err := http.NewRequestWithContext(callCtx, http.MethodPost,
-		strings.TrimRight(h.cfg.DataURL, "/")+"/internal/definitions/"+url.PathEscape(d.ID)+"/managed-link-lifecycle", bytes.NewReader(body))
+		strings.TrimRight(h.cfg.DataURL, "/")+"/internal/definitions/"+url.PathEscape(d.ID)+"/managed-storage-lifecycle", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -203,9 +216,9 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 		if response.StatusCode == 409 && json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&failure) == nil {
 			switch failure.Code {
 			case "definition_data_in_use":
-				return problem(409, failure.Code, "关系仍有实例")
+				return problem(409, failure.Code, "定义仍有实例")
 			case "definition_saved_query_in_use":
-				return problem(409, failure.Code, "仍有保存查询引用此关系")
+				return problem(409, failure.Code, "仍有保存查询引用此定义")
 			case "mapping_unavailable":
 				return problem(409, failure.Code, "关系存储未就绪或已改变")
 			}

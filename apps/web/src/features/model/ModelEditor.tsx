@@ -99,7 +99,8 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const uncertain = !!publication && !['succeeded', 'rejected'].includes(publication.status)
   const disabled = !!busy || uncertain || suspended
   const callable = definition.action ?? definition.function
-  const lifecycleAllowed = lifecycleAvailable && (record?.definition.kind === 'enum' || !!callable && (!callable.sideEffects || callable.sideEffects === 'none')) && (record?.status === 'active' || suspended)
+  const managedSchema = definition.schema?.mode === 'schema_2_db' && definition.schema.storageLayout === 'single' && !definition.schema.storageBinding
+  const lifecycleAllowed = lifecycleAvailable && (managedSchema || record?.definition.kind === 'enum' || !!callable && (!callable.sideEffects || callable.sideEffects === 'none')) && (record?.status === 'active' || suspended)
   const category = categories.find((item) => item.id === categoryId)
   const bindingReady = !!category && definition.categoryId === categoryId && (!!record || !groupsLoading && groups.some((group) => group.id === definition.groupId))
   const authorizedEntries = entries.filter((entry) => !definition.tenantId || entry.definition.tenantId === definition.tenantId)
@@ -135,12 +136,13 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
     api.metadataCapabilities(controller.signal).then((capabilities) => {
       if (controller.signal.aborted) return
       setSchemaMigrations(capabilities.schemaMigrations)
-      setLifecycleAvailable(definition.kind === 'enum' ? capabilities.enumLifecycle === true : capabilities.callableLifecycle === 'pure-only')
+      setLifecycleAvailable(definition.kind === 'enum' ? capabilities.enumLifecycle === true
+        : managedSchema ? capabilities.managedSchemaLifecycle === true : capabilities.callableLifecycle === 'pure-only')
       setLifecyclePreviewAvailable(capabilities.callableLifecyclePreview === true)
       setRecordReadAvailable(capabilities.actionRecordRead === true)
     }).catch((cause: unknown) => { if (!controller.signal.aborted && definition.schema) setCapabilityError(cause instanceof Error ? cause.message : '迁移能力读取失败。') })
     return () => controller.abort()
-  }, [api, active, locked, definition.kind, definition.schema?.storageBinding])
+  }, [api, active, locked, definition.kind, definition.schema?.storageBinding, managedSchema])
 
   useEffect(() => {
     if (!active || !locked || currentRecord || !definition.id) return
@@ -336,6 +338,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
         {lifecyclePreviewAvailable && <p>预览检查通过，确认时将重新检查。</p>}
         <p>{definition.kind === 'enum'
           ? suspended ? '恢复后，模型和参数可重新引用此枚举。' : '停用后，新定义将无法引用此枚举。已有引用会阻止停用。'
+          : managedSchema ? suspended ? '恢复前会复核物理表和引用。' : '停用前会检查对象存量、定义引用、保存查询和策略。'
           : suspended ? '恢复后，此定义可按现有权限调用。' : '停用后，此定义将暂停调用，已保存的内容仍可查看。'}</p>
         <div className="model-inline-actions"><button type="button" className="button primary" disabled={!!busy || dirty || uncertain} onClick={() => void changeLifecycle()}>{suspended ? '确认恢复' : '确认停用'}</button><button type="button" className="button subtle" onClick={() => setConfirmLifecycle(false)}>取消</button></div>
       </div>}

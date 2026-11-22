@@ -86,6 +86,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /internal/definitions/{id}/saved-query-impact", h.savedQueryImpactHTTP)
 	mux.HandleFunc("GET /internal/definitions/{id}/storage-impact", h.storageImpactHTTP)
 	mux.HandleFunc("POST /internal/definitions/{id}/managed-link-lifecycle", h.managedLinkLifecycleHTTP)
+	mux.HandleFunc("POST /internal/definitions/{id}/managed-storage-lifecycle", h.managedLinkLifecycleHTTP)
 	mux.HandleFunc("POST /internal/publications/prepare", h.prepare)
 	mux.HandleFunc("POST /internal/publications/activate", h.activate)
 	mux.HandleFunc("POST /internal/publications/preview", h.preview)
@@ -310,7 +311,8 @@ func (h *handler) gate(ctx context.Context, tx *sql.Tx, p c.Principal, current c
 		return problem(409, "mapping_unavailable", "Schema 正在生效或当前映射已改变，请重试")
 	}
 	if current.Definition.Kind == c.KindLink && current.Definition.Link != nil &&
-		current.Definition.Link.StorageBinding != nil && current.Definition.Link.StorageBinding.Mode == "managed" {
+		current.Definition.Link.StorageBinding != nil && current.Definition.Link.StorageBinding.Mode == "managed" ||
+		current.Definition.Kind == c.KindSchema && current.Definition.Schema != nil && current.Definition.Schema.StorageBinding == nil {
 		latest, err := h.current(ctx, p.TenantID, current.Definition.ID)
 		if err != nil {
 			return err
