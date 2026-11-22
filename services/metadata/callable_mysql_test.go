@@ -38,8 +38,12 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 			}
 		}
 	}()
-	var savedEnumReference atomic.Bool
+	var savedEnumReference, impactOverBudget atomic.Bool
 	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if impactOverBudget.Load() && (strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") || strings.HasSuffix(r.URL.Path, "/saved-query-impact")) {
+			writeJSON(w, 422, c.Error{Code: "saved_query_impact_budget", Message: "internal details"})
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") {
 			w.WriteHeader(204)
 			return
@@ -118,8 +122,25 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	publish(enum, 200)
 	enumPath := "/metadata/definitions/" + enum.Definition.ID
 	request("GET", enumPath+"/disable-preview", enum.ETag, nil, 200, nil)
-	savedEnumReference.Store(true)
 	var blocked c.Error
+	impactOverBudget.Store(true)
+	for _, target := range []struct{ path, etag string }{{schemaPath, lifecycleSchema.ETag}, {enumPath, enum.ETag}} {
+		request("GET", target.path+"/disable-preview", target.etag, nil, 422, &blocked)
+		if blocked.Code != "saved_query_impact_budget" || blocked.Message == "internal details" {
+			t.Fatalf("unexpected preview failure: %+v", blocked)
+		}
+		request("POST", target.path+"/disable", target.etag, nil, 422, &blocked)
+		if blocked.Code != "saved_query_impact_budget" {
+			t.Fatalf("unexpected disable failure: %+v", blocked)
+		}
+		var state c.CurrentDefinition
+		request("GET", target.path, "", nil, 200, &state)
+		if state.Status != "active" {
+			t.Fatalf("failed disable changed state: %+v", state)
+		}
+	}
+	impactOverBudget.Store(false)
+	savedEnumReference.Store(true)
 	request("POST", enumPath+"/disable", enum.ETag, nil, 409, &blocked)
 	if blocked.Code != "definition_saved_query_in_use" {
 		t.Fatalf("saved query did not block enum disable: %+v", blocked)

@@ -212,15 +212,19 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 204 {
-		var failure c.Error
-		if response.StatusCode == 409 && json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&failure) == nil {
-			switch failure.Code {
+		failure := lifecycleImpactFailure(response)
+		if failure != nil {
+			return failure
+		}
+		var conflict c.Error
+		if response.StatusCode == 409 && json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&conflict) == nil {
+			switch conflict.Code {
 			case "definition_data_in_use":
-				return problem(409, failure.Code, "定义仍有实例")
+				return problem(409, conflict.Code, "定义仍有实例")
 			case "definition_saved_query_in_use":
-				return problem(409, failure.Code, "仍有保存查询引用此定义")
+				return problem(409, conflict.Code, "仍有保存查询引用此定义")
 			case "mapping_unavailable":
-				return problem(409, failure.Code, "关系存储未就绪或已改变")
+				return problem(409, conflict.Code, "关系存储未就绪或已改变")
 			}
 		}
 		return problem(503, "link_lifecycle_unavailable", "无法复核关系存储")
@@ -262,6 +266,9 @@ func (h *handler) checkEnumDisable(ctx context.Context, tx *sql.Tx, tenant, id s
 		return problem(503, "saved_query_impact_unavailable", "无法复核保存查询引用")
 	}
 	defer response.Body.Close()
+	if err := lifecycleImpactFailure(response); err != nil {
+		return err
+	}
 	var impact struct {
 		Referenced *bool `json:"referenced"`
 	}
@@ -270,6 +277,17 @@ func (h *handler) checkEnumDisable(ctx context.Context, tx *sql.Tx, tenant, id s
 	}
 	if *impact.Referenced {
 		return problem(409, "definition_saved_query_in_use", "仍有保存查询引用此枚举")
+	}
+	return nil
+}
+
+func lifecycleImpactFailure(response *http.Response) error {
+	if response.StatusCode != http.StatusUnprocessableEntity {
+		return nil
+	}
+	var failure c.Error
+	if json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&failure) == nil && failure.Code == "saved_query_impact_budget" {
+		return problem(422, failure.Code, "租户保存查询超过影响检查预算，无法确认是否可停用")
 	}
 	return nil
 }
