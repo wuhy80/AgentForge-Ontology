@@ -191,7 +191,7 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 		}
 	}
 	if h.cfg.DataURL == "" || len(h.cfg.ServiceToken) < 32 {
-		return problem(503, "link_lifecycle_unavailable", "无法复核关系存储")
+		return problem(503, "link_lifecycle_unavailable", "无法复核定义存储")
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -208,7 +208,7 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	response, err := client.Do(req)
 	if err != nil {
-		return problem(503, "link_lifecycle_unavailable", "关系存储未确认，请重试原操作核对状态")
+		return problem(503, "link_lifecycle_unavailable", "定义存储未确认，请重试原操作核对状态")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 204 {
@@ -224,10 +224,10 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 			case "definition_saved_query_in_use":
 				return problem(409, conflict.Code, "仍有保存查询引用此定义")
 			case "mapping_unavailable":
-				return problem(409, conflict.Code, "关系存储未就绪或已改变")
+				return problem(409, conflict.Code, "定义存储未就绪或已改变")
 			}
 		}
-		return problem(503, "link_lifecycle_unavailable", "无法复核关系存储")
+		return problem(503, "link_lifecycle_unavailable", "无法复核定义存储")
 	}
 	if !restore && !preview {
 		// Take the policy lock after draining Data to avoid waiting on a

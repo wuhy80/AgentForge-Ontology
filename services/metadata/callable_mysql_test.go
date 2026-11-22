@@ -38,13 +38,17 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 			}
 		}
 	}()
-	var savedEnumReference, impactOverBudget, loseStorageResponse, storagePaused atomic.Bool
+	var savedEnumReference, impactOverBudget, loseStorageResponse, storagePaused, storageUnavailable atomic.Bool
 	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if impactOverBudget.Load() && (strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") || strings.HasSuffix(r.URL.Path, "/saved-query-impact")) {
 			writeJSON(w, 422, c.Error{Code: "saved_query_impact_budget", Message: "internal details"})
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") {
+			if storageUnavailable.Load() {
+				writeJSON(w, 409, c.Error{Code: "mapping_unavailable", Message: "internal physical table name"})
+				return
+			}
 			var command c.ManagedLinkLifecycle
 			if err := json.NewDecoder(r.Body).Decode(&command); err != nil {
 				w.WriteHeader(400)
@@ -122,6 +126,13 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	schemaPath := "/metadata/definitions/" + lifecycleSchema.Definition.ID
 	request("GET", schemaPath+"/disable-preview", lifecycleSchema.ETag, nil, 200, nil)
 	var schemaState c.CurrentDefinition
+	storageUnavailable.Store(true)
+	var mappingFailure c.Error
+	request("GET", schemaPath+"/disable-preview", lifecycleSchema.ETag, nil, 409, &mappingFailure)
+	if mappingFailure.Code != "mapping_unavailable" || mappingFailure.Message != "定义存储未就绪或已改变" {
+		t.Fatalf("unexpected mapping failure: %+v", mappingFailure)
+	}
+	storageUnavailable.Store(false)
 	loseStorageResponse.Store(true)
 	request("POST", schemaPath+"/disable", lifecycleSchema.ETag, nil, 503, nil)
 	request("GET", schemaPath, "", nil, 200, &schemaState)
