@@ -39,3 +39,5 @@ OAuth 授权服务器端点由 `ONTOLOGY_AUTH_ISSUER` 配置（缺省为工作�
 ## 账号提及目录
 
 GET /metadata/admin/mention-accounts?prefix=名称 沿用租户管理员会话授权，仅匹配同租户的启用账号。响应的 data 每项只包含 id 和 label，最多 20 条，hasMore 表示存在更多匹配。前缀按字面匹配。Metadata 测试和构建通过，隔离 MySQL 验证需配置 IDENTITY_TEST_DSN。
+
+GET /metadata/auth/mention-accounts 使用同一精简响应。管理员可查本租户启用账号。部署端显式设置 ONTOLOGY_SHARED_GROUP_MENTION_ACCOUNTS=true 后，普通用户可查与自己共属至少一个启用用户组的启用账号。目录在同一事务中检查会话并读取成员关系。该开关默认关闭，不改变业务数据授权。实库覆盖需设置 IDENTITY_TEST_DSN。

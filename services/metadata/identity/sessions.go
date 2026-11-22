@@ -232,6 +232,15 @@ func (s *Store) mutation(r *http.Request, administrator bool, fn func(*sql.Tx, c
 }
 
 func (s *Store) adminRead(r *http.Request, fn func(*sql.Tx, contracts.User) error) error {
+	return s.sessionRead(r, func(tx *sql.Tx, actor contracts.User) error {
+		if !actor.Administrator {
+			return problem(403, "administrator_required", "需要租户管理员权限")
+		}
+		return fn(tx, actor)
+	})
+}
+
+func (s *Store) sessionRead(r *http.Request, fn func(*sql.Tx, contracts.User) error) error {
 	session, err := s.sessionForRequest(r)
 	if err != nil {
 		return err
@@ -251,9 +260,6 @@ func (s *Store) adminRead(r *http.Request, fn func(*sql.Tx, contracts.User) erro
 		}
 		if exists != 1 || !actor.Enabled {
 			return problem(401, "unauthenticated", "会话已失效")
-		}
-		if !actor.Administrator {
-			return problem(403, "administrator_required", "需要租户管理员权限")
 		}
 		return fn(tx, actor)
 	})

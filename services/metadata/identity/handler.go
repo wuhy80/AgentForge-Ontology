@@ -29,6 +29,7 @@ func (s *Store) NewHandler() http.Handler {
 	s.registerExternalRoutes(mux, wrap)
 	mux.HandleFunc("GET /metadata/admin/users", wrap(s.listUsers))
 	mux.HandleFunc("GET /metadata/admin/mention-accounts", wrap(s.mentionAccounts))
+	mux.HandleFunc("GET /metadata/auth/mention-accounts", wrap(s.sharedMentionAccounts))
 	mux.HandleFunc("POST /metadata/admin/users", wrap(s.createUser))
 	mux.HandleFunc("GET /metadata/admin/users/{id}", wrap(s.getUser))
 	mux.HandleFunc("PUT /metadata/admin/users/{id}", wrap(s.updateUser))
