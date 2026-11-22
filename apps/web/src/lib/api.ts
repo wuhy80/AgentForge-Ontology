@@ -312,6 +312,12 @@ export class ApiClient {
   publish(id: string, etag: string): Promise<Publication> {
     return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/publish`, { method: 'POST', etag })
   }
+  previewDraftDeletion(id: string, etag: string): Promise<void> {
+    return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/delete-preview`, { etag })
+  }
+  deleteUnpublishedDraft(id: string, etag: string): Promise<void> {
+    return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}`, { method: 'DELETE', etag })
+  }
   previewCallableLifecycle(id: string, action: 'disable' | 'restore', etag: string): Promise<{ definitionId: string; targetStatus: 'active' | 'disabled' }> {
     return this.request(`/api/metadata/definitions/${encodeURIComponent(id)}/${action}-preview`, { etag })
   }

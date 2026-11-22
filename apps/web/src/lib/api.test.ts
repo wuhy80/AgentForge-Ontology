@@ -16,6 +16,20 @@ describe('ApiClient transport and complete directories', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/metadata/definitions/id%2Fwith%20space/dependencies?view=draft', expect.objectContaining({ signal, credentials: 'same-origin', cache: 'no-store', redirect: 'error' }))
   })
 
+  it('uses the same draft ETag for deletion preview and confirmation', async () => {
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(new Response(null, { status: 204 })))
+    vi.stubGlobal('fetch', fetcher)
+    const api = new ApiClient()
+    await api.previewDraftDeletion('draft/id', 'digest')
+    await api.deleteUnpublishedDraft('draft/id', 'digest')
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/metadata/definitions/draft%2Fid/delete-preview', expect.objectContaining({
+      method: 'GET', headers: expect.objectContaining({ 'If-Match': '"digest"' }),
+    }))
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/metadata/definitions/draft%2Fid', expect.objectContaining({
+      method: 'DELETE', headers: expect.objectContaining({ 'If-Match': '"digest"' }),
+    }))
+  })
+
   it('follows all pages using same-origin paths and never redirects credentials', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(page([{ id: 'first' }], true, 'first'))
       .mockResolvedValueOnce(page([{ id: 'second' }]))
