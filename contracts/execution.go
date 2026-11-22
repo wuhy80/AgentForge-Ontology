@@ -25,6 +25,7 @@ type SourceToolResult struct {
 }
 
 type InvocationRequest struct {
+	Async        bool                       `json:"async,omitempty"`
 	DefinitionID string                     `json:"definitionId"`
 	Input        map[string]json.RawMessage `json:"input"`
 	// A non-empty ETag selects the exact saved draft instead of current code.
@@ -58,6 +59,7 @@ const (
 // Invocation deliberately omits code, raw input, stdout and tracebacks. The
 // execution service owns the snapshot; every response requires current access.
 type Invocation struct {
+	Attempt        int                        `json:"attempt,omitempty"`
 	ID             string                     `json:"id"`
 	DefinitionID   string                     `json:"definitionId"`
 	DefinitionName string                     `json:"definitionName"`

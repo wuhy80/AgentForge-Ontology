@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -58,16 +59,24 @@ func (s *Store) checkOrigin(origin string) error {
 // CheckSession always reads the current account and role membership; the cookie
 // carries no identity, grants, or selected tenant supplied by the browser.
 func (s *Store) CheckSession(ctx context.Context, check contracts.SessionCheck) (contracts.Session, error) {
-	if check.AccessToken != "" {
-		return s.checkAccess(ctx, check)
-	}
 	var session contracts.Session
-	if len(check.Token) != 64 {
+	fingerprint := check.SessionFingerprint
+	if fingerprint != "" {
+		_, err := hex.DecodeString(fingerprint)
+		if err != nil || len(fingerprint) != 64 || check.Method != http.MethodGet ||
+			check.Token != "" || check.AccessToken != "" || check.CSRFToken != "" || check.Origin != "" {
+			return session, &platform.AccessError{Status: 401, Code: "unauthenticated", Message: "任务会话无效"}
+		}
+	} else if check.AccessToken != "" {
+		return s.checkAccess(ctx, check)
+	} else if len(check.Token) == 64 {
+		fingerprint = tokenHash(check.Token)
+	} else {
 		return session, &platform.AccessError{Status: 401, Code: "unauthenticated", Message: "请重新登录"}
 	}
 	err := s.transaction(ctx, func(tx *sql.Tx) error {
 		var tenant, userID, csrf string
-		err := tx.QueryRowContext(ctx, "SELECT tenant_id,user_id,csrf_token,expires_at FROM af_identity_sessions WHERE token_hash=?", tokenHash(check.Token)).Scan(&tenant, &userID, &csrf, &session.ExpiresAt)
+		err := tx.QueryRowContext(ctx, "SELECT tenant_id,user_id,csrf_token,expires_at FROM af_identity_sessions WHERE token_hash=?", fingerprint).Scan(&tenant, &userID, &csrf, &session.ExpiresAt)
 		if errors.Is(err, sql.ErrNoRows) || err == nil && session.ExpiresAt <= time.Now().Unix() {
 			return &platform.AccessError{Status: 401, Code: "unauthenticated", Message: "会话已失效，请重新登录"}
 		}
@@ -92,7 +101,10 @@ func (s *Store) CheckSession(ctx context.Context, check contracts.SessionCheck) 
 				return &platform.AccessError{Status: 403, Code: "csrf_invalid", Message: "会话校验失败，请重新读取当前会话"}
 			}
 		}
-		session.User, session.CSRFToken = user, csrf
+		session.User = user
+		if check.SessionFingerprint == "" {
+			session.CSRFToken = csrf
+		}
 		return nil
 	})
 	return session, err

@@ -13,7 +13,7 @@
 - 已保存的Function/Action草稿可独立试运行；请求显式携带草稿`draftEtag`，不替换当前态，也不能运行任意客户端定义。未发布的纯计算草稿同样可用。草稿与当前态共用隔离容器、并发、参数校验和持久化协议，记录以`mode: draft/current`区分。
 - `Callable.testCases`随定义草稿保存，发布后随当前定义可见；最多10项，总JSON最多64KiB，名称最多80个Unicode字符且不重复。样例输入使用参数稳定ID，可部分填写，已填写值须满足标量传输声明；运行时仍检查必填与默认值，不将样例当作执行授权。
 
-未开放用户自定义镜像、容器业务程序、HTTP/gRPC外部实现、第三方依赖安装、网络访问、业务数据读取、容器直接写库、模型API调用、事件/周期调度、后台队列、自动重试和调用委托。既无runtime也未绑定可执行Function的定义仍可登记；业务调用会明确拒绝。
+事件／周期调度、调用委托、异步业务读写及外部副作用仍在规划。当前计算容器使用运营方准备的镜像，禁用网络、依赖安装、直接写库和模型 API 调用。
 
 ## HTTP 入口
 
@@ -22,13 +22,16 @@
 | `GET /healthz` | 进程存活 |
 | `GET /readyz` | 存储表、Docker 与至少一种本地运行镜像就绪 |
 | `GET /execution/capabilities` | 已登录用户读取运行器实际可用状态；`actionInlineSource=true`表示支持Action直接源码 |
-| `POST /execution/invocations` | 同步发起计算，必须带 `Idempotency-Key` |
+| `POST /execution/invocations` | 默认同步。纯计算可显式提交 `async:true`，必须带 `Idempotency-Key` |
 | `GET /execution/invocations/{id}` | 当前发起用户按 ID 核对状态与读取结果 |
+| `DELETE /execution/invocations/{id}` | 当前发起用户取消排队或运行中的持久任务 |
 | `POST /execution/source-tools` | 对已保存且可编辑的Function/Action临时Go源码解析或格式化，不执行、不保存 |
 
 能力响应中的`actionRequiresFunctionInvoke=true`是旧兼容字段，仅指绑定Function的Action；直接源码Action的支持由`actionInlineSource`表达。
 
 `draftInvocation`表示已保存草稿试运行实际可用；`sourceDiagnostics`与`testCases`说明源码坐标诊断、样例协议已接入。
+
+`async` 表示首批持久计算任务可用。请求格式、状态、租约恢复、取消及迁移见[执行与调度](../../docs/执行与调度.md#job-01-首批持久计算任务)。
 
 `supportedRuntimes`固定列出`python/javascript/go`；`runtimes`仅列实际镜像及存储可用的语言，缺少单语言镜像不阻止其他语言调用，所选语言不可用时返回503而不会降级。`sourceTools`仅在Go运行器可用时列出`go`。
 

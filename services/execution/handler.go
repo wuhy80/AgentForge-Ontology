@@ -23,6 +23,7 @@ import (
 )
 
 type Config struct {
+	WorkerContext    context.Context
 	Store            Store
 	Authorizer       platform.Authorizer
 	SessionChecker   platform.SessionChecker
@@ -35,6 +36,7 @@ type Config struct {
 type handler struct {
 	cfg   Config
 	slots chan struct{}
+	jobs  jobStore
 }
 type apiError struct {
 	status        int
@@ -65,6 +67,14 @@ func NewHandler(cfg Config) http.Handler {
 		limit = 4
 	}
 	h := &handler{cfg: cfg, slots: make(chan struct{}, limit)}
+	if cfg.WorkerContext != nil && cfg.SessionChecker != nil && cfg.Runner != nil {
+		h.jobs, _ = cfg.Store.(jobStore)
+		if h.jobs != nil && cfg.WorkerContext.Err() == nil {
+			for range limit {
+				go h.workJobs(cfg.WorkerContext)
+			}
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", h.ready)
@@ -72,6 +82,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("POST /execution/source-tools", h.wrap(h.sourceTools))
 	mux.HandleFunc("POST /execution/invocations", h.wrap(h.invoke))
 	mux.HandleFunc("GET /execution/invocations/{id}", h.wrap(h.get))
+	mux.HandleFunc("DELETE /execution/invocations/{id}", h.wrap(h.cancelJob))
 	return mux
 }
 
@@ -326,7 +337,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p c.Princ
 			}
 		}
 	}
-	out := map[string]any{"invocation": available, "draftInvocation": available, "sourceDiagnostics": true, "testCases": true, "runtimes": runtimes, "supportedRuntimes": supportedRuntimes, "sourceTools": sourceTools, "synchronous": true, "async": false, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionInlineSource": true, "actionRequiresFunctionInvoke": true}
+	out := map[string]any{"invocation": available, "draftInvocation": available, "sourceDiagnostics": true, "testCases": true, "runtimes": runtimes, "supportedRuntimes": supportedRuntimes, "sourceTools": sourceTools, "synchronous": true, "async": h.jobs != nil && available, "sideEffects": []string{"none"}, "maxTimeoutSeconds": 30, "maxConcurrent": cap(h.slots), "maxPayloadBytes": MaxPayloadBytes, "actionInlineSource": true, "actionRequiresFunctionInvoke": true}
 	if _, ok := h.cfg.Runner.(DataRunner); ok && dataTransactionsConfigured(h.cfg.DataTransactions) {
 		if _, durable := h.cfg.Store.(PreparingStore); durable && available {
 			out["sideEffects"] = []string{"none", "dataWrite"}
@@ -380,6 +391,12 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	if request.DraftETag != "" && platform.ValidAccessToken(platform.Bearer(r)) {
 		return problem(403, "connection_scope_denied", "外部连接仅允许调用当前生效定义，不允许草稿试运行")
 	}
+	if request.Async && request.DraftETag != "" {
+		return problem(422, "unsupported_async", "草稿不能提交持久任务")
+	}
+	if request.Async && platform.ValidAccessToken(platform.Bearer(r)) {
+		return problem(403, "connection_scope_denied", "持久任务仅支持浏览器会话")
+	}
 	hash := digest(request)
 	previous, err := h.cfg.Store.FindKey(r.Context(), p.TenantID, p.Subject, key)
 	if err == nil {
@@ -388,11 +405,13 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	select {
-	case h.slots <- struct{}{}:
-		defer func() { <-h.slots }()
-	default:
-		return problem(429, "execution_busy", "计算并发已满，请稍后使用原请求标识重试")
+	if !request.Async {
+		select {
+		case h.slots <- struct{}{}:
+			defer func() { <-h.slots }()
+		default:
+			return problem(429, "execution_busy", "计算并发已满，请稍后使用原请求标识重试")
+		}
 	}
 	mode := c.InvocationModeCurrent
 	var initial plan
@@ -406,6 +425,13 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 		return err
 	}
 	rootCallable := definitionCallable(initial.root)
+	if request.Async {
+		input, err := buildInput(rootCallable.Input, request.Input)
+		if err != nil {
+			return err
+		}
+		return h.enqueueJob(w, r, p, key, hash, initial, input)
+	}
 	if rootCallable.RecordRead != nil && (mode != c.InvocationModeCurrent || platform.ValidAccessToken(platform.Bearer(r))) {
 		return problem(403, "record_read_unsupported", "当前记录读取仅支持浏览器调用当前定义")
 	}
@@ -611,6 +637,9 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request, p c.Principal) err
 }
 
 func (h *handler) deliver(w http.ResponseWriter, r *http.Request, p c.Principal, record Record) error {
+	if record.Job != nil {
+		return h.deliverJob(w, r, p, record)
+	}
 	if err := h.checkRecord(r.Context(), r, p, record); err != nil {
 		return err
 	}

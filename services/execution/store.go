@@ -14,12 +14,13 @@ import (
 // Record is private execution evidence, never an HTTP response. Code, caller
 // input and exact definitions remain inside this service's store.
 type Record struct {
-	Invocation  c.Invocation `json:"invocation"`
-	TenantID    string       `json:"tenantId"`
-	SubjectID   string       `json:"subjectId"`
-	RequestKey  string       `json:"requestKey"`
-	RequestHash string       `json:"requestHash"`
-	Root        c.Definition `json:"root"`
+	Job         *jobAdmission `json:"job,omitempty"`
+	Invocation  c.Invocation  `json:"invocation"`
+	TenantID    string        `json:"tenantId"`
+	SubjectID   string        `json:"subjectId"`
+	RequestKey  string        `json:"requestKey"`
+	RequestHash string        `json:"requestHash"`
+	Root        c.Definition  `json:"root"`
 	// Keep the original JSON key so existing persisted Function/Action records
 	// remain readable. The definition retains its real Action or Function kind.
 	Implementation          c.Definition               `json:"function"`
@@ -97,11 +98,17 @@ func (s *SQLStore) FindID(ctx context.Context, tenant, subject, id string) (Reco
 }
 
 func (s *SQLStore) Claim(ctx context.Context, record Record) (bool, error) {
+	return claimRecord(ctx, s.DB, record)
+}
+
+func claimRecord(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, record Record) (bool, error) {
 	raw, err := json.Marshal(record)
 	if err != nil {
 		return false, err
 	}
-	_, err = s.DB.ExecContext(ctx, "INSERT INTO af_execution_invocations (tenant_id,subject_id,request_key,request_hash,id,status,deadline_at,record_json) VALUES (?,?,?,?,?,?,?,?)", record.TenantID, record.SubjectID, record.RequestKey, record.RequestHash, record.Invocation.ID, record.Invocation.Status, record.DeadlineAt.UTC(), string(raw))
+	_, err = db.ExecContext(ctx, "INSERT INTO af_execution_invocations (tenant_id,subject_id,request_key,request_hash,id,status,deadline_at,record_json) VALUES (?,?,?,?,?,?,?,?)", record.TenantID, record.SubjectID, record.RequestKey, record.RequestHash, record.Invocation.ID, record.Invocation.Status, record.DeadlineAt.UTC(), string(raw))
 	var duplicate *mysql.MySQLError
 	if errors.As(err, &duplicate) && duplicate.Number == 1062 {
 		return false, nil

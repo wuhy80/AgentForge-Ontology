@@ -121,13 +121,16 @@ type RuntimePolicy struct {
 }
 
 type SessionCheck struct {
-	Token       string `json:"token"`
-	CSRFToken   string `json:"csrfToken"`
-	Method      string `json:"method"`
-	Origin      string `json:"origin"`
-	AccessToken string `json:"accessToken,omitempty"`
-	Path        string `json:"path,omitempty"`
-	Resource    string `json:"resource,omitempty"`
+	// SessionFingerprint is only sent over the authenticated internal session
+	// API by background execution. It cannot authenticate a browser request.
+	SessionFingerprint string `json:"sessionFingerprint,omitempty"`
+	Token              string `json:"token"`
+	CSRFToken          string `json:"csrfToken"`
+	Method             string `json:"method"`
+	Origin             string `json:"origin"`
+	AccessToken        string `json:"accessToken,omitempty"`
+	Path               string `json:"path,omitempty"`
+	Resource           string `json:"resource,omitempty"`
 }
 
 type AuthorizationCheck struct {

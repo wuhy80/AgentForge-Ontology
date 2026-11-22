@@ -3,6 +3,7 @@ package platform
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,10 +23,15 @@ type RemoteSessionChecker struct {
 
 func (c *RemoteSessionChecker) CheckSession(ctx context.Context, check contracts.SessionCheck) (contracts.Session, error) {
 	var session contracts.Session
-	if (check.AccessToken == "" && !opaqueCredential.MatchString(check.Token)) || (check.AccessToken != "" && (!ValidAccessToken(check.AccessToken) || check.Token != "")) {
+	fingerprint, err := hex.DecodeString(check.SessionFingerprint)
+	validTaskCheck := len(fingerprint) == 32 && err == nil && check.Method == http.MethodGet &&
+		check.Token == "" && check.AccessToken == "" && check.CSRFToken == "" && check.Origin == ""
+	if (check.SessionFingerprint != "" && !validTaskCheck) ||
+		(check.SessionFingerprint == "" && check.AccessToken == "" && !opaqueCredential.MatchString(check.Token)) ||
+		(check.AccessToken != "" && (!ValidAccessToken(check.AccessToken) || check.Token != "")) {
 		return session, &AccessError{Status: 401, Code: "unauthenticated", Message: "登录已失效，请重新登录"}
 	}
-	err := authorityCall(ctx, c.URL, c.ServiceToken, c.Client, "/internal/identity/session", check, &session)
+	err = authorityCall(ctx, c.URL, c.ServiceToken, c.Client, "/internal/identity/session", check, &session)
 	if err == nil {
 		err = validateSession(session, check)
 	}

@@ -125,6 +125,9 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 			if _, err := ee.DB().Exec("DELETE FROM af_execution_invocations WHERE tenant_id=?", tenantID); err != nil {
 				t.Error(err)
 			}
+			if _, err := ee.DB().Exec("DELETE FROM af_execution_job_admissions WHERE tenant_id=?", tenantID); err != nil {
+				t.Error(err)
+			}
 			cleanupOntologyTenant(t, me, de, tenantID)
 			for _, table := range []string{"af_identity_user_group_members", "af_identity_user_groups", "af_identity_sessions", "af_identity_audit", "af_identity_users", "af_identity_roles", "af_identity_tenants"} {
 				if _, err := me.DB().Exec("DELETE FROM "+table+" WHERE tenant_id=?", tenantID); err != nil {
@@ -200,8 +203,11 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if _, err := runner.Ready(ctx); err != nil {
 		t.Fatal(err)
 	}
-	execConfig := execution.Config{Store: &execution.SQLStore{DB: ee.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}, Runner: runner, DataTransactions: &execution.RemoteDataTransactions{URL: dataServer.URL, ServiceToken: serviceToken, Client: dataServer.Client()}}
+	workerContext, stopWorker := context.WithCancel(ctx)
+	defer stopWorker()
+	execConfig := execution.Config{WorkerContext: workerContext, Store: &execution.SQLStore{DB: ee.DB()}, Authorizer: &platform.RemoteAuthorizer{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}, Runner: runner, DataTransactions: &execution.RemoteDataTransactions{URL: dataServer.URL, ServiceToken: serviceToken, Client: dataServer.Client()}}
 	execApp := execution.NewHandler(execConfig)
+	execConfig.WorkerContext = nil
 	execServer := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, false, checker, execApp))
 	defer execServer.Close()
 	roots.AddCert(execServer.Certificate())
@@ -245,6 +251,32 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	savePolicy(policy.Current.Rules)
 	inputID, outputID := fn.Definition.Function.Input[0].ID, fn.Definition.Function.Output[0].ID
 	intent := c.InvocationRequest{DefinitionID: fn.Definition.ID, Input: map[string]json.RawMessage{inputID: raw("Hello知识")}}
+	async := intent
+	async.Async = true
+	var job c.Invocation
+	jobHeaders := admin.request("POST", execServer.URL+"/execution/invocations", async, map[string]string{"Idempotency-Key": c.NewID()}, 202, &job)
+	if job.Status != "queued" || jobHeaders.Get("Location") != "/execution/invocations/"+job.ID {
+		t.Fatalf("unexpected asynchronous admission: %+v", job)
+	}
+	for deadline := time.Now().Add(20 * time.Second); ; {
+		var status string
+		if err := ee.DB().QueryRowContext(ctx, "SELECT status FROM af_execution_invocations WHERE tenant_id=? AND id=?", tenant, job.ID).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status != "queued" && status != "job_running" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Python job did not complete")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	admin.request("GET", execServer.URL+jobHeaders.Get("Location"), nil, nil, 200, &job)
+	if job.Status != "succeeded" || job.Attempt != 1 || string(job.Output[outputID]) != `"7"` {
+		t.Fatalf("unexpected asynchronous Python result: %+v", job)
+	}
+	other.request("GET", execServer.URL+jobHeaders.Get("Location"), nil, nil, 404, nil)
+	stopWorker()
 	key := c.NewID()
 	var result c.Invocation
 	admin.request("POST", execServer.URL+"/execution/invocations", intent, map[string]string{"Idempotency-Key": key}, 201, &result)
@@ -400,6 +432,8 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 	opa.URL = originalURL
 	admin.request("POST", metaServer.URL+"/metadata/auth/logout", nil, nil, 204, nil)
 	admin.request("GET", resultURL, nil, nil, 401, nil)
+	sameUser, _ := login(tenant, "admin")
+	sameUser.request("GET", execServer.URL+jobHeaders.Get("Location"), nil, nil, 401, nil)
 }
 
 func verifyMultiLanguageHTTP(t *testing.T, admin, other, peer *executionHTTP, execURL, metaURL string, publish func(c.Definition) c.CurrentDefinition, savePolicy func([]c.PermissionRule), baseRules []c.PermissionRule, roleID string) {

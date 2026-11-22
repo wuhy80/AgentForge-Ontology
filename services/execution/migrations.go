@@ -17,4 +17,11 @@ var Migrations = []storage.Migration{
 		PRIMARY KEY (tenant_id,subject_id,request_key),
 		UNIQUE KEY invocation_id (tenant_id,id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin`},
+	{ID: "002_execution_job_leases", SQL: `ALTER TABLE af_execution_invocations
+		ADD COLUMN job_attempt INT NOT NULL DEFAULT 0,
+		ADD KEY job_claim (status,deadline_at,id),
+		ADD KEY job_pending (tenant_id,status)`},
+	{ID: "003_execution_job_admissions", SQL: `CREATE TABLE af_execution_job_admissions (
+		tenant_id VARBINARY(128) NOT NULL PRIMARY KEY
+	) ENGINE=InnoDB`},
 }
