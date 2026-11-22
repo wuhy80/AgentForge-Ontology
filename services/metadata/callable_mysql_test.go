@@ -140,6 +140,30 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		}
 	}
 	impactOverBudget.Store(false)
+	reader := executableAction()
+	reader.ID, reader.TenantID = "", ""
+	reader.CategoryID, reader.GroupID = category.ID, group.ID
+	reader.Name = "读取生命周期对象"
+	reader.Action.Input[0].DataType = "uuid"
+	reader.Action.TargetSchemaIDs = []string{lifecycleSchema.Definition.ID}
+	reader.Action.RecordRead = &c.ActionRecordRead{SchemaID: lifecycleSchema.Definition.ID, InstanceInputID: reader.Action.Input[0].ID, FieldIDs: []string{"missing"}}
+	var readError c.Error
+	request("POST", "/metadata/definitions", "", reader, 422, &readError)
+	if readError.Code != "invalid_record_read" {
+		t.Fatalf("unexpected draft read error: %+v", readError)
+	}
+	reader.Action.RecordRead.FieldIDs = []string{lifecycleSchema.Definition.Schema.Properties[0].ID}
+	readDraft := create(reader)
+	reader = readDraft.Definition
+	reader.Action.RecordRead.FieldIDs = []string{"missing"}
+	request("PUT", "/metadata/definitions/"+reader.ID+"/draft", readDraft.ETag, reader, 422, &readError)
+	if readError.Code != "invalid_record_read" {
+		t.Fatalf("unexpected draft update read error: %+v", readError)
+	}
+	request("POST", schemaPath+"/disable", lifecycleSchema.ETag, nil, 409, &readError)
+	if readError.Code != "definition_in_use" {
+		t.Fatalf("saved read draft did not block disable: %+v", readError)
+	}
 	savedEnumReference.Store(true)
 	request("POST", enumPath+"/disable", enum.ETag, nil, 409, &blocked)
 	if blocked.Code != "definition_saved_query_in_use" {

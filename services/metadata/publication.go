@@ -233,21 +233,8 @@ func validateReferences(ctx context.Context, tx *sql.Tx, d contracts.Definition)
 	}
 	if d.Action != nil {
 		if read := d.Action.RecordRead; read != nil {
-			schema := refs[read.SchemaID].Schema
-			if schema == nil || schema.StorageBinding != nil {
-				return problem(422, "invalid_record_read", "当前记录读取需要平台托管 Schema")
-			}
-			for _, id := range read.FieldIDs {
-				found := false
-				for _, property := range schema.Properties {
-					if property.ID == id && property.DataType != "longtext" {
-						found = true
-						break
-					}
-				}
-				if !found {
-					return problem(422, "invalid_record_read", "声明字段不存在或超出支持范围")
-				}
+			if err := validateActionRecordFields(refs[read.SchemaID].Schema, read); err != nil {
+				return err
 			}
 		}
 		for _, id := range d.Action.TargetSchemaIDs {

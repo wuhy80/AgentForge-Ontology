@@ -31,6 +31,11 @@ func validateActionTargetReferences(ctx context.Context, tx *sql.Tx, d contracts
 		if target.ID != id || target.TenantID != d.TenantID || target.Kind != contracts.KindSchema {
 			return problem(422, "invalid_action_target", "动作关联对象必须引用同租户已生效的Schema稳定标识")
 		}
+		if read := d.Action.RecordRead; read != nil && read.SchemaID == id {
+			if err := validateActionRecordFields(target.Schema, read); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -50,6 +55,25 @@ func validateActionFunctionReference(ctx context.Context, tx *sql.Tx, d contract
 	}
 	if !exists {
 		return problem(422, "invalid_dependency", "动作实现必须引用同租户已生效的 Function")
+	}
+	return nil
+}
+
+func validateActionRecordFields(schema *contracts.Schema, read *contracts.ActionRecordRead) error {
+	if schema == nil || schema.StorageBinding != nil {
+		return problem(422, "invalid_record_read", "当前记录读取需要平台托管 Schema")
+	}
+	for _, id := range read.FieldIDs {
+		found := false
+		for _, property := range schema.Properties {
+			if property.ID == id && property.DataType != "longtext" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return problem(422, "invalid_record_read", "声明字段不存在或超出支持范围")
+		}
 	}
 	return nil
 }
