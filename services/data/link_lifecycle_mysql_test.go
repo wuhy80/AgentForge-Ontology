@@ -105,6 +105,25 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 	if _, err := f.engine.DB().ExecContext(ctx, "ALTER TABLE "+quote(tableName(id))+" DROP COLUMN lifecycle_drift"); err != nil {
 		t.Fatal(err)
 	}
+	table := quote(tableName(id))
+	detached := quote(tableName(id) + "_detached")
+	if _, err := f.engine.DB().ExecContext(ctx, "RENAME TABLE "+table+" TO "+detached); err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() {
+			if _, err := f.engine.DB().ExecContext(ctx, "RENAME TABLE "+detached+" TO "+table); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		for _, restore := range []bool{false, true} {
+			for _, preview := range []bool{false, true} {
+				if w := invoke(restore, preview, 409); !bytes.Contains(w.Body.Bytes(), []byte("mapping_unavailable")) {
+					t.Fatalf("missing table error (restore=%t, preview=%t): %s", restore, preview, w.Body)
+				}
+			}
+		}
+	}()
 	f.create("restored")
 	invoke(false, true, 409)
 	invoke(false, false, 409)

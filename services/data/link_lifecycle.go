@@ -3,8 +3,11 @@ package data
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sort"
+
+	"github.com/go-sql-driver/mysql"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
@@ -57,6 +60,10 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 		}
 		var hasData bool
 		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+quote(table)+" WHERE tenant_id=?)", tenant).Scan(&hasData); err != nil {
+			var mysqlErr *mysql.MySQLError
+			if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1146 || mysqlErr.Number == 1054) {
+				return problem(409, "mapping_unavailable", "物理结构无法确认")
+			}
 			return err
 		}
 		next := "ready"
