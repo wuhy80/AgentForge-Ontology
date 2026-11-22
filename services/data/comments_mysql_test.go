@@ -75,6 +75,27 @@ func TestMySQLCommentInboxPagination(t *testing.T) {
 	if len(denied.Data) != 0 {
 		t.Fatal("continuation returned revoked replies")
 	}
+	// Restore access and validate the history summary independently of its first page size.
+	f.mu.Lock()
+	delete(f.policy, "instance.read")
+	f.mu.Unlock()
+	history := func(cursor string) c.RecordNoticePage {
+		r := httptest.NewRequest("GET", "/data/inbox/notifications?cursor="+url.QueryEscape(cursor), nil)
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, r.WithContext(platform.WithPrincipal(r.Context(), f.p)))
+		if w.Code != 200 {
+			t.Fatalf("history returned %d", w.Code)
+		}
+		return mutationDecode[c.RecordNoticePage](t, w)
+	}
+	page := history("")
+	if len(page.Data) != replyInboxBatch || page.NextCursor == "" || page.Unread == nil ||
+		!page.Unread.Exact || page.Unread.Count != replyInboxBatch+2 {
+		t.Fatalf("incomplete history summary: %v", page.Unread)
+	}
+	if next := history(page.NextCursor); len(next.Data) != 2 || next.Unread != nil {
+		t.Fatal("unexpected continuation summary or results")
+	}
 	f.p.Subject = author
 	inbox(first.NextCursor, 422)
 }
@@ -101,20 +122,25 @@ func TestMySQLRecordNotifications(t *testing.T) {
 		}
 		return w
 	}
-	list := func() []c.RecordNotice {
-		return mutationDecode[c.RecordNoticePage](t, call("GET", inbox, 200)).Data
+	list := func(unread int64) []c.RecordNotice {
+		t.Helper()
+		page := mutationDecode[c.RecordNoticePage](t, call("GET", inbox, 200))
+		if page.Unread == nil || !page.Unread.Exact || page.Unread.Count != unread {
+			t.Fatalf("unexpected unread summary: %v, want %d", page.Unread, unread)
+		}
+		return page.Data
 	}
-	if len(list()) != 0 {
+	if len(list(0)) != 0 {
 		t.Fatal("sender can see recipient's notifications")
 	}
 	call("PUT", mark, 404)
 	f.p.Subject = recipient
-	if got := list(); len(got) != 1 || got[0].ID != reply.ID || got[0].Read || got[0].Kind != "comment_reply" {
+	if got := list(1); len(got) != 1 || got[0].ID != reply.ID || got[0].Read || got[0].Kind != "comment_reply" {
 		t.Fatalf("unexpected unread notice: %+v", got)
 	}
 	call("PUT", mark, 204)
 	call("PUT", mark, 204)
-	if got := list(); len(got) != 1 || !got[0].Read {
+	if got := list(0); len(got) != 1 || !got[0].Read {
 		t.Fatalf("read notice missing from history: %+v", got)
 	}
 	legacy := call("GET", "/data/inbox/comment-replies", 200)
@@ -124,7 +150,7 @@ func TestMySQLRecordNotifications(t *testing.T) {
 	f.mu.Lock()
 	f.policy["instance.read"] = c.Decision{Allow: false}
 	f.mu.Unlock()
-	if len(list()) != 0 {
+	if len(list(0)) != 0 {
 		t.Fatal("revoked record still appears in history")
 	}
 	call("PUT", mark, 403)

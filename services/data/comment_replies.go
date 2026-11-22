@@ -68,6 +68,11 @@ func replyInboxCursor(secret string, p c.Principal, token string, position reply
 	return position, base64.RawURLEncoding.EncodeToString(aead.Seal(nonce, nonce, payload, scope)), nil
 }
 
+const replyInboxScope = ` FROM af_data_record_comments parent JOIN af_data_record_comments reply
+ON reply.tenant_id=parent.tenant_id AND reply.schema_id=parent.schema_id AND reply.entity_id=parent.entity_id AND reply.parent_id=parent.id
+LEFT JOIN af_data_comment_reply_reads rr ON rr.tenant_id=reply.tenant_id AND rr.schema_id=reply.schema_id AND rr.entity_id=reply.entity_id AND rr.reply_id=reply.id AND rr.subject_id=parent.author
+WHERE parent.tenant_id=? AND parent.author=? AND reply.author<>parent.author`
+
 type inboxReply struct {
 	ID       string `json:"id"`
 	SchemaID string `json:"schemaId"`
@@ -102,12 +107,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 	// Bound the candidate set before checking each target object's current permissions.
 	candidates := []inboxReply{}
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		query := `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL
-FROM af_data_record_comments parent JOIN af_data_record_comments reply
-ON reply.tenant_id=parent.tenant_id AND reply.schema_id=parent.schema_id AND reply.entity_id=parent.entity_id AND reply.parent_id=parent.id
-LEFT JOIN af_data_comment_reply_reads rr ON rr.tenant_id=reply.tenant_id AND rr.schema_id=reply.schema_id AND rr.entity_id=reply.entity_id AND rr.reply_id=reply.id AND rr.subject_id=parent.author
-WHERE parent.tenant_id=? AND parent.author=? AND reply.author<>parent.author
-`
+		query := `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL` + replyInboxScope
 		if !includeRead {
 			query += " AND rr.reply_id IS NULL"
 		}
@@ -166,6 +166,14 @@ WHERE parent.tenant_id=? AND parent.author=? AND reply.author<>parent.author
 	w.Header().Set("Cache-Control", "no-store")
 	if includeRead {
 		page := c.RecordNoticePage{Data: make([]c.RecordNotice, 0, len(data)), NextCursor: next}
+		if position.At.IsZero() {
+			unread, err := h.recordUnreadSummary(ctx, p)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			page.Unread = &unread
+		}
 		for _, item := range data {
 			page.Data = append(page.Data, recordNotice(item))
 		}

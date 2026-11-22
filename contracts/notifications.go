@@ -10,7 +10,14 @@ type RecordNotice struct {
 	Read     bool   `json:"read"`
 }
 
+// RecordUnreadSummary counts visible unread notifications within the server's scan budget.
+type RecordUnreadSummary struct {
+	Count int64 `json:"count"`
+	Exact bool  `json:"exact"`
+}
+
 type RecordNoticePage struct {
-	Data       []RecordNotice `json:"data"`
-	NextCursor string         `json:"nextCursor,omitempty"`
+	Unread     *RecordUnreadSummary `json:"unread,omitempty"`
+	Data       []RecordNotice       `json:"data"`
+	NextCursor string               `json:"nextCursor,omitempty"`
 }
