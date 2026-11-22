@@ -73,9 +73,14 @@ type inboxReply struct {
 	SchemaID string `json:"schemaId"`
 	RecordID string `json:"recordId"`
 	At       string `json:"at"`
+	read     bool
 }
 
 func (h *handler) commentReplyInbox(w http.ResponseWriter, r *http.Request) {
+	h.readReplyInbox(w, r, false)
+}
+
+func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, includeRead bool) {
 	ctx := r.Context()
 	p, err := h.principal(r)
 	if err != nil {
@@ -83,8 +88,12 @@ func (h *handler) commentReplyInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var position replyInboxPosition
+	secret := h.cfg.CursorSecret
+	if includeRead && len(secret) >= 32 {
+		secret = "record-notifications\x00" + secret
+	}
 	if token := r.URL.Query().Get("cursor"); token != "" {
-		position, _, err = replyInboxCursor(h.cfg.CursorSecret, p, token, position)
+		position, _, err = replyInboxCursor(secret, p, token, position)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -93,12 +102,15 @@ func (h *handler) commentReplyInbox(w http.ResponseWriter, r *http.Request) {
 	// Bound the candidate set before checking each target object's current permissions.
 	candidates := []inboxReply{}
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		query := `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at
+		query := `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL
 FROM af_data_record_comments parent JOIN af_data_record_comments reply
 ON reply.tenant_id=parent.tenant_id AND reply.schema_id=parent.schema_id AND reply.entity_id=parent.entity_id AND reply.parent_id=parent.id
+LEFT JOIN af_data_comment_reply_reads rr ON rr.tenant_id=reply.tenant_id AND rr.schema_id=reply.schema_id AND rr.entity_id=reply.entity_id AND rr.reply_id=reply.id AND rr.subject_id=parent.author
 WHERE parent.tenant_id=? AND parent.author=? AND reply.author<>parent.author
-AND NOT EXISTS (SELECT 1 FROM af_data_comment_reply_reads rr WHERE rr.tenant_id=reply.tenant_id AND rr.schema_id=reply.schema_id AND rr.entity_id=reply.entity_id AND rr.reply_id=reply.id AND rr.subject_id=parent.author)
 `
+		if !includeRead {
+			query += " AND rr.reply_id IS NULL"
+		}
 		args := []any{p.TenantID, p.Subject}
 		if !position.At.IsZero() {
 			query += " AND (reply.created_at,reply.id,reply.schema_id,reply.entity_id)<(?,?,?,?)"
@@ -112,7 +124,7 @@ AND NOT EXISTS (SELECT 1 FROM af_data_comment_reply_reads rr WHERE rr.tenant_id=
 		for rows.Next() {
 			var item inboxReply
 			var at time.Time
-			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at); err != nil {
+			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at, &item.read); err != nil {
 				return err
 			}
 			item.At = at.UTC().Format(time.RFC3339Nano)
@@ -134,7 +146,7 @@ AND NOT EXISTS (SELECT 1 FROM af_data_comment_reply_reads rr WHERE rr.tenant_id=
 			writeError(w, err)
 			return
 		}
-		_, next, err = replyInboxCursor(h.cfg.CursorSecret, p, "", replyInboxPosition{ID: last.ID, SchemaID: last.SchemaID, RecordID: last.RecordID, At: at})
+		_, next, err = replyInboxCursor(secret, p, "", replyInboxPosition{ID: last.ID, SchemaID: last.SchemaID, RecordID: last.RecordID, At: at})
 		if err != nil {
 			writeError(w, err)
 			return
@@ -152,6 +164,14 @@ AND NOT EXISTS (SELECT 1 FROM af_data_comment_reply_reads rr WHERE rr.tenant_id=
 		data = append(data, item)
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if includeRead {
+		page := c.RecordNoticePage{Data: make([]c.RecordNotice, 0, len(data)), NextCursor: next}
+		for _, item := range data {
+			page.Data = append(page.Data, recordNotice(item))
+		}
+		writeJSON(w, http.StatusOK, page)
+		return
+	}
 	out := map[string]any{"data": data}
 	if next != "" {
 		out["nextCursor"] = next

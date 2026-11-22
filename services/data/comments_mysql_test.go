@@ -79,6 +79,57 @@ func TestMySQLCommentInboxPagination(t *testing.T) {
 	inbox(first.NextCursor, 422)
 }
 
+func TestMySQLRecordNotifications(t *testing.T) {
+	f := newMutationFixture(t)
+	row := f.create("record-notifications")
+	path := "/instances/" + row.ID + "/comments"
+	parent := mutationDecode[c.RecordComment](t, f.call("POST", path,
+		map[string]string{"body": "parent", "requestId": c.NewID()}, "", 201))
+	recipient := f.p.Subject
+	f.p.Subject = c.NewID()
+	reply := mutationDecode[c.RecordComment](t, f.call("POST", path,
+		map[string]string{"body": "reply", "requestId": c.NewID(), "parentId": parent.ID}, "", 201))
+	const inbox = "/data/inbox/notifications"
+	mark := inbox + "/comment_reply/" + row.SchemaID + "/" + row.ID + "/" + reply.ID
+	call := func(method, path string, status int) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(method, path, nil)
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, r.WithContext(platform.WithPrincipal(r.Context(), f.p)))
+		if w.Code != status {
+			t.Fatalf("%s %s returned %d, want %d", method, path, w.Code, status)
+		}
+		return w
+	}
+	list := func() []c.RecordNotice {
+		return mutationDecode[c.RecordNoticePage](t, call("GET", inbox, 200)).Data
+	}
+	if len(list()) != 0 {
+		t.Fatal("sender can see recipient's notifications")
+	}
+	call("PUT", mark, 404)
+	f.p.Subject = recipient
+	if got := list(); len(got) != 1 || got[0].ID != reply.ID || got[0].Read || got[0].Kind != "comment_reply" {
+		t.Fatalf("unexpected unread notice: %+v", got)
+	}
+	call("PUT", mark, 204)
+	call("PUT", mark, 204)
+	if got := list(); len(got) != 1 || !got[0].Read {
+		t.Fatalf("read notice missing from history: %+v", got)
+	}
+	legacy := call("GET", "/data/inbox/comment-replies", 200)
+	if len(mutationDecode[struct{ Data []inboxReply }](t, legacy).Data) != 0 {
+		t.Fatal("legacy inbox still lists acknowledged reply")
+	}
+	f.mu.Lock()
+	f.policy["instance.read"] = c.Decision{Allow: false}
+	f.mu.Unlock()
+	if len(list()) != 0 {
+		t.Fatal("revoked record still appears in history")
+	}
+	call("PUT", mark, 403)
+}
+
 func TestMySQLRecordComments(t *testing.T) {
 	f := newMutationFixture(t)
 	row := f.create("commented")
