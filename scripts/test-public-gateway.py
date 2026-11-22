@@ -187,6 +187,8 @@ func main() {
                 ('PATCH', '/api/data/schemas/model/instances/record'),
                 ('PUT', '/api/metadata/definitions/model/draft'),
                 ('POST', '/api/metadata/definitions/model/publish'),
+                ('GET', '/api/metadata/definitions/model/delete-preview'),
+                ('DELETE', '/api/metadata/definitions/model'),
             ]:
                 status, response_headers, value = request(method, path,
                     {'If-Match': '"old-etag"', 'Content-Type': 'application/json'}, '{}')
@@ -212,6 +214,10 @@ func main() {
                 checks += 1
             for method, path in [('GET','/api/data/transactions'),('PUT','/api/data/transactions/status'),
                                  ('POST','/api/metadata/definitions/model/dependencies'),
+                                 ('POST','/api/metadata/definitions/model/delete-preview'),
+                                 ('DELETE','/api/metadata/definitions/model/draft'),
+                                 ('DELETE','/api/ontoapp-ontology/metadata/definitions/model'),
+                                 ('GET','/api/ontoapp-ontology/metadata/definitions/model/delete-preview'),
                                  ('GET','/api/ontoapp-ontology/metadata/definitions/model/dependencies'),
                                  ('GET','/api/data/query/bind'),('PUT','/api/data/query/bind'),
                                  ('POST','/api/data/query/bind/execute'),('GET','/api/ontoapp-ontology/data/query/bind'),
