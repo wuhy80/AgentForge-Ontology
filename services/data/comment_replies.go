@@ -2,13 +2,71 @@ package data
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
+
+const replyInboxBatch = 50
+
+type replyInboxPosition struct {
+	ID       string
+	SchemaID string
+	RecordID string
+	At       time.Time
+	Expires  int64
+}
+
+func replyInboxCursor(secret string, p c.Principal, token string, position replyInboxPosition) (replyInboxPosition, string, error) {
+	bad := problem(422, "invalid_cursor", "回复收件箱游标无效")
+	if len(secret) < 32 {
+		return position, "", problem(503, "configuration", "游标签名密钥未配置")
+	}
+	key := sha256.Sum256([]byte("comment-reply-inbox\x00" + secret))
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		return position, "", err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return position, "", err
+	}
+	scope, _ := json.Marshal([2]string{p.TenantID, p.Subject})
+	if token != "" {
+		if len(token) > 1024 {
+			return position, "", bad
+		}
+		raw, err := base64.RawURLEncoding.DecodeString(token)
+		if err != nil || len(raw) < aead.NonceSize() {
+			return position, "", bad
+		}
+		payload, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], scope)
+		if err != nil || json.Unmarshal(payload, &position) != nil || position.Expires <= time.Now().Unix() ||
+			!uuidPattern.MatchString(position.ID) || !uuidPattern.MatchString(position.SchemaID) || !uuidPattern.MatchString(position.RecordID) || position.At.IsZero() {
+			return position, "", bad
+		}
+		return position, "", nil
+	}
+	nonce := make([]byte, aead.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return position, "", err
+	}
+	position.Expires = time.Now().Add(15 * time.Minute).Unix()
+	payload, err := json.Marshal(position)
+	if err != nil {
+		return position, "", err
+	}
+	return position, base64.RawURLEncoding.EncodeToString(aead.Seal(nonce, nonce, payload, scope)), nil
+}
 
 type inboxReply struct {
 	ID       string `json:"id"`
@@ -24,15 +82,29 @@ func (h *handler) commentReplyInbox(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	var position replyInboxPosition
+	if token := r.URL.Query().Get("cursor"); token != "" {
+		position, _, err = replyInboxCursor(h.cfg.CursorSecret, p, token, position)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+	}
 	// Bound the candidate set before checking each target object's current permissions.
 	candidates := []inboxReply{}
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at
+		query := `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at
 FROM af_data_record_comments parent JOIN af_data_record_comments reply
 ON reply.tenant_id=parent.tenant_id AND reply.schema_id=parent.schema_id AND reply.entity_id=parent.entity_id AND reply.parent_id=parent.id
 WHERE parent.tenant_id=? AND parent.author=? AND reply.author<>parent.author
 AND NOT EXISTS (SELECT 1 FROM af_data_comment_reply_reads rr WHERE rr.tenant_id=reply.tenant_id AND rr.schema_id=reply.schema_id AND rr.entity_id=reply.entity_id AND rr.reply_id=reply.id AND rr.subject_id=parent.author)
-ORDER BY reply.created_at DESC,reply.id DESC LIMIT 50`, p.TenantID, p.Subject)
+`
+		args := []any{p.TenantID, p.Subject}
+		if !position.At.IsZero() {
+			query += " AND (reply.created_at,reply.id,reply.schema_id,reply.entity_id)<(?,?,?,?)"
+			args = append(args, position.At, position.ID, position.SchemaID, position.RecordID)
+		}
+		rows, err := tx.QueryContext(ctx, query+" ORDER BY reply.created_at DESC,reply.id DESC,reply.schema_id DESC,reply.entity_id DESC LIMIT ?", append(args, replyInboxBatch+1)...)
 		if err != nil {
 			return err
 		}
@@ -53,6 +125,21 @@ ORDER BY reply.created_at DESC,reply.id DESC LIMIT 50`, p.TenantID, p.Subject)
 		return
 	}
 	data := []inboxReply{}
+	next := ""
+	if len(candidates) > replyInboxBatch {
+		candidates = candidates[:replyInboxBatch]
+		last := candidates[len(candidates)-1]
+		at, err := time.Parse(time.RFC3339Nano, last.At)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		_, next, err = replyInboxCursor(h.cfg.CursorSecret, p, "", replyInboxPosition{ID: last.ID, SchemaID: last.SchemaID, RecordID: last.RecordID, At: at})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+	}
 	for _, item := range candidates {
 		if err := h.checkReplyTarget(ctx, p, item); err != nil {
 			var failure *apiError
@@ -65,7 +152,11 @@ ORDER BY reply.created_at DESC,reply.id DESC LIMIT 50`, p.TenantID, p.Subject)
 		data = append(data, item)
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+	out := map[string]any{"data": data}
+	if next != "" {
+		out["nextCursor"] = next
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *handler) checkReplyTarget(ctx context.Context, p c.Principal, item inboxReply) error {

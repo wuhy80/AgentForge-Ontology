@@ -245,7 +245,7 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 事务实体校验失败并回滚时，失败回执可包含 `error.fieldId` 和原操作的 `error.clientKey`，用于定位客户端输入。并发冲突仍返回事务级错误。
 ## 记录评论
 
-`GET /data/inbox/comment-replies` 从当前会话所属租户选取最近 50 条未读评论回复候选，再逐项按最新模型和行权限复核。响应仅含可访问记录的模型 ID、记录 ID、回复 ID 和时间。需要显式应用 `015_data_comment_inbox_indexes` 索引迁移。
+`GET /data/inbox/comment-replies` 按当前会话选取每页最多 50 条未读回复候选，逐项按最新模型和行权限复核。可用 nextCursor 继续读取，游标加密且绑定租户和接收人，15 分钟后失效。权限过滤后可能返回带游标的空页。响应仅含可访问记录的模型 ID、记录 ID、回复 ID 和时间。需要显式应用 `015_data_comment_inbox_indexes` 索引迁移。
 
 `GET .../instances/{entityId}/comment-replies` 返回当前记录内回复了当前用户评论的未读总数，以及最近 25 条未读回复的 ID 和时间。回复自己不计入通知。`PUT .../comment-replies/{replyId}` 幂等标记已读，只允许原评论作者调用。两个接口均重新校验对象读取权限。需要显式应用 `014_data_comment_reply_reads`，对象删除时同步清除已读记录。
 
