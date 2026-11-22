@@ -31,4 +31,10 @@ created_at datetime(6) NOT NULL, is_read boolean NOT NULL DEFAULT false,
 PRIMARY KEY(tenant_id,subject_id,id), KEY target(tenant_id,schema_id,entity_id),
 KEY inbox(tenant_id,subject_id,created_at,id)) ENGINE=InnoDB`},
 	{ID: "018_data_mention_notices", SQL: `ALTER TABLE af_data_record_notices ADD COLUMN kind varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'record_updated', ADD COLUMN field_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT ''`},
+	{ID: "019_data_record_approvals", SQL: `CREATE TABLE af_data_record_approvals (
+tenant_id varbinary(128) NOT NULL, schema_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+entity_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+assignee varbinary(255) NOT NULL, submitted_by varbinary(255) NOT NULL,
+submitted_at datetime(6) NOT NULL, decided_at datetime(6), state varchar(16) NOT NULL, note text NOT NULL,
+PRIMARY KEY(tenant_id,schema_id,entity_id,id), KEY pending(tenant_id,schema_id,entity_id,state)) ENGINE=InnoDB`},
 }, SavedQueryMigrations...)

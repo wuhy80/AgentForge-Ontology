@@ -204,7 +204,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 }
 
 func (h *handler) checkReplyTarget(ctx context.Context, p c.Principal, item inboxReply) error {
-	return h.withReplyTarget(ctx, p, item, false, func(*sql.Tx, c.Decision) error { return nil })
+	return h.withReplyTarget(ctx, p, item, false, func(*sql.Tx, c.Decision, c.Definition) error { return nil })
 }
 
 func (h *handler) commentReplies(w http.ResponseWriter, r *http.Request) {

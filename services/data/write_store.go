@@ -144,7 +144,7 @@ func (s *platformMutationStore) Delete(ctx context.Context, old c.Instance) erro
 	if _, err := s.tx.ExecContext(ctx, "DELETE FROM af_data_record_comments WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
 		return err
 	}
-	for _, table := range []string{"af_data_record_follows", "af_data_record_notices"} {
+	for _, table := range []string{"af_data_record_follows", "af_data_record_notices", "af_data_record_approvals"} {
 		if _, err := s.tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
 			return err
 		}

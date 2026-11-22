@@ -28,7 +28,7 @@ func (h *handler) recordNoticeWrite(w http.ResponseWriter, r *http.Request, mark
 		return
 	}
 	following := false
-	err = h.withReplyTarget(ctx, p, target, r.Method != http.MethodGet, func(tx *sql.Tx, read c.Decision) error {
+	err = h.withReplyTarget(ctx, p, target, r.Method != http.MethodGet, func(tx *sql.Tx, read c.Decision, _ c.Definition) error {
 		args := []any{p.TenantID, target.SchemaID, target.RecordID, p.Subject}
 		if mark {
 			var fieldID string
@@ -69,7 +69,7 @@ func (h *handler) recordNoticeWrite(w http.ResponseWriter, r *http.Request, mark
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *handler) withReplyTarget(ctx context.Context, p c.Principal, item inboxReply, lock bool, apply func(*sql.Tx, c.Decision) error) error {
+func (h *handler) withReplyTarget(ctx context.Context, p c.Principal, item inboxReply, lock bool, apply func(*sql.Tx, c.Decision, c.Definition) error) error {
 	current, err := h.current(ctx, p.TenantID, item.SchemaID)
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func (h *handler) withReplyTarget(ctx context.Context, p c.Principal, item inbox
 		if _, err := selectInstanceFields(ctx, tx, d, nil, p.TenantID, item.RecordID, read.RowFilter, lock); err != nil {
 			return err
 		}
-		if err := apply(tx, read); err != nil {
+		if err := apply(tx, read, d); err != nil {
 			return err
 		}
 		return h.recheck(ctx, p, "instance.read", d.ID, read)
