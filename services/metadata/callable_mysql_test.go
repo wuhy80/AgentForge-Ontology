@@ -123,6 +123,33 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	discardPath := "/metadata/definitions/" + discard.Definition.ID
 	request("GET", discardPath+"/delete-preview", discard.ETag, nil, 204, nil)
 	request("GET", discardPath+"/draft", "", nil, 200, nil)
+	if _, err := engine.DB().Exec("UPDATE af_meta_tenant_guards SET publication_id=? WHERE tenant_id=?", c.NewID(), tenant); err != nil {
+		t.Fatal(err)
+	}
+	var deletionError c.Error
+	request("GET", discardPath+"/delete-preview", discard.ETag, nil, 409, &deletionError)
+	if deletionError.Code != "publication_in_progress" {
+		t.Fatalf("unexpected publication blocker: %+v", deletionError)
+	}
+	if _, err := engine.DB().Exec("UPDATE af_meta_tenant_guards SET publication_id='' WHERE tenant_id=?", tenant); err != nil {
+		t.Fatal(err)
+	}
+	latePolicy, err := json.Marshal(c.PermissionPolicy{Rules: []c.PermissionRule{{Operation: "definition.read", ResourceID: discard.Definition.ID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.DB().Exec(`INSERT INTO af_identity_tenants
+ (tenant_id,authorization_state,current_policy,draft_policy,policy_etag) VALUES (?,'state','{"rules":[]}',?,'etag')`, tenant, string(latePolicy)); err != nil {
+		t.Fatal(err)
+	}
+	request("DELETE", discardPath, discard.ETag, nil, 409, &deletionError)
+	if deletionError.Code != "definition_policy_in_use" {
+		t.Fatalf("unexpected policy blocker: %+v", deletionError)
+	}
+	request("GET", discardPath+"/draft", "", nil, 200, nil)
+	if _, err := engine.DB().Exec("DELETE FROM af_identity_tenants WHERE tenant_id=?", tenant); err != nil {
+		t.Fatal(err)
+	}
 	request("DELETE", discardPath, "stale", nil, 412, nil)
 	request("DELETE", discardPath, discard.ETag, nil, 204, nil)
 	request("DELETE", discardPath, discard.ETag, nil, 204, nil)

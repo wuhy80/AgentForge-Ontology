@@ -23,6 +23,16 @@ func (h *handler) deleteDraft(preview bool) endpoint {
 					return err
 				}
 			}
+			if preview {
+				var publication string
+				err = tx.QueryRowContext(ctx, "SELECT publication_id FROM af_meta_tenant_guards WHERE tenant_id=?", p.TenantID).Scan(&publication)
+				if err != nil && err != sql.ErrNoRows {
+					return err
+				}
+				if publication != "" {
+					return problem(409, "publication_in_progress", "该租户发布尚未完成，请稍后重试")
+				}
+			}
 			if row.status == "deleted" && !preview {
 				return matchHeader(r, row.draftDigest)
 			}
