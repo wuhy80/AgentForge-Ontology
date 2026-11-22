@@ -35,3 +35,7 @@ OAuth 授权服务器端点由 `ONTOLOGY_AUTH_ISSUER` 配置（缺省为工作�
 2026-11-08新增`Expression.valueRef`，与`value`互斥，支持权威用户属性及指定/用户匹配的平台对象属性；类型见[取值契约](../../../contracts/permission_context.go)，当前来源、资格、预算及一致性唯一见[权限主说明](../../../docs/权限/权限设计.md#权限上下文与动态取值2026-11-08首批已实现)。服务入口显式将`Store.ObjectContext`接到Data的`platform.RemoteObjectContext.Read`，使用`ONTOLOGY_DATA_URL`与服务凭据，不跨服务读私表。未配置对象读取器时对象引用失败，用户引用仍可使用；仅匹配规则在每次授权中解析，不缓存allow。模拟共用实际解析，`contextProtected=true`时不返回解析后的行条件及来源摘要；不把隐藏属性写入错误或审计。该增量保存在既有策略JSON内，不新增平台迁移、不修改已有租户策略。
 
 `go test ./identity` 运行类型与预算回归。设置 `IDENTITY_TEST_DSN` 启用真实 MySQL 测试；可额外设置 `IDENTITY_TEST_OPA_URL` 连接真实 OPA，否则测试使用受控 HTTP 决策桩。测试显式应用迁移并创建随机租户，不删除已有业务数据。用户组回归覆盖授权/模拟一致、显式拒绝与不兼容字段集合、停用账号、跨租户、管理员边界、ETag、成员会话撤销、描述修改保留会话、256成员/64有效角色/64组/2000组/20000成员引用预算，以及同组和跨组并发事务。共享登录保护的 `TestMySQLSharedLoginBudget` 另外要求 `IDENTITY_THROTTLE_TEST_DSN` 指向空的独立临时库；该用例会填满未知账号空间并删除测试密钥，禁止指向既有开发或业务库。规则统一见[权限设计](../../../docs/权限/权限设计.md#当前实现协议2026-11-07)。外部身份目录、全局多副本入口准入和生产会话运维继续待后续实施。
+
+## 账号提及目录
+
+GET /metadata/admin/mention-accounts?prefix=名称 沿用租户管理员会话授权，仅匹配同租户的启用账号。响应的 data 每项只包含 id 和 label，最多 20 条，hasMore 表示存在更多匹配。前缀按字面匹配。Metadata 测试和构建通过，隔离 MySQL 验证需配置 IDENTITY_TEST_DSN。
