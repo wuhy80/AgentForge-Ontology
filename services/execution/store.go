@@ -90,11 +90,11 @@ func scanRecord(row *sql.Row) (Record, error) {
 }
 
 func (s *SQLStore) FindKey(ctx context.Context, tenant, subject, key string) (Record, error) {
-	return scanRecord(s.DB.QueryRowContext(ctx, "SELECT record_json FROM af_execution_invocations WHERE tenant_id=? AND subject_id=? AND request_key=?", tenant, subject, key))
+	return scanRecord(s.DB.QueryRowContext(ctx, "SELECT record_json FROM af_execution_invocations WHERE tenant_id=? AND subject_id=? AND request_key=? AND "+retainedJob, tenant, subject, key))
 }
 
 func (s *SQLStore) FindID(ctx context.Context, tenant, subject, id string) (Record, error) {
-	return scanRecord(s.DB.QueryRowContext(ctx, "SELECT record_json FROM af_execution_invocations WHERE tenant_id=? AND subject_id=? AND id=?", tenant, subject, id))
+	return scanRecord(s.DB.QueryRowContext(ctx, "SELECT record_json FROM af_execution_invocations WHERE tenant_id=? AND subject_id=? AND id=? AND "+retainedJob, tenant, subject, id))
 }
 
 func (s *SQLStore) Claim(ctx context.Context, record Record) (bool, error) {
@@ -106,6 +106,12 @@ func claimRecord(ctx context.Context, db interface {
 }, record Record) (bool, error) {
 	raw, err := json.Marshal(record)
 	if err != nil {
+		return false, err
+	}
+	// Reuse expired keys even if the background retention sweep is delayed.
+	// The expiry predicate also protects a new concurrent claim of this key.
+	if _, err := db.ExecContext(ctx, "DELETE FROM af_execution_invocations WHERE tenant_id=? AND subject_id=? AND request_key=? AND job_purge_at<=UTC_TIMESTAMP(6)",
+		record.TenantID, record.SubjectID, record.RequestKey); err != nil {
 		return false, err
 	}
 	_, err = db.ExecContext(ctx, "INSERT INTO af_execution_invocations (tenant_id,subject_id,request_key,request_hash,id,status,deadline_at,record_json) VALUES (?,?,?,?,?,?,IF(?='queued',UTC_TIMESTAMP(6),?),?)",

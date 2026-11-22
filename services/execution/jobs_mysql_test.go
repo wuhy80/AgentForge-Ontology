@@ -120,8 +120,8 @@ func TestMySQLJobLifecycle(t *testing.T) {
 	}
 	old := winners[0]
 	closeJob(&old, "succeeded", "", "")
-	if err := store.finishJob(ctx, old); err != nil {
-		t.Fatal(err)
+	if saved, err := store.finishJob(ctx, old); err != nil || saved {
+		t.Fatalf("expired lease completion saved=%v: %v", saved, err)
 	}
 	if state := invocation(t, call("GET", path, "", "", tenant), 202); state.Status != "running" {
 		t.Fatalf("expired attempt published a result: %s", state.Status)
@@ -158,8 +158,8 @@ func TestMySQLJobLifecycle(t *testing.T) {
 		}
 	}
 	closeJob(&running, "succeeded", "", "")
-	if err := store.finishJob(ctx, running); err != nil {
-		t.Fatal(err)
+	if saved, err := store.finishJob(ctx, running); err != nil || saved {
+		t.Fatalf("canceled lease completion saved=%v: %v", saved, err)
 	}
 	if state := invocation(t, call("GET", path, "", "", tenant), 200); state.Status != "canceled" || f.runner.calls.Load() != 1 {
 		t.Fatal("cancelled task was overwritten")
@@ -232,6 +232,15 @@ func TestMySQLJobLifecycle(t *testing.T) {
 	}
 	if _, err := engine.DB().Exec("UPDATE af_execution_invocations SET job_purge_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE tenant_id=? AND status='canceled'", tenant); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := store.FindKey(ctx, tenant, "user", "cancel-job"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expired key visible before sweep: %v", err)
+	}
+	if _, err := store.FindID(ctx, tenant, "user", job.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expired task visible before sweep: %v", err)
+	}
+	if _, err := store.cancelJob(ctx, tenant, "user", job.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expired task cancel found an old task: %v", err)
 	}
 	if err := store.purgeJobs(ctx); err != nil {
 		t.Fatal(err)

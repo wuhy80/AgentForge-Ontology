@@ -14,11 +14,21 @@ import (
 type jobStore interface {
 	admitJob(context.Context, Record) (bool, error)
 	leaseJob(context.Context) (Record, error)
+	hasReadyJob(context.Context) (bool, error)
 	jobActive(context.Context, Record) (bool, error)
-	finishJob(context.Context, Record) error
+	finishJob(context.Context, Record) (bool, error)
 	cancelJob(context.Context, string, string, string) (Record, error)
 	purgeJobs(context.Context) error
 	listJobs(context.Context, string, string, string, string, int) ([]c.InvocationSummary, error)
+}
+
+const retainedJob = "(job_purge_at IS NULL OR job_purge_at>UTC_TIMESTAMP(6))"
+
+func (s *SQLStore) hasReadyJob(ctx context.Context) (bool, error) {
+	var ready bool
+	err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM af_execution_invocations
+		WHERE status IN ('queued','job_running') AND deadline_at<=UTC_TIMESTAMP(6))`).Scan(&ready)
+	return ready, err
 }
 
 func (s *SQLStore) jobActive(ctx context.Context, record Record) (bool, error) {
@@ -50,7 +60,7 @@ func (s *SQLStore) admitJob(ctx context.Context, record Record) (bool, error) {
 	var pending int
 	var duplicate bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM af_execution_invocations
-		WHERE tenant_id=? AND subject_id=? AND request_key=?)`, record.TenantID, record.SubjectID, record.RequestKey).Scan(&duplicate); err != nil {
+		WHERE tenant_id=? AND subject_id=? AND request_key=? AND `+retainedJob+`)`, record.TenantID, record.SubjectID, record.RequestKey).Scan(&duplicate); err != nil {
 		return false, err
 	}
 	if duplicate {
@@ -102,21 +112,25 @@ func (s *SQLStore) leaseJob(ctx context.Context) (Record, error) {
 	return record, tx.Commit()
 }
 
-func (s *SQLStore) finishJob(ctx context.Context, record Record) error {
+func (s *SQLStore) finishJob(ctx context.Context, record Record) (bool, error) {
 	raw, err := json.Marshal(record)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var delay int
 	if record.Invocation.Status == "queued" {
 		delay = 5 * record.Invocation.Attempt
 	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE af_execution_invocations SET status=?,record_json=?,
+	result, err := s.DB.ExecContext(ctx, `UPDATE af_execution_invocations SET status=?,record_json=?,
 		deadline_at=UTC_TIMESTAMP(6)+INTERVAL ? SECOND,
 		job_purge_at=IF(?='queued',NULL,UTC_TIMESTAMP(6)+INTERVAL 30 DAY)
 		WHERE tenant_id=? AND id=? AND status='job_running' AND job_attempt=? AND deadline_at>UTC_TIMESTAMP(6)`,
 		record.Invocation.Status, string(raw), delay, record.Invocation.Status, record.TenantID, record.Invocation.ID, record.Invocation.Attempt)
-	return err
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	return count == 1, err
 }
 
 func (s *SQLStore) cancelJob(ctx context.Context, tenant, subject, id string) (Record, error) {
@@ -126,7 +140,7 @@ func (s *SQLStore) cancelJob(ctx context.Context, tenant, subject, id string) (R
 	}
 	defer tx.Rollback()
 	record, err := scanRecord(tx.QueryRowContext(ctx, `SELECT record_json FROM af_execution_invocations
-		WHERE tenant_id=? AND subject_id=? AND id=? FOR UPDATE`, tenant, subject, id))
+		WHERE tenant_id=? AND subject_id=? AND id=? AND `+retainedJob+` FOR UPDATE`, tenant, subject, id))
 	if err != nil {
 		return Record{}, err
 	}
@@ -163,7 +177,7 @@ func (s *SQLStore) listJobs(ctx context.Context, tenant, subject, created, id st
 		COALESCE(JSON_UNQUOTE(JSON_EXTRACT(record_json,'$.invocation.finishedAt')),'')
 		FROM af_execution_invocations
 		WHERE tenant_id=? AND subject_id=? AND job_created IS NOT NULL
-		AND (job_purge_at IS NULL OR job_purge_at>UTC_TIMESTAMP(6))
+		AND `+retainedJob+`
 		AND (job_created<? OR (job_created=? AND id<?)) ORDER BY job_created DESC,id DESC LIMIT ?`,
 		tenant, subject, created, created, id, limit)
 	if err != nil {
