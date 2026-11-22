@@ -77,9 +77,10 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		}
 	}))
 	defer data.Close()
-	api := NewHandler(Config{Engine: engine, DataURL: data.URL, ServiceToken: strings.Repeat("p", 32), CallablePolicyReferences: identity.NewStore(engine.DB(), nil, ""), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) {
+	config := Config{Engine: engine, DataURL: data.URL, ServiceToken: strings.Repeat("p", 32), CallablePolicyReferences: identity.NewStore(engine.DB(), nil, ""), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) {
 		return c.Decision{Allow: true}, nil
-	})})
+	})}
+	api := NewHandler(config)
 	request := func(method, path, etag string, body any, status int, out any) {
 		t.Helper()
 		var raw []byte
@@ -237,6 +238,16 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	if blocked.Code != "definition_in_use" {
 		t.Fatalf("current definition did not block enum disable: %+v", blocked)
 	}
+	withoutPolicy := config
+	withoutPolicy.CallablePolicyReferences = nil
+	api = NewHandler(withoutPolicy)
+	for _, op := range []struct{ method, suffix string }{{"GET", "/disable-preview"}, {"POST", "/disable"}} {
+		request(op.method, functionPath+op.suffix, function.ETag, nil, 503, &blocked)
+		if blocked.Code != "policy_impact_unavailable" {
+			t.Fatalf("unexpected policy availability error: %+v", blocked)
+		}
+	}
+	api = NewHandler(config)
 	request("GET", functionPath+"/disable-preview", function.ETag, nil, 200, nil)
 	actionDefinition := executableFunction()
 	actionDefinition.Kind, actionDefinition.Name, actionDefinition.Action, actionDefinition.Function = c.KindAction, "调用Python", actionDefinition.Function, nil

@@ -98,14 +98,16 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 					if referenced {
 						return problem(409, "definition_in_use", "当前或草稿定义仍引用此定义")
 					}
-					if policies := h.cfg.CallablePolicyReferences; policies != nil {
-						referenced, err = policies.HasCallablePolicyReference(ctx, tx, p.TenantID, id, d.Kind, !preview)
-						if err != nil {
-							return err
-						}
-						if referenced {
-							return problem(409, "definition_policy_in_use", "存在引用此定义的调用授权，请由权限管理员处理后重试")
-						}
+					policies := h.cfg.CallablePolicyReferences
+					if policies == nil {
+						return problem(503, "policy_impact_unavailable", "无法复核定义相关策略")
+					}
+					referenced, err = policies.HasCallablePolicyReference(ctx, tx, p.TenantID, id, d.Kind, !preview)
+					if err != nil {
+						return err
+					}
+					if referenced {
+						return problem(409, "definition_policy_in_use", "存在引用此定义的调用授权，请由权限管理员处理后重试")
 					}
 				}
 			}
