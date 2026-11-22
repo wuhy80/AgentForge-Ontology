@@ -143,6 +143,11 @@ func (s *platformMutationStore) Delete(ctx context.Context, old c.Instance) erro
 	if _, err := s.tx.ExecContext(ctx, "DELETE FROM af_data_record_comments WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
 		return err
 	}
+	for _, table := range []string{"af_data_record_follows", "af_data_record_notices"} {
+		if _, err := s.tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
+			return err
+		}
+	}
 	for _, property := range s.current.Definition.Schema.Properties {
 		if property.FileKind != "" {
 			_, err = s.tx.ExecContext(ctx, "DELETE FROM af_data_property_files WHERE tenant_id=? AND schema_id=? AND entity_id=?", s.p.TenantID, old.SchemaID, old.ID)
@@ -193,5 +198,15 @@ func (s *platformMutationStore) SaveReceipt(ctx context.Context, operation, key,
 }
 
 func (s *platformMutationStore) Emit(ctx context.Context, event string, instance c.Instance) error {
-	return emit(ctx, s.tx, s.p.TenantID, event, instance)
+	if err := emit(ctx, s.tx, s.p.TenantID, event, instance); err != nil {
+		return err
+	}
+	if event != "instance.updated" {
+		return nil
+	}
+	_, err := s.tx.ExecContext(ctx, `INSERT INTO af_data_record_notices(tenant_id,subject_id,id,schema_id,entity_id,created_at)
+SELECT tenant_id,subject_id,?,schema_id,entity_id,UTC_TIMESTAMP(6) FROM af_data_record_follows
+WHERE tenant_id=? AND schema_id=? AND entity_id=? AND subject_id<>?`,
+		c.NewID(), s.p.TenantID, instance.SchemaID, instance.ID, s.p.Subject)
+	return err
 }

@@ -24,6 +24,7 @@ type replyInboxPosition struct {
 	RecordID string
 	At       time.Time
 	Expires  int64
+	Kind     string `json:",omitempty"`
 }
 
 func replyInboxCursor(secret string, p c.Principal, token string, position replyInboxPosition) (replyInboxPosition, string, error) {
@@ -51,6 +52,7 @@ func replyInboxCursor(secret string, p c.Principal, token string, position reply
 		}
 		payload, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], scope)
 		if err != nil || json.Unmarshal(payload, &position) != nil || position.Expires <= time.Now().Unix() ||
+			(position.Kind != "" && position.Kind != commentReplyNoticeKind && position.Kind != recordUpdateNoticeKind) ||
 			!uuidPattern.MatchString(position.ID) || !uuidPattern.MatchString(position.SchemaID) || !uuidPattern.MatchString(position.RecordID) || position.At.IsZero() {
 			return position, "", bad
 		}
@@ -79,6 +81,7 @@ type inboxReply struct {
 	RecordID string `json:"recordId"`
 	At       string `json:"at"`
 	read     bool
+	kind     string
 }
 
 func (h *handler) commentReplyInbox(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +98,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 	var position replyInboxPosition
 	secret := h.cfg.CursorSecret
 	if includeRead && len(secret) >= 32 {
-		secret = "record-notifications\x00" + secret
+		secret = "record-notifications-v2\x00" + secret
 	}
 	if token := r.URL.Query().Get("cursor"); token != "" {
 		position, _, err = replyInboxCursor(secret, p, token, position)
@@ -107,16 +110,24 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 	// Bound the candidate set before checking each target object's current permissions.
 	candidates := []inboxReply{}
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		query := `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL` + replyInboxScope
+		query := "SELECT id,schema_id,entity_id,created_at,is_read,kind FROM (" + replyNoticeSelect
+		args := []any{p.TenantID, p.Subject}
+		if includeRead {
+			query += " UNION ALL " + updateNoticeSelect
+			args = append(args, p.TenantID, p.Subject)
+		}
 		if !includeRead {
 			query += " AND rr.reply_id IS NULL"
 		}
-		args := []any{p.TenantID, p.Subject}
-		if !position.At.IsZero() {
-			query += " AND (reply.created_at,reply.id,reply.schema_id,reply.entity_id)<(?,?,?,?)"
+		query += ") notices WHERE 1=1"
+		if !position.At.IsZero() && includeRead {
+			query += " AND (created_at,id,schema_id,entity_id,kind)<(?,?,?,?,?)"
+			args = append(args, position.At, position.ID, position.SchemaID, position.RecordID, position.Kind)
+		} else if !position.At.IsZero() {
+			query += " AND (created_at,id,schema_id,entity_id)<(?,?,?,?)"
 			args = append(args, position.At, position.ID, position.SchemaID, position.RecordID)
 		}
-		rows, err := tx.QueryContext(ctx, query+" ORDER BY reply.created_at DESC,reply.id DESC,reply.schema_id DESC,reply.entity_id DESC LIMIT ?", append(args, replyInboxBatch+1)...)
+		rows, err := tx.QueryContext(ctx, query+" ORDER BY created_at DESC,id DESC,schema_id DESC,entity_id DESC,kind DESC LIMIT ?", append(args, replyInboxBatch+1)...)
 		if err != nil {
 			return err
 		}
@@ -124,7 +135,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 		for rows.Next() {
 			var item inboxReply
 			var at time.Time
-			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at, &item.read); err != nil {
+			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at, &item.read, &item.kind); err != nil {
 				return err
 			}
 			item.At = at.UTC().Format(time.RFC3339Nano)
@@ -146,7 +157,11 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 			writeError(w, err)
 			return
 		}
-		_, next, err = replyInboxCursor(secret, p, "", replyInboxPosition{ID: last.ID, SchemaID: last.SchemaID, RecordID: last.RecordID, At: at})
+		position := replyInboxPosition{ID: last.ID, SchemaID: last.SchemaID, RecordID: last.RecordID, At: at}
+		if includeRead {
+			position.Kind = last.kind
+		}
+		_, next, err = replyInboxCursor(secret, p, "", position)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -188,27 +203,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 }
 
 func (h *handler) checkReplyTarget(ctx context.Context, p c.Principal, item inboxReply) error {
-	current, err := h.current(ctx, p.TenantID, item.SchemaID)
-	if err != nil {
-		return err
-	}
-	read, err := h.authorize(ctx, p, "instance.read", current.Definition.ID)
-	if err != nil {
-		return err
-	}
-	d := current.Definition
-	if d.Schema == nil || d.Schema.StorageBinding != nil {
-		return problem(404, "not_found", "记录不可访问")
-	}
-	return h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		if err := h.gate(ctx, tx, p, current); err != nil {
-			return err
-		}
-		if _, err := selectInstanceFields(ctx, tx, d, nil, p.TenantID, item.RecordID, read.RowFilter, false); err != nil {
-			return err
-		}
-		return h.recheck(ctx, p, "instance.read", d.ID, read)
-	})
+	return h.withReplyTarget(ctx, p, item, false, func(*sql.Tx) error { return nil })
 }
 
 func (h *handler) commentReplies(w http.ResponseWriter, r *http.Request) {

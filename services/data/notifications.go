@@ -10,12 +10,20 @@ import (
 )
 
 const commentReplyNoticeKind = "comment_reply"
+const recordUpdateNoticeKind = "record_updated"
+
+const replyNoticeSelect = `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL AS is_read,'comment_reply' AS kind` + replyInboxScope
+const updateNoticeSelect = `SELECT id,schema_id,entity_id,created_at,is_read,'record_updated' AS kind FROM af_data_record_notices WHERE tenant_id=? AND subject_id=?`
 
 func (h *handler) recordNotifications(w http.ResponseWriter, r *http.Request) {
 	h.readReplyInbox(w, r, true)
 }
 
 func (h *handler) markRecordNotification(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("kind") == recordUpdateNoticeKind {
+		h.recordNoticeWrite(w, r, true)
+		return
+	}
 	if r.PathValue("kind") != commentReplyNoticeKind {
 		writeError(w, problem(http.StatusNotFound, "not_found", "通知不可访问"))
 		return
@@ -25,7 +33,7 @@ func (h *handler) markRecordNotification(w http.ResponseWriter, r *http.Request)
 }
 
 func recordNotice(item inboxReply) c.RecordNotice {
-	return c.RecordNotice{ID: item.ID, Kind: commentReplyNoticeKind, SchemaID: item.SchemaID,
+	return c.RecordNotice{ID: item.ID, Kind: item.kind, SchemaID: item.SchemaID,
 		RecordID: item.RecordID, At: item.At, Read: item.read}
 }
 
@@ -38,9 +46,10 @@ func (h *handler) recordUnreadSummary(ctx context.Context, p c.Principal) (c.Rec
 	}
 	records := make([]recordCount, 0, unreadRecordBudget+1)
 	err := h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT reply.schema_id,reply.entity_id,COUNT(*)`+replyInboxScope+
-			` AND rr.reply_id IS NULL GROUP BY reply.schema_id,reply.entity_id
-			   ORDER BY reply.schema_id,reply.entity_id LIMIT ?`, p.TenantID, p.Subject, unreadRecordBudget+1)
+		rows, err := tx.QueryContext(ctx, `SELECT schema_id,entity_id,COUNT(*) FROM (`+replyNoticeSelect+
+			` AND rr.reply_id IS NULL UNION ALL `+updateNoticeSelect+` AND is_read=false) notices
+			  GROUP BY schema_id,entity_id ORDER BY schema_id,entity_id LIMIT ?`,
+			p.TenantID, p.Subject, p.TenantID, p.Subject, unreadRecordBudget+1)
 		if err != nil {
 			return err
 		}

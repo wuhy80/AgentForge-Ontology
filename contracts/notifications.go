@@ -21,3 +21,7 @@ type RecordNoticePage struct {
 	Data       []RecordNotice       `json:"data"`
 	NextCursor string               `json:"nextCursor,omitempty"`
 }
+
+type RecordFollow struct {
+	Following bool `json:"following"`
+}

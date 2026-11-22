@@ -261,3 +261,11 @@ Data capabilities 通过 `recordNotifications: true` 声明支持。会话调用
 `PUT /data/inbox/notifications/{kind}/{schemaId}/{entityId}/{noticeId}` 幂等标记已读，成功返回 204，沿用会话写入保护及记录授权。首个类型为 `comment_reply`，与原回复收件箱共享已读状态，依赖已有 014 和 015 迁移。
 
 隔离 MySQL HTTP 验证覆盖发送者隔离、跨页计数、已读历史、重复标记、旧收件箱同步及撤权过滤。
+
+### 关注记录与更新通知
+
+Data capabilities 声明 `recordFollows: true`。托管记录的 `GET /data/schemas/{schemaId}/instances/{entityId}/follow` 返回 `{following}`，PUT 和 DELETE 幂等关注和取消关注，返回 204。服务端使用当前租户、会话账号及记录读取授权。平台记录更新事务为同租户的其他关注者写入站内通知，事务失败时一并回滚。取消关注停止生成新通知，历史继续保留，删除记录清除其关注及通知。通知仅含记录标识和时间，历史、计数及标记已读均复核当前记录权限。
+
+更新通知类型为 `record_updated`，与评论回复共用列表、分页和计数。部署前显式执行 `016_data_record_follows` 与 `017_data_record_notices` 迁移。新版历史游标包含类型，升级前签发的历史游标须从首屏重新读取。外部映射记录未开放关注。
+
+隔离 MySQL 验证关注和已读幂等、自身更新排除、接收者隔离、撤权隐藏、取消关注和删除清理。

@@ -18,4 +18,16 @@ var Migrations = append([]storage.Migration{
 	{ID: "013_data_record_comments", SQL: `CREATE TABLE af_data_record_comments (tenant_id varbinary(128) NOT NULL, schema_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, entity_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, author varbinary(255) NOT NULL, parent_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, body text NOT NULL, created_at datetime(6) NOT NULL, etag char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, PRIMARY KEY (tenant_id,schema_id,entity_id,id), KEY thread_order (tenant_id,schema_id,entity_id,created_at,id)) ENGINE=InnoDB`},
 	{ID: "014_data_comment_reply_reads", SQL: `CREATE TABLE af_data_comment_reply_reads (tenant_id varbinary(128) NOT NULL, schema_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, entity_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, reply_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, subject_id varbinary(255) NOT NULL, PRIMARY KEY (tenant_id,schema_id,entity_id,reply_id,subject_id)) ENGINE=InnoDB`},
 	{ID: "015_data_comment_inbox_indexes", SQL: `ALTER TABLE af_data_record_comments ADD KEY comment_author (tenant_id,author), ADD KEY comment_parent (tenant_id,schema_id,entity_id,parent_id)`},
+	{ID: "016_data_record_follows", SQL: `CREATE TABLE af_data_record_follows (
+tenant_id varbinary(128) NOT NULL, schema_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+entity_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, subject_id varbinary(255) NOT NULL,
+PRIMARY KEY(tenant_id,schema_id,entity_id,subject_id)) ENGINE=InnoDB`},
+	{ID: "017_data_record_notices", SQL: `CREATE TABLE af_data_record_notices (
+tenant_id varbinary(128) NOT NULL, subject_id varbinary(255) NOT NULL,
+id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+schema_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+entity_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+created_at datetime(6) NOT NULL, is_read boolean NOT NULL DEFAULT false,
+PRIMARY KEY(tenant_id,subject_id,id), KEY target(tenant_id,schema_id,entity_id),
+KEY inbox(tenant_id,subject_id,created_at,id)) ENGINE=InnoDB`},
 }, SavedQueryMigrations...)
