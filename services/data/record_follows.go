@@ -28,17 +28,20 @@ func (h *handler) recordNoticeWrite(w http.ResponseWriter, r *http.Request, mark
 		return
 	}
 	following := false
-	err = h.withReplyTarget(ctx, p, target, r.Method != http.MethodGet, func(tx *sql.Tx) error {
+	err = h.withReplyTarget(ctx, p, target, r.Method != http.MethodGet, func(tx *sql.Tx, read c.Decision) error {
 		args := []any{p.TenantID, target.SchemaID, target.RecordID, p.Subject}
 		if mark {
-			var found string
-			err := tx.QueryRowContext(ctx, "SELECT id FROM af_data_record_notices WHERE "+commentScope+" AND subject_id=? AND id=? FOR UPDATE",
-				append(args, id)...).Scan(&found)
+			var fieldID string
+			err := tx.QueryRowContext(ctx, "SELECT field_id FROM af_data_record_notices WHERE "+commentScope+" AND subject_id=? AND id=? AND kind=? FOR UPDATE",
+				append(args, id, r.PathValue("kind"))...).Scan(&fieldID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return problem(404, "not_found", "通知不可访问")
 			}
 			if err != nil {
 				return err
+			}
+			if fieldID != "" && !fieldAllowed(read.ReadFields, fieldID) {
+				return problem(403, "forbidden", "??????")
 			}
 			_, err = tx.ExecContext(ctx, "UPDATE af_data_record_notices SET is_read=true WHERE "+commentScope+" AND subject_id=? AND id=?", append(args, id)...)
 			return err
@@ -66,7 +69,7 @@ func (h *handler) recordNoticeWrite(w http.ResponseWriter, r *http.Request, mark
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *handler) withReplyTarget(ctx context.Context, p c.Principal, item inboxReply, lock bool, apply func(*sql.Tx) error) error {
+func (h *handler) withReplyTarget(ctx context.Context, p c.Principal, item inboxReply, lock bool, apply func(*sql.Tx, c.Decision) error) error {
 	current, err := h.current(ctx, p.TenantID, item.SchemaID)
 	if err != nil {
 		return err
@@ -74,6 +77,9 @@ func (h *handler) withReplyTarget(ctx context.Context, p c.Principal, item inbox
 	read, err := h.authorize(ctx, p, "instance.read", current.Definition.ID)
 	if err != nil {
 		return err
+	}
+	if item.fieldID != "" && !fieldAllowed(read.ReadFields, item.fieldID) {
+		return problem(403, "forbidden", "??????")
 	}
 	d := current.Definition
 	if d.Schema == nil || d.Schema.StorageBinding != nil {
@@ -86,7 +92,7 @@ func (h *handler) withReplyTarget(ctx context.Context, p c.Principal, item inbox
 		if _, err := selectInstanceFields(ctx, tx, d, nil, p.TenantID, item.RecordID, read.RowFilter, lock); err != nil {
 			return err
 		}
-		if err := apply(tx); err != nil {
+		if err := apply(tx, read); err != nil {
 			return err
 		}
 		return h.recheck(ctx, p, "instance.read", d.ID, read)

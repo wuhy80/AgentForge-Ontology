@@ -158,7 +158,7 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 			deleted, deleteErr := applyTransactionLinkDeletes(ctx, tx, p, links, &saved)
 			txErr = deleteErr
 			if txErr == nil {
-				result, txErr = applyWriteTransaction(ctx, tx, p, operations, &saved)
+				result, txErr = h.applyWriteTransaction(ctx, tx, p, operations, &saved)
 			}
 			result.LinkDeleteResults = deleted
 			if txErr == nil {
@@ -423,7 +423,7 @@ func transactionOperationOrder(operations []preparedTransactionOperation) ([]int
 	return ordered, nil
 }
 
-func applyWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, operations []preparedTransactionOperation, saved *transactionSaved) (c.WriteTransactionResult, error) {
+func (h *handler) applyWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, operations []preparedTransactionOperation, saved *transactionSaved) (c.WriteTransactionResult, error) {
 	order, err := transactionOperationOrder(operations)
 	if err != nil {
 		return c.WriteTransactionResult{}, err
@@ -437,7 +437,7 @@ func applyWriteTransaction(ctx context.Context, tx *sql.Tx, p c.Principal, opera
 		if seen[id] == nil {
 			seen[id] = map[string]bool{}
 		}
-		store := &platformMutationStore{tx: tx, p: p, current: item.current}
+		store := &platformMutationStore{h: h, tx: tx, p: p, current: item.current}
 		command, err := resolveTransactionReferences(item, completed)
 		if err != nil {
 			return c.WriteTransactionResult{}, err

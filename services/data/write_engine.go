@@ -781,6 +781,11 @@ func applyMutation(ctx context.Context, store mutationStore, current c.CurrentDe
 		if err != nil {
 			return mutationSavedItem{}, err
 		}
+		if platformStore, ok := store.(*platformMutationStore); ok {
+			if err := platformStore.notifyMentions(ctx, old, item.Instance, input); err != nil {
+				return mutationSavedItem{}, err
+			}
+		}
 	}
 	if err = store.Emit(ctx, "instance."+item.Outcome, item.Instance); err != nil {
 		return mutationSavedItem{}, err

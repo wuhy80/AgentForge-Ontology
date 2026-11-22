@@ -30,4 +30,5 @@ entity_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
 created_at datetime(6) NOT NULL, is_read boolean NOT NULL DEFAULT false,
 PRIMARY KEY(tenant_id,subject_id,id), KEY target(tenant_id,schema_id,entity_id),
 KEY inbox(tenant_id,subject_id,created_at,id)) ENGINE=InnoDB`},
+	{ID: "018_data_mention_notices", SQL: `ALTER TABLE af_data_record_notices ADD COLUMN kind varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'record_updated', ADD COLUMN field_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT ''`},
 }, SavedQueryMigrations...)

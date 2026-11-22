@@ -52,7 +52,7 @@ func replyInboxCursor(secret string, p c.Principal, token string, position reply
 		}
 		payload, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], scope)
 		if err != nil || json.Unmarshal(payload, &position) != nil || position.Expires <= time.Now().Unix() ||
-			(position.Kind != "" && position.Kind != commentReplyNoticeKind && position.Kind != recordUpdateNoticeKind) ||
+			(position.Kind != "" && position.Kind != commentReplyNoticeKind && position.Kind != recordUpdateNoticeKind && position.Kind != accountMentionNoticeKind) ||
 			!uuidPattern.MatchString(position.ID) || !uuidPattern.MatchString(position.SchemaID) || !uuidPattern.MatchString(position.RecordID) || position.At.IsZero() {
 			return position, "", bad
 		}
@@ -82,6 +82,7 @@ type inboxReply struct {
 	At       string `json:"at"`
 	read     bool
 	kind     string
+	fieldID  string
 }
 
 func (h *handler) commentReplyInbox(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +111,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 	// Bound the candidate set before checking each target object's current permissions.
 	candidates := []inboxReply{}
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		query := "SELECT id,schema_id,entity_id,created_at,is_read,kind FROM (" + replyNoticeSelect
+		query := "SELECT id,schema_id,entity_id,created_at,is_read,kind,field_id FROM (" + replyNoticeSelect
 		args := []any{p.TenantID, p.Subject}
 		if includeRead {
 			query += " UNION ALL " + updateNoticeSelect
@@ -135,7 +136,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 		for rows.Next() {
 			var item inboxReply
 			var at time.Time
-			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at, &item.read, &item.kind); err != nil {
+			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at, &item.read, &item.kind, &item.fieldID); err != nil {
 				return err
 			}
 			item.At = at.UTC().Format(time.RFC3339Nano)
@@ -203,7 +204,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 }
 
 func (h *handler) checkReplyTarget(ctx context.Context, p c.Principal, item inboxReply) error {
-	return h.withReplyTarget(ctx, p, item, false, func(*sql.Tx) error { return nil })
+	return h.withReplyTarget(ctx, p, item, false, func(*sql.Tx, c.Decision) error { return nil })
 }
 
 func (h *handler) commentReplies(w http.ResponseWriter, r *http.Request) {

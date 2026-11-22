@@ -269,3 +269,9 @@ Data capabilities 声明 `recordFollows: true`。托管记录的 `GET /data/sche
 更新通知类型为 `record_updated`，与评论回复共用列表、分页和计数。部署前显式执行 `016_data_record_follows` 与 `017_data_record_notices` 迁移。新版历史游标包含类型，升级前签发的历史游标须从首屏重新读取。外部映射记录未开放关注。
 
 隔离 MySQL 验证关注和已读幂等、自身更新排除、接收者隔离、撤权隐藏、取消关注和删除清理。
+
+### 账号提及通知
+
+托管记录创建、修改及批量事务识别字符串、文本或长文本字段中新增的 `[@显示名](#onto-mention-account-账号UUID)` 标记。每条记录一次最多新增 20 个不同账号，本人不接收通知。Data 通过 Metadata 复核同租户账号目录，再校验收件人能读取更新后的记录及包含提及的字段。校验失败回滚保存与通知，单字段重复提及、保留原标记的保存及已成功请求重放均不重复生成。
+
+类型 `account_mention` 使用通用通知历史及标记已读接口。字段 ID 仅作服务端重新授权，响应不包含正文及字段 ID。需要先升级 Metadata，再显式应用 Data 迁移 `018_data_mention_notices`。

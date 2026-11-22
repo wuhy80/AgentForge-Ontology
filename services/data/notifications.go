@@ -11,16 +11,17 @@ import (
 
 const commentReplyNoticeKind = "comment_reply"
 const recordUpdateNoticeKind = "record_updated"
+const accountMentionNoticeKind = "account_mention"
 
-const replyNoticeSelect = `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL AS is_read,'comment_reply' AS kind` + replyInboxScope
-const updateNoticeSelect = `SELECT id,schema_id,entity_id,created_at,is_read,'record_updated' AS kind FROM af_data_record_notices WHERE tenant_id=? AND subject_id=?`
+const replyNoticeSelect = `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL AS is_read,'comment_reply' AS kind,'' AS field_id` + replyInboxScope
+const updateNoticeSelect = `SELECT id,schema_id,entity_id,created_at,is_read,kind,field_id FROM af_data_record_notices WHERE tenant_id=? AND subject_id=?`
 
 func (h *handler) recordNotifications(w http.ResponseWriter, r *http.Request) {
 	h.readReplyInbox(w, r, true)
 }
 
 func (h *handler) markRecordNotification(w http.ResponseWriter, r *http.Request) {
-	if r.PathValue("kind") == recordUpdateNoticeKind {
+	if r.PathValue("kind") == recordUpdateNoticeKind || r.PathValue("kind") == accountMentionNoticeKind {
 		h.recordNoticeWrite(w, r, true)
 		return
 	}
@@ -46,9 +47,9 @@ func (h *handler) recordUnreadSummary(ctx context.Context, p c.Principal) (c.Rec
 	}
 	records := make([]recordCount, 0, unreadRecordBudget+1)
 	err := h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, `SELECT schema_id,entity_id,COUNT(*) FROM (`+replyNoticeSelect+
+		rows, err := tx.QueryContext(ctx, `SELECT schema_id,entity_id,field_id,COUNT(*) FROM (`+replyNoticeSelect+
 			` AND rr.reply_id IS NULL UNION ALL `+updateNoticeSelect+` AND is_read=false) notices
-			  GROUP BY schema_id,entity_id ORDER BY schema_id,entity_id LIMIT ?`,
+			  GROUP BY schema_id,entity_id,field_id ORDER BY schema_id,entity_id,field_id LIMIT ?`,
 			p.TenantID, p.Subject, p.TenantID, p.Subject, unreadRecordBudget+1)
 		if err != nil {
 			return err
@@ -56,7 +57,7 @@ func (h *handler) recordUnreadSummary(ctx context.Context, p c.Principal) (c.Rec
 		defer rows.Close()
 		for rows.Next() {
 			var record recordCount
-			if err := rows.Scan(&record.target.SchemaID, &record.target.RecordID, &record.count); err != nil {
+			if err := rows.Scan(&record.target.SchemaID, &record.target.RecordID, &record.target.fieldID, &record.count); err != nil {
 				return err
 			}
 			records = append(records, record)

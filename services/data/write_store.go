@@ -30,6 +30,7 @@ type mutationStore interface {
 }
 
 type platformMutationStore struct {
+	h       *handler
 	tx      *sql.Tx
 	p       c.Principal
 	current c.CurrentDefinition
@@ -45,7 +46,7 @@ func (h *handler) withMutationStore(ctx context.Context, p c.Principal, current 
 		if err := h.gate(ctx, tx, p, current); err != nil {
 			return err
 		}
-		return fn(&platformMutationStore{tx: tx, p: p, current: current})
+		return fn(&platformMutationStore{h: h, tx: tx, p: p, current: current})
 	})
 }
 

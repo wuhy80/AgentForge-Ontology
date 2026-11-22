@@ -19,14 +19,15 @@ import (
 )
 
 type mutationFixture struct {
-	t       *testing.T
-	engine  *storage.Engine
-	handler http.Handler
-	core    *handler
-	current c.CurrentDefinition
-	p       c.Principal
-	mu      sync.RWMutex
-	policy  map[string]c.Decision
+	t            *testing.T
+	engine       *storage.Engine
+	handler      http.Handler
+	core         *handler
+	current      c.CurrentDefinition
+	p            c.Principal
+	mu           sync.RWMutex
+	policy       map[string]c.Decision
+	mentionCheck func(c.MentionTargetCheck) int
 }
 
 func newMutationFixture(t *testing.T) *mutationFixture {
@@ -50,6 +51,15 @@ func newMutationFixture(t *testing.T) *mutationFixture {
 	d.Schema.Indexes = []c.Index{{ID: c.NewID(), Name: "编码唯一", Unique: true, FieldIDs: []string{testFieldCode}}, {ID: c.NewID(), Name: "金额唯一", Unique: true, FieldIDs: []string{testFieldPrice}}}
 	f := &mutationFixture{t: t, engine: engine, p: c.Principal{TenantID: d.TenantID, Subject: "mutation-user"}, current: c.CurrentDefinition{Definition: d, ETag: digest(d), Status: "active"}, policy: map[string]c.Decision{}}
 	meta := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/internal/identity/mention-targets" {
+			var check c.MentionTargetCheck
+			if f.mentionCheck == nil || r.Method != "POST" || json.NewDecoder(r.Body).Decode(&check) != nil {
+				w.WriteHeader(400)
+				return
+			}
+			w.WriteHeader(f.mentionCheck(check))
+			return
+		}
 		if r.Header.Get("X-Tenant-ID") != d.TenantID {
 			w.WriteHeader(404)
 			return
