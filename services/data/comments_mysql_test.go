@@ -1,9 +1,11 @@
 package data
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
+	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 )
 
 func TestMySQLRecordComments(t *testing.T) {
@@ -24,14 +26,33 @@ func TestMySQLRecordComments(t *testing.T) {
 		t.Fatalf("unexpected comment thread: %+v", out)
 	}
 	inbox := "/instances/" + row.ID + "/comment-replies"
+	workspaceInbox := func() []inboxReply {
+		r := httptest.NewRequest("GET", "/data/inbox/comment-replies", nil)
+		r = r.WithContext(platform.WithPrincipal(r.Context(), f.p))
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("inbox HTTP %d", w.Code)
+		}
+		return mutationDecode[struct{ Data []inboxReply }](t, w).Data
+	}
+	if got := workspaceInbox(); len(got) != 1 || got[0].RecordID != row.ID || got[0].ID != out.Data[1].ID {
+		t.Fatalf("unexpected workspace inbox: %+v", got)
+	}
 	type unreadCount struct{ Unread int }
 	if got := mutationDecode[unreadCount](t, f.call("GET", inbox, nil, "", 200)); got.Unread != 1 {
 		t.Fatalf("unread count: %d", got.Unread)
 	}
 	f.p.Subject = c.NewID()
+	if got := workspaceInbox(); len(got) != 0 {
+		t.Fatal("reply returned to another subject")
+	}
 	f.call("PUT", inbox+"/"+out.Data[1].ID, nil, "", 404)
 	f.p.Subject = author
 	f.call("PUT", inbox+"/"+out.Data[1].ID, nil, "", 204)
+	if got := workspaceInbox(); len(got) != 0 {
+		t.Fatal("read reply remained in workspace inbox")
+	}
 	f.call("PUT", inbox+"/"+out.Data[1].ID, nil, "", 204)
 	if got := mutationDecode[unreadCount](t, f.call("GET", inbox, nil, "", 200)); got.Unread != 0 {
 		t.Fatalf("unread after marking: %d", got.Unread)

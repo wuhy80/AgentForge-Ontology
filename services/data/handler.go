@@ -99,6 +99,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /data/schemas/{schemaId}/instances/{entityId}", h.read)
 	mux.HandleFunc("GET /data/schemas/{schemaId}/instances/{entityId}/comments", h.recordComments)
 	mux.HandleFunc("GET /data/schemas/{schemaId}/instances/{entityId}/comment-replies", h.commentReplies)
+	mux.HandleFunc("GET /data/inbox/comment-replies", h.commentReplyInbox)
 	mux.HandleFunc("PUT /data/schemas/{schemaId}/instances/{entityId}/comment-replies/{replyId}", h.commentReplies)
 	mux.HandleFunc("POST /data/schemas/{schemaId}/instances/{entityId}/comments", h.recordComments)
 	mux.HandleFunc("PATCH /data/schemas/{schemaId}/instances/{entityId}/comments/{commentId}", h.recordComments)

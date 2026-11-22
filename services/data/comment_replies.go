@@ -1,10 +1,96 @@
 package data
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"time"
+
+	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
+
+type inboxReply struct {
+	ID       string `json:"id"`
+	SchemaID string `json:"schemaId"`
+	RecordID string `json:"recordId"`
+	At       string `json:"at"`
+}
+
+func (h *handler) commentReplyInbox(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p, err := h.principal(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	// Bound the candidate set before checking each target object's current permissions.
+	candidates := []inboxReply{}
+	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(ctx, `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at
+FROM af_data_record_comments parent JOIN af_data_record_comments reply
+ON reply.tenant_id=parent.tenant_id AND reply.schema_id=parent.schema_id AND reply.entity_id=parent.entity_id AND reply.parent_id=parent.id
+WHERE parent.tenant_id=? AND parent.author=? AND reply.author<>parent.author
+AND NOT EXISTS (SELECT 1 FROM af_data_comment_reply_reads rr WHERE rr.tenant_id=reply.tenant_id AND rr.schema_id=reply.schema_id AND rr.entity_id=reply.entity_id AND rr.reply_id=reply.id AND rr.subject_id=parent.author)
+ORDER BY reply.created_at DESC,reply.id DESC LIMIT 50`, p.TenantID, p.Subject)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var item inboxReply
+			var at time.Time
+			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at); err != nil {
+				return err
+			}
+			item.At = at.UTC().Format(time.RFC3339Nano)
+			candidates = append(candidates, item)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	data := []inboxReply{}
+	for _, item := range candidates {
+		if err := h.checkReplyTarget(ctx, p, item); err != nil {
+			var failure *apiError
+			if errors.As(err, &failure) && (failure.status == 403 || failure.status == 404) {
+				continue
+			}
+			writeError(w, err)
+			return
+		}
+		data = append(data, item)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func (h *handler) checkReplyTarget(ctx context.Context, p c.Principal, item inboxReply) error {
+	current, err := h.current(ctx, p.TenantID, item.SchemaID)
+	if err != nil {
+		return err
+	}
+	read, err := h.authorize(ctx, p, "instance.read", current.Definition.ID)
+	if err != nil {
+		return err
+	}
+	d := current.Definition
+	if d.Schema == nil || d.Schema.StorageBinding != nil {
+		return problem(404, "not_found", "记录不可访问")
+	}
+	return h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
+		if err := h.gate(ctx, tx, p, current); err != nil {
+			return err
+		}
+		if _, err := selectInstanceFields(ctx, tx, d, nil, p.TenantID, item.RecordID, read.RowFilter, false); err != nil {
+			return err
+		}
+		return h.recheck(ctx, p, "instance.read", d.ID, read)
+	})
+}
 
 func (h *handler) commentReplies(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
