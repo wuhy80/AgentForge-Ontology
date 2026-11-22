@@ -13,7 +13,7 @@ import (
 func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 	f := newMutationFixture(t)
 	id := f.current.Definition.ID
-	invoke := func(restore, preview bool, expected int) {
+	invoke := func(restore, preview bool, expected int) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest("POST", "/internal/definitions/"+id+"/managed-storage-lifecycle",
 			bytes.NewReader(mustMutationJSON(t, c.ManagedLinkLifecycle{Digest: f.current.ETag, Restore: restore, Preview: preview})))
@@ -24,6 +24,7 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		if w.Code != expected {
 			t.Errorf("lifecycle HTTP %d, want %d: %s", w.Code, expected, w.Body)
 		}
+		return w
 	}
 	invoke(false, true, 204)
 	ctx := context.Background()
@@ -32,14 +33,19 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	if err := f.core.gate(ctx, tx, f.p, f.current); err != nil {
+	query := c.QuerySpec{From: c.Source{SchemaID: id}}
+	if err := f.core.lockSavedQueryDefinitions(httptest.NewRequest("POST", "/data/saved-queries", nil), tx, f.p.TenantID, query); err != nil {
 		t.Fatal(err)
 	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		invoke(false, false, 204)
-	}()
+	queryID := c.NewID()
+	template := mustMutationJSON(t, c.SavedQueryInput{Query: query})
+	if _, err := tx.ExecContext(ctx, `INSERT INTO af_data_saved_queries
+ (tenant_id,user_id,id,name,name_key,template_json,etag,created_at,updated_at)
+ VALUES (?,?,?,?,?,?,?,NOW(6),NOW(6))`, f.p.TenantID, f.p.Subject, queryID, "saved", "saved", template, f.current.ETag); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- invoke(false, false, 409) }()
 	select {
 	case <-done:
 		t.Fatal("schema pause bypassed the writer gate")
@@ -49,10 +55,18 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case <-done:
+	case w := <-done:
+		if !bytes.Contains(w.Body.Bytes(), []byte("definition_saved_query_in_use")) {
+			t.Fatalf("pause missed newly committed saved query: %s", w.Body)
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("schema pause did not proceed after writer released the gate")
 	}
+	if _, err := f.engine.DB().ExecContext(ctx, "DELETE FROM af_data_saved_queries WHERE tenant_id=? AND user_id=? AND id=?", f.p.TenantID, f.p.Subject, queryID); err != nil {
+		t.Fatal(err)
+	}
+	invoke(false, true, 204)
+	invoke(false, false, 204)
 	f.call("POST", "/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: mutationValues("blocked")}, "", 409)
 	invoke(true, false, 204)
 	f.create("restored")
