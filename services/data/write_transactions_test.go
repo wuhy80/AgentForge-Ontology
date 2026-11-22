@@ -101,6 +101,27 @@ func (f *transactionFixture) transactionCounts() [4]int {
 	return counts
 }
 
+func TestMySQLWriteTransactionSchemaETag(t *testing.T) {
+	f := newTransactionFixture(t)
+	item := transactionCreate(f.current.Definition.ID, "row-1", "ETAG-IMPORT")
+	item.SchemaETag = "stale"
+	body := c.WriteTransactionRequest{IdempotencyKey: c.NewID(), Operations: []c.TransactionOperation{item}}
+	before := f.transactionCounts()
+	if rejected := f.transaction(body, false, 200); rejected.Committed || rejected.Error == nil || rejected.Error.Code != "definition_changed" {
+		t.Fatalf("unexpected stale Schema result: %+v", rejected)
+	}
+	if after := f.transactionCounts(); after[0] != before[0] {
+		t.Fatal("stale Schema ETag wrote a business record")
+	}
+	body.IdempotencyKey = c.NewID()
+	body.Operations[0].SchemaETag = f.current.ETag
+	saved := f.transaction(body, false, 200)
+	replay := f.transaction(body, false, 200)
+	if !saved.Committed || !replay.Committed || !replay.Replayed || len(saved.Results) != 1 || len(replay.Results) != 1 || saved.Results[0].ID != replay.Results[0].ID {
+		t.Fatal("valid Schema ETag transaction or its replay did not preserve identity")
+	}
+}
+
 func TestMySQLWriteTransactionMixedSchemasAndRecovery(t *testing.T) {
 	f := newTransactionFixture(t)
 	base := f.create("BASE")

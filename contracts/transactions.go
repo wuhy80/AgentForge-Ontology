@@ -15,6 +15,7 @@ type DataWriteCapability struct {
 // References are keyed by stable field ID and cannot overlap Values or Match.
 type TransactionOperation struct {
 	SchemaID       string                                `json:"schemaId"`
+	SchemaETag     string                                `json:"schemaEtag,omitempty"`
 	Operation      string                                `json:"operation"`
 	ClientKey      string                                `json:"clientKey"`
 	ID             string                                `json:"id,omitempty"`

@@ -309,6 +309,9 @@ func (h *handler) prepareWriteTransaction(ctx context.Context, p c.Principal, bo
 		if err != nil {
 			return nil, nil, err
 		}
+		if item.SchemaETag != "" && item.SchemaETag != current.ETag {
+			return nil, nil, problem(409, "definition_changed", "目标 Schema 已改变，请重新预检")
+		}
 		if !found {
 			// Storage readiness must not reveal an inaccessible object's mode.
 			if current.Definition.Schema != nil && current.Definition.Schema.StorageBinding != nil {
