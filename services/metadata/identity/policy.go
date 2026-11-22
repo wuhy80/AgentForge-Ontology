@@ -22,6 +22,16 @@ func policyRecord(ctx context.Context, tx *sql.Tx, tenant string) (contracts.Pol
 // HasCallablePolicyReference shares the lifecycle transaction so a policy save
 // or publish cannot race the final check. Policy mutations lock the tenant row.
 func (s *Store) HasCallablePolicyReference(ctx context.Context, tx *sql.Tx, tenant, id string, kind contracts.Kind, lock bool) (bool, error) {
+	return hasDefinitionPolicyReference(ctx, tx, tenant, id, kind, lock, false)
+}
+
+// HasDeletionPolicyReference also checks grants that retain management access
+// while a definition is disabled.
+func (s *Store) HasDeletionPolicyReference(ctx context.Context, tx *sql.Tx, tenant, id string, kind contracts.Kind, lock bool) (bool, error) {
+	return hasDefinitionPolicyReference(ctx, tx, tenant, id, kind, lock, true)
+}
+
+func hasDefinitionPolicyReference(ctx context.Context, tx *sql.Tx, tenant, id string, kind contracts.Kind, lock, includeManagement bool) (bool, error) {
 	query := "SELECT " + policyColumns + " FROM af_identity_tenants WHERE tenant_id=?"
 	if lock {
 		query += " FOR UPDATE"
@@ -37,6 +47,7 @@ func (s *Store) HasCallablePolicyReference(ctx context.Context, tx *sql.Tx, tena
 	hasReference := func(rules []contracts.PermissionRule) bool {
 		for _, rule := range rules {
 			if rule.ResourceID == id && (rule.Operation == operation ||
+				includeManagement && strings.HasPrefix(rule.Operation, "definition.") ||
 				kind == contracts.KindLink && strings.HasPrefix(rule.Operation, "link.") ||
 				kind == contracts.KindSchema && strings.HasPrefix(rule.Operation, "instance.")) {
 				return true

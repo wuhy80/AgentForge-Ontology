@@ -96,4 +96,19 @@ func TestMySQLCallablePoliciesBindTypeTenantAndRecheckRevocation(t *testing.T) {
 	if before.ETag != after.ETag || before.State != after.State || len(before.Current.Rules) != len(after.Current.Rules) {
 		t.Fatal("bootstrap widened existing tenant permissions")
 	}
+	management := c.PermissionRule{ID: c.NewID(), RoleID: roleID, Effect: "allow", Operation: "definition.read", ResourceID: action.ID}
+	candidate = c.PermissionPolicy{Rules: append(append([]c.PermissionRule{}, after.Current.Rules...), management)}
+	f.check(f.request("PUT", "/metadata/admin/policy", &f.admin, after.ETag, candidate), 200)
+	ctx := context.Background()
+	tx, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if found, err := f.store.HasDeletionPolicyReference(ctx, tx, f.tenant, action.ID, action.Kind, true); err != nil || !found {
+		t.Fatalf("draft management grant must block deletion: found=%t err=%v", found, err)
+	}
+	if found, err := f.store.HasCallablePolicyReference(ctx, tx, f.tenant, action.ID, action.Kind, true); err != nil || found {
+		t.Fatalf("draft management grant must not block disable: found=%t err=%v", found, err)
+	}
 }
