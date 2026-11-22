@@ -19,6 +19,9 @@ func (h *handler) resolveCallableEnums(ctx context.Context, p c.Principal, defin
 	if err := c.ResolveDefinitionEnums(&resolved, func(id string) (c.CurrentDefinition, error) {
 		return h.cfg.Metadata.Current(ctx, p.TenantID, id)
 	}); err != nil {
+		if temporaryJobError(err) {
+			return definition, err
+		}
 		return definition, problem(422, "enum_unavailable", "参数枚举不可用或选项超过预算")
 	}
 	return resolved, nil

@@ -51,6 +51,21 @@ type CallableTestCase struct {
 
 type InvocationMode string
 
+type InvocationSummary struct {
+	ID             string `json:"id"`
+	DefinitionName string `json:"definitionName"`
+	Kind           Kind   `json:"kind"`
+	Status         string `json:"status"`
+	Attempt        int    `json:"attempt"`
+	CreatedAt      string `json:"createdAt"`
+	FinishedAt     string `json:"finishedAt,omitempty"`
+}
+
+type InvocationPage struct {
+	Data       []InvocationSummary `json:"data"`
+	NextCursor string              `json:"nextCursor,omitempty"`
+}
+
 const (
 	InvocationModeCurrent InvocationMode = "current"
 	InvocationModeDraft   InvocationMode = "draft"

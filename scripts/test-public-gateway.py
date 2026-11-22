@@ -160,6 +160,7 @@ func main() {
                 ('DELETE', '/api/ontoapp-ontology/data/saved-queries/query-id', '/data/saved-queries/query-id'),
                 ('PATCH', '/api/ontoapp-ontology/data/schemas/model/instances/record', '/data/schemas/model/instances/record'),
                 ('POST', '/api/execution/invocations', '/execution/invocations'),
+                ('GET', '/api/execution/invocations', '/execution/invocations'),
                 ('DELETE', '/api/execution/invocations/example', '/execution/invocations/example'),
                 ('GET', '/api/data/sources/source/tables/a%20b', '/data/sources/source/tables/a%20b'),
                 ('GET', '/api/ontoapp/workspace', '/api/ontoapp/workspace'),

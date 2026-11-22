@@ -24,4 +24,15 @@ var Migrations = []storage.Migration{
 	{ID: "003_execution_job_admissions", SQL: `CREATE TABLE af_execution_job_admissions (
 		tenant_id VARBINARY(128) NOT NULL PRIMARY KEY
 	) ENGINE=InnoDB`},
+	{ID: "004_execution_job_history", SQL: `ALTER TABLE af_execution_invocations
+		ADD COLUMN job_created VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin
+			GENERATED ALWAYS AS (IF(JSON_EXTRACT(record_json,'$.job') IS NULL,NULL,
+				CONCAT(LEFT(JSON_UNQUOTE(JSON_EXTRACT(record_json,'$.invocation.createdAt')),19),'.',
+				RPAD(SUBSTRING(REPLACE(JSON_UNQUOTE(JSON_EXTRACT(record_json,'$.invocation.createdAt')),'Z',''),21),9,'0'),'Z'))) STORED,
+		ADD COLUMN job_purge_at DATETIME(6) NULL,
+		ADD KEY job_history (tenant_id,subject_id,job_created,id),
+		ADD KEY job_retention (job_purge_at)`},
+	{ID: "005_execution_existing_job_retention", SQL: `UPDATE af_execution_invocations
+		SET job_purge_at=UTC_TIMESTAMP(6)+INTERVAL 30 DAY
+		WHERE job_created IS NOT NULL AND status NOT IN ('queued','job_running') AND job_purge_at IS NULL`},
 }

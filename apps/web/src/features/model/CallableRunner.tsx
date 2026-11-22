@@ -6,7 +6,7 @@ import { buildWriteValues, errorMessage, initialDrafts, propertyValueText, write
 import { CallableInputs, testCaseDrafts } from './CallableInputs'
 import { languageLabels } from '../../lib/runtime-language'
 
-const statuses: Record<Invocation['status'], string> = { running: '正在运行', committing: '正在确认事务提交', succeeded: '运行成功', failed: '运行失败', timed_out: '执行超时', canceled: '执行已取消', interrupted: '执行中断' }
+const statuses: Record<Invocation['status'], string> = { queued: '已排队，可在我的任务查看', running: '正在运行', committing: '正在确认事务提交', succeeded: '运行成功', failed: '运行失败', timed_out: '执行超时', canceled: '执行已取消', interrupted: '执行中断' }
 
 export function CallableRunner({ api, definitionId, tenantId, active = true, mode = 'current', draftEtag, blocked = false, dataWrite = false, onDiagnostics, onDiagnosticFocus }: {
   api: ApiClient; definitionId: string; tenantId: string; active?: boolean; mode?: 'current' | 'draft'; draftEtag?: string; blocked?: boolean
@@ -20,7 +20,8 @@ export function CallableRunner({ api, definitionId, tenantId, active = true, mod
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(false)
-  const pending = useRef<{ signature: string; key: string; input: Values; dispatched?: boolean } | undefined>(undefined)
+  const [asyncAvailable, setAsyncAvailable] = useState(false)
+  const pending = useRef<{ signature: string; key: string; input: Values; async: boolean; dispatched?: boolean } | undefined>(undefined)
   const request = useRef<AbortController | undefined>(undefined)
   const callable = current?.definition.action ?? current?.definition.function
   const isDraft = mode === 'draft'
@@ -61,6 +62,7 @@ export function CallableRunner({ api, definitionId, tenantId, active = true, mod
       if (isDraft && !capabilities.draftInvocation) throw new Error('执行服务尚未开放草稿试运行，请更新本地执行服务。')
       if (record.definition.action && target.runtime && !capabilities.actionInlineSource) throw new Error('执行服务尚未开放动作独立源码，请更新本地执行服务。')
       setCurrent(record); setDrafts(initialDrafts(target.input ?? []))
+      setAsyncAvailable(!!capabilities.async && !isDraft && target.sideEffects === 'none' && !target.recordRead && !target.dataWrite?.length)
     } catch (cause) {
       if (!controller.signal.aborted) { setCurrent(undefined); setInvocation(undefined); setError(errorMessage(cause)) }
     } finally { if (!controller.signal.aborted) setBusy(false) }
@@ -95,14 +97,15 @@ export function CallableRunner({ api, definitionId, tenantId, active = true, mod
     if (cause instanceof ApiError && [401, 403, 404, 409, 412].includes(cause.status)) setCurrent(undefined)
     setError(errorMessage(cause))
   }
-  async function run(resume = false) {
+  async function run(resume = false, queue = false) {
     if (!current || !callable || busy || blocked) return
     if (hasWrites && pending.current?.dispatched && !resume) return
     let input: Values
     try { input = resume && pending.current ? pending.current.input : buildWriteValues(callable.input ?? [], drafts) } catch (cause) { setError(errorMessage(cause)); return }
-    const signature = `${current.etag}:${writeIntentSignature(input)}`
+    const async = retry || resume ? pending.current?.async ?? queue : queue
+    const signature = `${current.etag}:${async}:${writeIntentSignature(input)}`
     if (resume && !pending.current) return
-    if (pending.current?.signature !== signature) pending.current = { signature, key: crypto.randomUUID(), input }
+    if (pending.current?.signature !== signature) pending.current = { signature, key: crypto.randomUUID(), input, async }
     const controller = new AbortController()
     request.current?.abort(); request.current = controller
     setBusy(true); setError(''); if (!resume) setInvocation(undefined)
@@ -114,7 +117,9 @@ export function CallableRunner({ api, definitionId, tenantId, active = true, mod
         if (record.etag !== current.etag || record.definition.tenantId !== tenantId || record.status !== (isDraft ? 'draft' : 'active')) throw new ApiError(409, 'definition_changed', isDraft ? '草稿已更新，请载入服务器最新内容。' : '当前定义已更新，请重新载入运行参数。')
       }
       pending.current!.dispatched = true
-      const result = isDraft ? await api.invokeDraft(definitionId, input, current.etag, pending.current!.key, controller.signal) : await api.invoke(definitionId, input, pending.current!.key, controller.signal)
+      const key = pending.current!.key
+      const result = isDraft ? await api.invokeDraft(definitionId, input, current.etag, key, controller.signal)
+        : async ? await api.invokeAsync(definitionId, input, key, controller.signal) : await api.invoke(definitionId, input, key, controller.signal)
       if (!controller.signal.aborted) receive(result)
     } catch (cause) { if (!controller.signal.aborted) fail(cause) }
     finally { if (!controller.signal.aborted) setBusy(false) }
@@ -147,6 +152,7 @@ export function CallableRunner({ api, definitionId, tenantId, active = true, mod
           }}><option value="">选择已保存的样例</option>{callable.testCases.map((sample) => <option value={sample.id} key={sample.id}>{sample.name}</option>)}</select></label>}
           <CallableInputs properties={callable.input ?? []} drafts={drafts} onChange={change} />
           <button type="button" className="button primary" disabled={busy} onClick={() => void run()}><Play size={16} />{retry ? '重试并核对本次运行' : isDraft ? '试运行草稿' : '运行'}</button>
+          {asyncAvailable && !retry && <button type="button" className="button" disabled={busy || invocation?.status === 'queued'} onClick={() => void run(false, true)}>后台运行</button>}
         </fieldset>
         {awaitingCommit && <div className="notice"><p>提交结果尚未确认，请保持此面板。可以核对运行结果，或用原参数和幂等键恢复本次提交；服务端不会重新运行脚本。</p>{(invocation?.status === 'committing' || retry) && <button type="button" className="button" disabled={busy} onClick={() => void run(true)}>恢复本次提交</button>}</div>}
         {invocation && <div className="model-invocation-result" role="region" aria-label={isDraft ? '草稿试运行结果' : '运行结果'}><div className="model-section-heading"><h4>{statuses[invocation.status]}</h4><button type="button" className="button subtle" disabled={busy} onClick={() => void refresh()}><RefreshCw size={15} />核对运行结果</button></div><p className="muted">{isDraft && <span className="badge">草稿试运行</span>}调用标识：{invocation.id}</p>{invocation.error && <p role="alert">{invocation.error.message}</p>}{invocation.diagnostics?.map((item, index) => <p key={index}>{onDiagnosticFocus ? <button type="button" className="button subtle" data-diagnostic onClick={() => onDiagnosticFocus(item)}>第 {item.line} 行{item.column ? `，第 ${item.column} 列` : ''}：{item.message}</button> : `第 ${item.line} 行${item.column ? `，第 ${item.column} 列` : ''}：${item.message}`}</p>)}{invocation.status === 'succeeded' && <dl>{(callable.output ?? []).map((property) => <div key={property.id}><dt>{property.name}</dt><dd>{Object.hasOwn(invocation.output ?? {}, property.id) ? propertyValueText(property, invocation.output![property.id]) : '未返回'}</dd></div>)}</dl>}{invocation.status === 'succeeded' && !(callable.output?.length) && <p>运行完成，无输出参数。</p>}</div>}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,10 +21,14 @@ import (
 
 type jobTestAuthority struct {
 	*testAuthority
-	tenant string
+	tenant      string
+	unavailable *atomic.Bool
 }
 
 func (a jobTestAuthority) CheckSession(ctx context.Context, check c.SessionCheck) (c.Session, error) {
+	if check.SessionFingerprint != "" && a.unavailable.Load() {
+		return c.Session{}, &platform.AccessError{Status: 503}
+	}
 	session, err := a.testAuthority.CheckSession(ctx, check)
 	if check.SessionFingerprint != "" && check.SessionFingerprint != sourceDigest(strings.Repeat("s", 64)) {
 		return c.Session{}, errors.New("wrong session fingerprint")
@@ -56,7 +61,8 @@ func TestMySQLJobLifecycle(t *testing.T) {
 	f.fn.TenantID = tenant
 	f.meta.set(f.fn)
 	store := &SQLStore{DB: engine.DB()}
-	auth := jobTestAuthority{testAuthority: f.auth, tenant: tenant}
+	var unavailable atomic.Bool
+	auth := jobTestAuthority{testAuthority: f.auth, tenant: tenant, unavailable: &unavailable}
 	// A stopped initial worker allows deterministic testing of enqueue and
 	// lease expiry before the replacement worker begins.
 	stopped, cancel := context.WithCancel(ctx)
@@ -210,5 +216,55 @@ func TestMySQLJobLifecycle(t *testing.T) {
 	}
 	if state := invocation(t, call("POST", collection, "cancel-job", body, tenant), 200); state.Status != "canceled" {
 		t.Fatal("queue limit blocked a valid idempotent replay")
+	}
+	var page c.InvocationPage
+	response := call("GET", collection, "", "", tenant)
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &page) != nil || len(page.Data) != 20 || page.NextCursor == "" {
+		t.Fatalf("invalid first job page: %d %s", response.Code, response.Body)
+	}
+	var next c.InvocationPage
+	response = call("GET", collection+"?cursor="+page.NextCursor, "", "", tenant)
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &next) != nil || len(next.Data) == 0 || next.Data[0].ID == page.Data[19].ID {
+		t.Fatalf("invalid continuation: %d %s", response.Code, response.Body)
+	}
+	if foreign, err := store.listJobs(ctx, tenant, "another-user", "9999", "", 20); err != nil || len(foreign) != 0 {
+		t.Fatalf("foreign job history exposed: %v", err)
+	}
+	if _, err := engine.DB().Exec("UPDATE af_execution_invocations SET job_purge_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE tenant_id=? AND status='canceled'", tenant); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.purgeJobs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.FindKey(ctx, tenant, "user", "cancel-job"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expired task and idempotency key survived retention: %v", err)
+	}
+	leased, err := store.leaseJob(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unavailable.Store(true)
+	worker.runJob(ctx, leased)
+	unavailable.Store(false)
+	retried, err := store.FindID(ctx, tenant, "user", leased.Invocation.ID)
+	if err != nil || retried.Invocation.Status != "queued" || retried.Invocation.Error == nil || retried.Invocation.Error.Code != "job_authority_unavailable" {
+		t.Fatalf("transient authority failure was not rescheduled: %+v %v", retried.Invocation, err)
+	}
+	var scheduled bool
+	if err := engine.DB().QueryRow("SELECT deadline_at>UTC_TIMESTAMP(6) FROM af_execution_invocations WHERE tenant_id=? AND id=?", tenant, leased.Invocation.ID).Scan(&scheduled); err != nil || !scheduled {
+		t.Fatalf("retry was not delayed: %v", err)
+	}
+	if _, err := engine.DB().Exec("UPDATE af_execution_invocations SET deadline_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE tenant_id=? AND id=?", tenant, leased.Invocation.ID); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := store.leaseJob(ctx)
+	if err != nil || recovered.Invocation.ID != leased.Invocation.ID || recovered.Invocation.Attempt != 2 {
+		t.Fatalf("retry could not be claimed after its delay: %v", err)
+	}
+	worker.cfg.Runner = f.runner
+	worker.runJob(ctx, recovered)
+	state = invocation(t, call("GET", collection+"/"+leased.Invocation.ID, "", "", tenant), 200)
+	if state.Status != "succeeded" || state.Error != nil {
+		t.Fatalf("recovered attempt retained an error: %+v", state)
 	}
 }

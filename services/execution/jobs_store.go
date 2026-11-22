@@ -4,6 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"log"
+	"time"
+
+	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
 
 type jobStore interface {
@@ -12,6 +17,8 @@ type jobStore interface {
 	jobActive(context.Context, Record) (bool, error)
 	finishJob(context.Context, Record) error
 	cancelJob(context.Context, string, string, string) (Record, error)
+	purgeJobs(context.Context) error
+	listJobs(context.Context, string, string, string, string, int) ([]c.InvocationSummary, error)
 }
 
 func (s *SQLStore) jobActive(ctx context.Context, record Record) (bool, error) {
@@ -23,7 +30,7 @@ func (s *SQLStore) jobActive(ctx context.Context, record Record) (bool, error) {
 }
 
 func (s *SQLStore) CheckJobs(ctx context.Context) error {
-	rows, err := s.DB.QueryContext(ctx, "SELECT job_attempt FROM af_execution_invocations, af_execution_job_admissions LIMIT 0")
+	rows, err := s.DB.QueryContext(ctx, "SELECT job_attempt,job_created,job_purge_at FROM af_execution_invocations, af_execution_job_admissions LIMIT 0")
 	if err != nil {
 		return err
 	}
@@ -69,14 +76,19 @@ func (s *SQLStore) leaseJob(ctx context.Context) (Record, error) {
 		return Record{}, err
 	}
 	defer tx.Rollback()
-	record, err := scanRecord(tx.QueryRowContext(ctx, `SELECT record_json FROM af_execution_invocations
-		WHERE status='queued' OR (status='job_running' AND deadline_at<=UTC_TIMESTAMP(6))
-		ORDER BY deadline_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`))
+	const claim = `SELECT record_json FROM af_execution_invocations FORCE INDEX (job_claim)
+		WHERE status=? AND deadline_at<=UTC_TIMESTAMP(6)
+		ORDER BY deadline_at,id LIMIT 1 FOR UPDATE SKIP LOCKED`
+	record, err := scanRecord(tx.QueryRowContext(ctx, claim, "job_running"))
+	if errors.Is(err, sql.ErrNoRows) {
+		record, err = scanRecord(tx.QueryRowContext(ctx, claim, "queued"))
+	}
 	if err != nil {
 		return Record{}, err
 	}
 	record.Invocation.Status = "running"
 	record.Invocation.Attempt++
+	record.Invocation.Error = nil
 	raw, err := json.Marshal(record)
 	if err != nil {
 		return Record{}, err
@@ -95,9 +107,15 @@ func (s *SQLStore) finishJob(ctx context.Context, record Record) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.DB.ExecContext(ctx, `UPDATE af_execution_invocations SET status=?,record_json=?
+	var delay int
+	if record.Invocation.Status == "queued" {
+		delay = 5 * record.Invocation.Attempt
+	}
+	_, err = s.DB.ExecContext(ctx, `UPDATE af_execution_invocations SET status=?,record_json=?,
+		deadline_at=UTC_TIMESTAMP(6)+INTERVAL ? SECOND,
+		job_purge_at=IF(?='queued',NULL,UTC_TIMESTAMP(6)+INTERVAL 30 DAY)
 		WHERE tenant_id=? AND id=? AND status='job_running' AND job_attempt=? AND deadline_at>UTC_TIMESTAMP(6)`,
-		record.Invocation.Status, string(raw), record.TenantID, record.Invocation.ID, record.Invocation.Attempt)
+		record.Invocation.Status, string(raw), delay, record.Invocation.Status, record.TenantID, record.Invocation.ID, record.Invocation.Attempt)
 	return err
 }
 
@@ -122,7 +140,7 @@ func (s *SQLStore) cancelJob(ctx context.Context, tenant, subject, id string) (R
 		if err != nil {
 			return Record{}, err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE af_execution_invocations SET status='canceled',record_json=? WHERE tenant_id=? AND id=?", string(raw), tenant, id); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE af_execution_invocations SET status='canceled',record_json=?,job_purge_at=UTC_TIMESTAMP(6)+INTERVAL 30 DAY WHERE tenant_id=? AND id=?", string(raw), tenant, id); err != nil {
 			return Record{}, err
 		}
 	case "canceled":
@@ -130,4 +148,53 @@ func (s *SQLStore) cancelJob(ctx context.Context, tenant, subject, id string) (R
 		return Record{}, problem(409, "job_finished", "任务已结束")
 	}
 	return record, tx.Commit()
+}
+
+func (s *SQLStore) purgeJobs(ctx context.Context) error {
+	_, err := s.DB.ExecContext(ctx, "DELETE FROM af_execution_invocations WHERE job_purge_at<=UTC_TIMESTAMP(6) ORDER BY job_purge_at LIMIT 200")
+	return err
+}
+
+func (s *SQLStore) listJobs(ctx context.Context, tenant, subject, created, id string, limit int) ([]c.InvocationSummary, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,job_created,job_attempt,
+		JSON_UNQUOTE(JSON_EXTRACT(record_json,'$.invocation.definitionName')),
+		JSON_UNQUOTE(JSON_EXTRACT(record_json,'$.invocation.kind')),
+		IF(status='job_running','running',status),
+		COALESCE(JSON_UNQUOTE(JSON_EXTRACT(record_json,'$.invocation.finishedAt')),'')
+		FROM af_execution_invocations
+		WHERE tenant_id=? AND subject_id=? AND job_created IS NOT NULL
+		AND (job_purge_at IS NULL OR job_purge_at>UTC_TIMESTAMP(6))
+		AND (job_created<? OR (job_created=? AND id<?)) ORDER BY job_created DESC,id DESC LIMIT ?`,
+		tenant, subject, created, created, id, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]c.InvocationSummary, 0, limit)
+	for rows.Next() {
+		var item c.InvocationSummary
+		if err := rows.Scan(&item.ID, &item.CreatedAt, &item.Attempt, &item.DefinitionName, &item.Kind, &item.Status, &item.FinishedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (h *handler) reapJobs(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			purgeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err := h.jobs.purgeJobs(purgeCtx)
+			cancel()
+			if err != nil && ctx.Err() == nil {
+				log.Printf("execution job retention failed: %T", err)
+			}
+		}
+	}
 }

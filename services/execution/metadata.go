@@ -79,7 +79,13 @@ func (m *RemoteMetadata) read(ctx context.Context, tenant, id string, draft bool
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&out) != nil || decoder.Decode(new(any)) != io.EOF || out.Definition.TenantID != tenant || out.Definition.ID != id || out.Status != status || out.ETag == "" {
+	if decoder.Decode(&out) != nil || decoder.Decode(new(any)) != io.EOF || out.Definition.TenantID != tenant || out.Definition.ID != id || out.ETag == "" {
+		return c.CurrentDefinition{}, problem(503, "invalid_metadata", "定义服务返回了无效当前定义")
+	}
+	if !draft && out.Status == "disabled" {
+		return c.CurrentDefinition{}, problem(404, "not_found", "未找到可调用的当前定义")
+	}
+	if out.Status != status {
 		return c.CurrentDefinition{}, problem(503, "invalid_metadata", "定义服务返回了无效当前定义")
 	}
 	return out, nil

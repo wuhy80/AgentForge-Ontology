@@ -23,6 +23,7 @@
 | `GET /readyz` | 存储表、Docker 与至少一种本地运行镜像就绪 |
 | `GET /execution/capabilities` | 已登录用户读取运行器实际可用状态；`actionInlineSource=true`表示支持Action直接源码 |
 | `POST /execution/invocations` | 默认同步。纯计算可显式提交 `async:true`，必须带 `Idempotency-Key` |
+| `GET /execution/invocations` | 分页查看本人后台任务摘要 |
 | `GET /execution/invocations/{id}` | 当前发起用户按 ID 核对状态与读取结果 |
 | `DELETE /execution/invocations/{id}` | 当前发起用户取消排队或运行中的持久任务 |
 | `POST /execution/source-tools` | 对已保存且可编辑的Function/Action临时Go源码解析或格式化，不执行、不保存 |

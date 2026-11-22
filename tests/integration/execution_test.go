@@ -276,6 +276,15 @@ func TestCallableExecutionSessionsAndOPAEndToEnd(t *testing.T) {
 		t.Fatalf("unexpected asynchronous Python result: %+v", job)
 	}
 	other.request("GET", execServer.URL+jobHeaders.Get("Location"), nil, nil, 404, nil)
+	var jobs c.InvocationPage
+	admin.request("GET", execServer.URL+"/execution/invocations", nil, nil, 200, &jobs)
+	if len(jobs.Data) != 1 || jobs.Data[0].ID != job.ID || jobs.Data[0].Status != "succeeded" {
+		t.Fatalf("unexpected own job history: %+v", jobs)
+	}
+	other.request("GET", execServer.URL+"/execution/invocations", nil, nil, 200, &jobs)
+	if len(jobs.Data) != 0 {
+		t.Fatalf("job history exposed a foreign tenant: %+v", jobs)
+	}
 	stopWorker()
 	key := c.NewID()
 	var result c.Invocation

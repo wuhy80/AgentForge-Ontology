@@ -70,6 +70,7 @@ func NewHandler(cfg Config) http.Handler {
 	if cfg.WorkerContext != nil && cfg.SessionChecker != nil && cfg.Runner != nil {
 		h.jobs, _ = cfg.Store.(jobStore)
 		if h.jobs != nil && cfg.WorkerContext.Err() == nil {
+			go h.reapJobs(cfg.WorkerContext)
 			for range limit {
 				go h.workJobs(cfg.WorkerContext)
 			}
@@ -81,6 +82,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /execution/capabilities", h.wrap(h.capabilities))
 	mux.HandleFunc("POST /execution/source-tools", h.wrap(h.sourceTools))
 	mux.HandleFunc("POST /execution/invocations", h.wrap(h.invoke))
+	mux.HandleFunc("GET /execution/invocations", h.wrap(h.listJobs))
 	mux.HandleFunc("GET /execution/invocations/{id}", h.wrap(h.get))
 	mux.HandleFunc("DELETE /execution/invocations/{id}", h.wrap(h.cancelJob))
 	return mux

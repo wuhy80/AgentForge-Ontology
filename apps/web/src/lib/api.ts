@@ -1,5 +1,5 @@
 import type {
-  DataCapabilities, DefinitionInput, DefinitionRecord, PropertyInput, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation, ScriptRuntime, SourceToolResult,
+  DataCapabilities, DefinitionInput, DefinitionRecord, PropertyInput, Instance, Kind, MetadataCapabilities, ExecutionCapabilities, Invocation, InvocationPage, ScriptRuntime, SourceToolResult,
   WriteCapabilities, UpsertRequest, WriteResult, BulkWriteRequest, BulkWriteResult, WriteOperation,
   Organization, Page, Preview, Publication, QueryResult, QuerySpec, Values,
   AuditRecord, LoginRequest, PermissionPolicy, PolicyRecord, Role, RoleInput, Session, SimulationRequest, SimulationResult, User, UserInput, UserGroup, UserGroupInput,
@@ -123,6 +123,15 @@ export class ApiClient {
     return this.request('/api/execution/invocations', { method: 'POST', body: { definitionId, input, draftEtag }, idempotencyKey, signal })
   }
   getInvocation(id: string, signal?: AbortSignal): Promise<Invocation> { return this.request(`/api/execution/invocations/${encodeURIComponent(id)}`, { signal }) }
+  invokeAsync(definitionId: string, input: Values, idempotencyKey: string, signal?: AbortSignal): Promise<Invocation> {
+    return this.request('/api/execution/invocations', { method: 'POST', body: { definitionId, input, async: true }, idempotencyKey, signal })
+  }
+  listInvocations(cursor?: string, signal?: AbortSignal): Promise<InvocationPage> {
+    return this.request(`/api/execution/invocations${cursor ? '?cursor=' + encodeURIComponent(cursor) : ''}`, { signal })
+  }
+  cancelInvocation(id: string, signal?: AbortSignal): Promise<Invocation> {
+    return this.request(`/api/execution/invocations/${encodeURIComponent(id)}`, { method: 'DELETE', signal })
+  }
   sourceTools(definitionId: string, runtime: ScriptRuntime, operation: 'check' | 'format', signal?: AbortSignal): Promise<SourceToolResult> {
     return this.request('/api/execution/source-tools', { method: 'POST', body: { definitionId, runtime, operation }, signal })
   }

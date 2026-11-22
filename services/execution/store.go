@@ -108,7 +108,8 @@ func claimRecord(ctx context.Context, db interface {
 	if err != nil {
 		return false, err
 	}
-	_, err = db.ExecContext(ctx, "INSERT INTO af_execution_invocations (tenant_id,subject_id,request_key,request_hash,id,status,deadline_at,record_json) VALUES (?,?,?,?,?,?,?,?)", record.TenantID, record.SubjectID, record.RequestKey, record.RequestHash, record.Invocation.ID, record.Invocation.Status, record.DeadlineAt.UTC(), string(raw))
+	_, err = db.ExecContext(ctx, "INSERT INTO af_execution_invocations (tenant_id,subject_id,request_key,request_hash,id,status,deadline_at,record_json) VALUES (?,?,?,?,?,?,IF(?='queued',UTC_TIMESTAMP(6),?),?)",
+		record.TenantID, record.SubjectID, record.RequestKey, record.RequestHash, record.Invocation.ID, record.Invocation.Status, record.Invocation.Status, record.DeadlineAt.UTC(), string(raw))
 	var duplicate *mysql.MySQLError
 	if errors.As(err, &duplicate) && duplicate.Number == 1062 {
 		return false, nil
