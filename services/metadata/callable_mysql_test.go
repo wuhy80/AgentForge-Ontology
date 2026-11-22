@@ -138,9 +138,27 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reference := &c.Expression{Op: "and", Args: []c.Expression{
+		{Op: "eq", Field: "source-field", ValueRef: &c.PermissionValueRef{
+			Source: "object", SchemaID: lifecycleSchema.Definition.ID,
+		}},
+	}}
+	otherResource := c.NewID()
+	policyWithReference := func(rule c.PermissionRule) string {
+		t.Helper()
+		body, err := json.Marshal(c.PermissionPolicy{Rules: []c.PermissionRule{rule}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	rowReference := policyWithReference(c.PermissionRule{Operation: "instance.read", ResourceID: otherResource, RowFilter: reference})
+	newRowReference := policyWithReference(c.PermissionRule{Operation: "instance.patch", ResourceID: otherResource, NewRowFilter: reference})
 	for _, policy := range []struct{ current, draft any }{
 		{string(schemaPolicy), nil},
 		{`{"rules":[]}`, string(schemaPolicy)},
+		{rowReference, nil},
+		{`{"rules":[]}`, newRowReference},
 	} {
 		if _, err := engine.DB().Exec(`INSERT INTO af_identity_tenants
  (tenant_id,authorization_state,current_policy,draft_policy,policy_etag) VALUES (?,'state',?,?,'etag')
