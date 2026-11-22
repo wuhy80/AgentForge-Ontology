@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -16,6 +17,32 @@ import (
 
 func policyRecord(ctx context.Context, tx *sql.Tx, tenant string) (contracts.PolicyRecord, error) {
 	return scanPolicy(tx.QueryRowContext(ctx, "SELECT "+policyColumns+" FROM af_identity_tenants WHERE tenant_id=?", tenant))
+}
+
+// HasCallablePolicyReference shares the lifecycle transaction so a policy save
+// or publish cannot race the final check. Policy mutations lock the tenant row.
+func (s *Store) HasCallablePolicyReference(ctx context.Context, tx *sql.Tx, tenant, id string, kind contracts.Kind, lock bool) (bool, error) {
+	query := "SELECT " + policyColumns + " FROM af_identity_tenants WHERE tenant_id=?"
+	if lock {
+		query += " FOR UPDATE"
+	}
+	policy, err := scanPolicy(tx.QueryRowContext(ctx, query, tenant))
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	operation := string(kind) + ".invoke"
+	hasReference := func(rules []contracts.PermissionRule) bool {
+		for _, rule := range rules {
+			if rule.ResourceID == id && rule.Operation == operation {
+				return true
+			}
+		}
+		return false
+	}
+	return hasReference(policy.Current.Rules) || policy.Draft != nil && hasReference(policy.Draft.Rules), nil
 }
 
 func (s *Store) getPolicy(w http.ResponseWriter, r *http.Request) error {

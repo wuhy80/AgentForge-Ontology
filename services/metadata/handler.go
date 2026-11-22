@@ -18,12 +18,15 @@ import (
 )
 
 type Config struct {
-	Engine         *storage.Engine
-	Authorizer     platform.Authorizer
-	SessionChecker platform.SessionChecker
-	DataURL        string
-	ServiceToken   string
-	HTTPClient     *http.Client
+	Engine                   *storage.Engine
+	Authorizer               platform.Authorizer
+	SessionChecker           platform.SessionChecker
+	CallablePolicyReferences interface {
+		HasCallablePolicyReference(context.Context, *sql.Tx, string, string, contracts.Kind, bool) (bool, error)
+	}
+	DataURL      string
+	ServiceToken string
+	HTTPClient   *http.Client
 }
 
 type handler struct {

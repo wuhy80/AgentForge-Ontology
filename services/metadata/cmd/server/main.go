@@ -64,7 +64,7 @@ func run() error {
 	if *bootstrap {
 		return accounts.Bootstrap(ctx, os.Getenv("ONTOLOGY_BOOTSTRAP_TENANT"), os.Getenv("ONTOLOGY_BOOTSTRAP_USERNAME"), os.Getenv("ONTOLOGY_BOOTSTRAP_PASSWORD"))
 	}
-	app := metadata.NewHandler(metadata.Config{Engine: e, Authorizer: accounts, SessionChecker: accounts, DataURL: os.Getenv("ONTOLOGY_DATA_URL"), ServiceToken: service})
+	app := metadata.NewHandler(metadata.Config{Engine: e, Authorizer: accounts, SessionChecker: accounts, CallablePolicyReferences: accounts, DataURL: os.Getenv("ONTOLOGY_DATA_URL"), ServiceToken: service})
 	mux := http.NewServeMux()
 	mux.Handle("/metadata/auth/", accounts.NewHandler())
 	mux.Handle("/metadata/admin/", accounts.NewHandler())

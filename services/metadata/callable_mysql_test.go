@@ -13,6 +13,7 @@ import (
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 	"github.com/wuhy80/AgentForge-Ontology/libs/storage"
+	"github.com/wuhy80/AgentForge-Ontology/services/metadata/identity"
 )
 
 func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
@@ -25,12 +26,12 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer engine.Close()
-	if err := storage.Migrate(context.Background(), engine.DB(), "metadata", Migrations); err != nil {
+	if err := storage.Migrate(context.Background(), engine.DB(), "metadata", append(append([]storage.Migration{}, Migrations...), identity.Migrations...)); err != nil {
 		t.Fatal(err)
 	}
 	tenant := "python-publication-" + c.NewID()
 	defer func() {
-		for _, table := range []string{"af_meta_dependencies", "af_meta_outbox", "af_meta_publications", "af_meta_definitions", "af_meta_organizations", "af_meta_tenant_guards"} {
+		for _, table := range []string{"af_meta_dependencies", "af_meta_outbox", "af_meta_publications", "af_meta_definitions", "af_meta_organizations", "af_meta_tenant_guards", "af_identity_tenants"} {
 			if _, err := engine.DB().Exec("DELETE FROM "+table+" WHERE tenant_id=?", tenant); err != nil {
 				t.Error(err)
 			}
@@ -46,7 +47,7 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		}
 	}))
 	defer data.Close()
-	api := NewHandler(Config{Engine: engine, DataURL: data.URL, ServiceToken: strings.Repeat("p", 32), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) {
+	api := NewHandler(Config{Engine: engine, DataURL: data.URL, ServiceToken: strings.Repeat("p", 32), CallablePolicyReferences: identity.NewStore(engine.DB(), nil, ""), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) {
 		return c.Decision{Allow: true}, nil
 	})})
 	request := func(method, path, etag string, body any, status int, out any) {
@@ -114,6 +115,29 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	if preview.DefinitionID != inline.Definition.ID || preview.TargetStatus != disabledDefinition || lifecycle.Status != "active" {
 		t.Fatalf("disable preview changed current state: preview=%+v state=%s", preview, lifecycle.Status)
 	}
+	policy, _ := json.Marshal(c.PermissionPolicy{Rules: []c.PermissionRule{{Operation: "action.invoke", ResourceID: inline.Definition.ID}}})
+	setPolicy := func(current string, draft any) {
+		t.Helper()
+		_, err := engine.DB().Exec(`INSERT INTO af_identity_tenants (tenant_id,authorization_state,current_policy,draft_policy,policy_etag)
+ VALUES (?,'state',?,?,'etag') ON DUPLICATE KEY UPDATE current_policy=VALUES(current_policy),draft_policy=VALUES(draft_policy)`, tenant, current, draft)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	const emptyPolicy = `{"rules":[]}`
+	for _, policies := range []struct {
+		current string
+		draft   any
+	}{{string(policy), nil}, {emptyPolicy, string(policy)}} {
+		setPolicy(policies.current, policies.draft)
+		var failure c.Error
+		request("GET", inlinePath+"/disable-preview", inline.ETag, nil, 409, &failure)
+		if failure.Code != "definition_policy_in_use" {
+			t.Fatalf("unexpected blocker: %+v", failure)
+		}
+		request("POST", inlinePath+"/disable", inline.ETag, nil, 409, nil)
+	}
+	setPolicy(emptyPolicy, nil)
 	request("POST", inlinePath+"/disable", inline.ETag, nil, 200, &lifecycle)
 	if lifecycle.Status != disabledDefinition || lifecycle.Definition.ID != inline.Definition.ID {
 		t.Fatalf("disabled callable was not retained: %+v", lifecycle)
