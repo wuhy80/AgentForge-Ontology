@@ -25,6 +25,22 @@ type jobTestAuthority struct {
 	unavailable *atomic.Bool
 }
 
+type observedJobStore struct {
+	jobStore
+	ready chan struct{}
+}
+
+func (s observedJobStore) hasReadyJob(ctx context.Context) (bool, error) {
+	ready, err := s.jobStore.hasReadyJob(ctx)
+	if ready && err == nil {
+		select {
+		case s.ready <- struct{}{}:
+		default:
+		}
+	}
+	return ready, err
+}
+
 func (a jobTestAuthority) CheckSession(ctx context.Context, check c.SessionCheck) (c.Session, error) {
 	if check.SessionFingerprint != "" && a.unavailable.Load() {
 		return c.Session{}, &platform.AccessError{Status: 503}
@@ -208,6 +224,42 @@ func TestMySQLJobLifecycle(t *testing.T) {
 	if state := invocation(t, call("GET", path, "", "", tenant), 200); state.Status != "canceled" {
 		t.Fatalf("unexpected status after active cancellation: %s", state.Status)
 	}
+	priorityJob := invocation(t, call("POST", collection, "next-worker-slot", body, tenant), 202)
+	observed := observedJobStore{jobStore: store, ready: make(chan struct{}, 1)}
+	scheduler := handler{cfg: cfg, slots: make(chan struct{}, 1), jobs: observed}
+	scheduler.slots <- struct{}{} // A synchronous request occupies the only slot.
+	schedulerCtx, stopScheduler := context.WithCancel(ctx)
+	defer stopScheduler()
+	schedulerDone := make(chan struct{})
+	go func() {
+		defer close(schedulerDone)
+		scheduler.workJobs(schedulerCtx)
+	}()
+	select {
+	case <-observed.ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("worker did not wait for a synchronous slot")
+	}
+	time.Sleep(50 * time.Millisecond)
+	<-scheduler.slots
+	select {
+	case scheduler.slots <- struct{}{}:
+		<-scheduler.slots
+		t.Fatal("a synchronous arrival took the reserved worker slot")
+	default:
+	}
+	for deadline := time.Now().Add(3 * time.Second); ; {
+		saved, err := store.FindID(ctx, tenant, "user", priorityJob.ID)
+		if err == nil && saved.Invocation.Status == "succeeded" {
+			break
+		}
+		if err != nil || time.Now().After(deadline) {
+			t.Fatalf("waiting worker did not complete: %s, %v", saved.Invocation.Status, err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	stopScheduler()
+	<-schedulerDone
 	for range 32 {
 		invocation(t, call("POST", collection, c.NewID(), body, tenant), 202)
 	}
