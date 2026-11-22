@@ -167,7 +167,19 @@ func (h *handler) workJobs(ctx context.Context) {
 		select {
 		case h.slots <- struct{}{}:
 		default:
-			continue
+			checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			ready, err := h.jobs.hasReadyJob(checkCtx)
+			cancel()
+			if err != nil || !ready {
+				continue
+			}
+			// A waiting channel send takes the released slot ahead of the
+			// next nonblocking synchronous admission.
+			select {
+			case h.slots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
 		}
 		claimCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 		record, err := h.jobs.leaseJob(claimCtx)
@@ -203,8 +215,12 @@ func (h *handler) runJob(ctx context.Context, record Record) {
 	}
 	saveCtx, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
-	if err := h.jobs.finishJob(saveCtx, record); err != nil {
+	saved, err := h.jobs.finishJob(saveCtx, record)
+	if err != nil {
 		log.Printf("execution job completion failed: %T", err)
+		return
+	}
+	if !saved {
 		return
 	}
 	created, _ := time.Parse(time.RFC3339Nano, record.Invocation.CreatedAt)

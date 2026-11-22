@@ -18,6 +18,37 @@ test('从函数运行面板提交后台任务', async ({ page }) => {
   expect(submitted).toEqual({ definitionId: 'normalize', input: {}, async: true })
 })
 
+test('任务自动刷新在页面隐藏时暂停', async ({ page }) => {
+  await ontologyFixture(page)
+  let requests = 0
+  let completed = false
+  await page.route('**/api/execution/invocations', route => {
+    requests++
+    return route.fulfill({ json: { data: [{
+      id: 'poll-job', definitionName: '待刷新任务', kind: 'function', status: completed ? 'succeeded' : 'queued',
+      attempt: 1, createdAt: '2026-11-22T10:00:00Z',
+    }] } })
+  })
+  await page.clock.install()
+  await page.goto('/#jobs')
+  const item = page.getByRole('listitem').filter({ hasText: '待刷新任务' })
+  await expect(item).toContainText('排队中')
+  const beforePause = requests
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.clock.runFor(6_000)
+  expect(requests).toBe(beforePause)
+  completed = true
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.clock.runFor(6_000)
+  await expect(item).toContainText('成功')
+})
+
 for (const width of [1440, 390]) test(`任务列表在 ${width}px 下可分页、查看并取消`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
   const fixture = await ontologyFixture(page)

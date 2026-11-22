@@ -15,13 +15,16 @@ export function JobsPage({ api }: { api: ApiClient }) {
   const [items, setItems] = useState<InvocationSummary[]>([])
   const [cursor, setCursor] = useState<string>()
   const [busy, setBusy] = useState(true)
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible')
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Invocation>()
   const [cancel, setCancel] = useState<InvocationSummary>()
   const current = useRef<AbortController | undefined>(undefined)
+  const poll = useRef<AbortController | undefined>(undefined)
 
   const perform = useCallback(async (action: (signal: AbortSignal) => Promise<void>) => {
     current.current?.abort()
+    poll.current?.abort()
     const request = new AbortController()
     current.current = request
     setBusy(true)
@@ -56,6 +59,45 @@ export function JobsPage({ api }: { api: ApiClient }) {
     void perform((signal) => list(signal))
     return () => current.current?.abort()
   }, [list, perform])
+
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState === 'visible')
+    document.addEventListener('visibilitychange', update)
+    return () => document.removeEventListener('visibilitychange', update)
+  }, [])
+
+  const hasPending = items.some(({ status }) => status === 'queued' || status === 'running')
+  useEffect(() => {
+    if (!visible || !hasPending || busy || cancel) return
+    const request = new AbortController()
+    poll.current = request
+    let inFlight = false
+    const timer = window.setInterval(async () => {
+      if (inFlight) return
+      inFlight = true
+      try {
+        const page = await api.listInvocations(undefined, request.signal)
+        const result = selected && ['queued', 'running'].includes(selected.status)
+          ? await api.getInvocation(selected.id, request.signal) : undefined
+        if (request.signal.aborted) return
+        setItems((previous) => {
+          const latest = new Map(page.data.map((item) => [item.id, item]))
+          return previous.map((item) => latest.get(item.id) ?? item)
+        })
+        if (result) setSelected(result)
+      } catch (cause) {
+        if (request.signal.aborted) return
+        if (cause instanceof ApiError && [401, 403, 404, 409].includes(cause.status)) {
+          setSelected(undefined)
+          if (cause.status === 401) { setItems([]); setCursor(undefined) }
+        }
+        setError(errorMessage(cause))
+      } finally {
+        inFlight = false
+      }
+    }, 5000)
+    return () => { request.abort(); window.clearInterval(timer) }
+  }, [api, busy, cancel, hasPending, selected, visible])
 
   function load(id: string) {
     setSelected(undefined)
@@ -96,7 +138,7 @@ export function JobsPage({ api }: { api: ApiClient }) {
     </section>
     {selected && <Dialog title={selected.definitionName} description={labels[selected.status]} onClose={() => setSelected(undefined)}>
       <p>尝试 {selected.attempt ?? 0} 次</p>
-      {selected.error && <p role="status">{selected.error.message}</p>}
+      {selected.error && <p role="status">{selected.status === 'queued' ? '等待重试。' : ''}{selected.error.message}</p>}
       {selected.status === 'succeeded' && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(selected.output ?? {}, null, 2)}</pre>}
       {['queued', 'running'].includes(selected.status) && <button type="button" className="button" onClick={() => load(selected.id)}>核对状态</button>}
     </Dialog>}

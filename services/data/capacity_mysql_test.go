@@ -1,14 +1,20 @@
 package data
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
+	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 )
 
 func TestMySQLQueryCapacityBaseline(t *testing.T) {
@@ -20,6 +26,15 @@ func TestMySQLQueryCapacityBaseline(t *testing.T) {
 	}
 	f, schema := newAggregateFixture(t)
 	const rowCount, warmup, samples = 1000, 10, 100
+	fanout := 2
+	if raw := os.Getenv("ONTOLOGY_TEST_CAPACITY_FANOUT"); raw != "" {
+		var err error
+		fanout, err = strconv.Atoi(raw)
+		if err != nil || fanout < 1 || fanout > 16 {
+			t.Fatal("ONTOLOGY_TEST_CAPACITY_FANOUT must be between 1 and 16")
+		}
+	}
+	t.Logf("rows=%d fanout=%d", rowCount, fanout)
 	rows := make([][]any, rowCount)
 	for i := range rows {
 		rows[i] = []any{fmt.Sprintf("group-%02d", i%32), "12.500000", i, "allowed"}
@@ -57,8 +72,12 @@ func TestMySQLQueryCapacityBaseline(t *testing.T) {
 		t.Fatalf("unexpected capacity seed: %d rows, %v", len(ordered), ids.Err())
 	}
 	for i, id := range ordered {
-		_, err := f.engine.DB().ExecContext(f.ctx, "INSERT INTO "+table+" (tenant_id,id,source_id,target_id,etag) VALUES (?,?,?,?,?),(?,?,?,?,?)",
-			f.tenant, c.NewID(), id, ordered[(i+1)%rowCount], c.NewID(), f.tenant, c.NewID(), id, ordered[(i+2)%rowCount], c.NewID())
+		values := make([]any, 0, fanout*5)
+		for offset := 1; offset <= fanout; offset++ {
+			values = append(values, f.tenant, c.NewID(), id, ordered[(i+offset)%rowCount], c.NewID())
+		}
+		_, err := f.engine.DB().ExecContext(f.ctx, "INSERT INTO "+table+" (tenant_id,id,source_id,target_id,etag) VALUES "+
+			strings.TrimSuffix(strings.Repeat("(?,?,?,?,?),", fanout), ","), values...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -91,7 +110,7 @@ func TestMySQLQueryCapacityBaseline(t *testing.T) {
 		spec c.QuerySpec
 		want int
 	}{{"entity", entity, 50}, {"continuation", continuation, 50}, {"aggregate", aggregate, 32},
-		{"relation_filter", relation, 50}, {"relation_aggregate", grouped, 1}, {"fixed_path", fixed, 50}} {
+		{"relation_filter", relation, 50}, {"relation_aggregate", grouped, 1}, {"fixed_path", fixed, min(50, 32*fanout*fanout)}} {
 		t.Log(workload.name)
 		if workload.name == "fixed_path" {
 			started := time.Now()
@@ -152,4 +171,58 @@ func measureDataCapacity(t *testing.T, warmup, samples int, run func()) {
 	percentile := func(p int) time.Duration { return durations[(samples*p+99)/100-1] }
 	t.Logf("warmup=%d samples=%d concurrency=1 p50=%s p95=%s p99=%s",
 		warmup, samples, percentile(50), percentile(95), percentile(99))
+}
+
+func TestMySQLConcurrentCapacityBaseline(t *testing.T) {
+	if os.Getenv("ONTOLOGY_TEST_CAPACITY") != "1" {
+		t.Skip("set ONTOLOGY_TEST_CAPACITY=1 for the isolated capacity baseline")
+	}
+	f, link := newTransactionLinkSQLFixture(t, "1:N")
+	for _, clients := range []int{2, 4, 8} {
+		var workers sync.WaitGroup
+		const perClient = 16
+		durations, codes := make([]time.Duration, clients*perClient), make([]int, clients*perClient)
+		for client := range clients {
+			workers.Go(func() {
+				for i := range perClient {
+					slot := client*perClient + i
+					path := "/data/query"
+					payload, _ := json.Marshal(c.QuerySpec{From: c.Source{SchemaID: f.current.Definition.ID},
+						Select: []string{testFieldCode}, Page: c.Page{Limit: 20}})
+					if i%4 == 0 {
+						path = "/data/transactions"
+						request := mixedLinkRequest(f, link)
+						label := fmt.Sprintf("%d-%d", clients, slot)
+						request.Operations[0] = transactionCreate(f.current.Definition.ID, "master", "M-"+label)
+						request.Operations[1] = transactionCreate(f.second.Definition.ID, "detail", "D-"+label)
+						payload, _ = json.Marshal(request)
+					}
+					r := httptest.NewRequest("POST", path, bytes.NewReader(payload))
+					r = r.WithContext(platform.WithPrincipal(r.Context(), f.p))
+					w := httptest.NewRecorder()
+					start := time.Now()
+					f.handler.ServeHTTP(w, r)
+					durations[slot], codes[slot] = time.Since(start), w.Code
+				}
+			})
+		}
+		workers.Wait()
+		success, throttled := make([]time.Duration, 0, len(codes)), 0
+		for slot, code := range codes {
+			switch code {
+			case 200:
+				success = append(success, durations[slot])
+			case 429:
+				throttled++
+			default:
+				t.Fatalf("concurrency=%d request=%d HTTP %d", clients, slot, code)
+			}
+		}
+		if len(success) == 0 {
+			t.Fatalf("concurrency=%d no successful requests", clients)
+		}
+		slices.Sort(success)
+		t.Logf("concurrency=%d successful=%d throttled=%d p95=%s p99=%s", clients, len(success), throttled,
+			success[(len(success)*95+99)/100-1], success[(len(success)*99+99)/100-1])
+	}
 }
