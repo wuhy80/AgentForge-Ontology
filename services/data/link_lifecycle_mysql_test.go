@@ -65,6 +65,31 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 	if _, err := f.engine.DB().ExecContext(ctx, "DELETE FROM af_data_saved_queries WHERE tenant_id=? AND user_id=? AND id=?", f.p.TenantID, f.p.Subject, queryID); err != nil {
 		t.Fatal(err)
 	}
+	unrelated := mustMutationJSON(t, c.SavedQueryInput{Query: c.QuerySpec{From: c.Source{SchemaID: c.NewID()}}})
+	if _, err := f.engine.DB().ExecContext(ctx, `INSERT INTO af_data_saved_queries
+ (tenant_id,user_id,id,name,name_key,template_json,etag,created_at,updated_at)
+ WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n < ?)
+ SELECT ?, ?, UUID(), CONCAT('budget-',n), CONCAT('budget-',n), ?, ?, NOW(6), NOW(6) FROM seq`,
+		savedQueryImpactBudget+1, f.p.TenantID, f.p.Subject, unrelated, f.current.ETag); err != nil {
+		t.Fatal(err)
+	}
+	clearBudgetRows := func() {
+		if _, err := f.engine.DB().ExecContext(ctx, "DELETE FROM af_data_saved_queries WHERE tenant_id=? AND user_id=? AND name_key LIKE 'budget-%'", f.p.TenantID, f.p.Subject); err != nil {
+			t.Error(err)
+		}
+	}
+	defer clearBudgetRows()
+	for _, preview := range []bool{true, false} {
+		w := invoke(false, preview, 422)
+		if !bytes.Contains(w.Body.Bytes(), []byte("saved_query_impact_budget")) {
+			t.Fatalf("unexpected budget failure (preview=%t): %s", preview, w.Body)
+		}
+	}
+	var status string
+	if err := f.engine.DB().QueryRowContext(ctx, "SELECT status FROM af_data_gates WHERE tenant_id=? AND definition_id=?", f.p.TenantID, id).Scan(&status); err != nil || status != "ready" {
+		t.Fatalf("budget failure changed storage gate: status=%q err=%v", status, err)
+	}
+	clearBudgetRows()
 	invoke(false, true, 204)
 	invoke(false, false, 204)
 	f.call("POST", "/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: mutationValues("blocked")}, "", 409)
