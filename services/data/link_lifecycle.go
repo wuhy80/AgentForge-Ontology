@@ -60,10 +60,8 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			return err
 		}
 		next := "ready"
-		if command.Restore {
-			if err := verify(); err != nil {
-				return problem(409, "mapping_unavailable", "物理结构无法确认")
-			}
+		if err := verify(); err != nil {
+			return problem(409, "mapping_unavailable", "物理结构无法确认")
 		}
 		if !command.Restore {
 			if hasData {

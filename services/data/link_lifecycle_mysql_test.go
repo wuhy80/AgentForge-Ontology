@@ -94,6 +94,17 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 	invoke(false, false, 204)
 	f.call("POST", "/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: mutationValues("blocked")}, "", 409)
 	invoke(true, false, 204)
+	if _, err := f.engine.DB().ExecContext(ctx, "ALTER TABLE "+quote(tableName(id))+" ADD COLUMN lifecycle_drift INT NULL"); err != nil {
+		t.Fatal(err)
+	}
+	for _, preview := range []bool{true, false} {
+		if w := invoke(false, preview, 409); !bytes.Contains(w.Body.Bytes(), []byte("mapping_unavailable")) {
+			t.Fatalf("mismatched physical schema was not rejected: %s", w.Body)
+		}
+	}
+	if _, err := f.engine.DB().ExecContext(ctx, "ALTER TABLE "+quote(tableName(id))+" DROP COLUMN lifecycle_drift"); err != nil {
+		t.Fatal(err)
+	}
 	f.create("restored")
 	invoke(false, true, 409)
 	invoke(false, false, 409)
