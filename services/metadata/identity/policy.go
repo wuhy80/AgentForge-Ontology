@@ -294,7 +294,11 @@ func validatePolicy(ctx context.Context, tx *sql.Tx, tenant string, policy contr
 			if strings.HasPrefix(rule.Operation, "organization.") {
 				table = "af_meta_organizations"
 			}
-			if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE tenant_id=? AND id=?", tenant, rule.ResourceID).Scan(&count); err != nil {
+			query := "SELECT COUNT(*) FROM " + table + " WHERE tenant_id=? AND id=?"
+			if table == "af_meta_definitions" {
+				query += " AND status<>'deleted'"
+			}
+			if err := tx.QueryRowContext(ctx, query, tenant, rule.ResourceID).Scan(&count); err != nil {
 				return err
 			}
 			if count != 1 {

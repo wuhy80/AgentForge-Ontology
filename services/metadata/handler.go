@@ -79,6 +79,8 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("PUT /metadata/definitions/{id}/draft", h.wrap(h.saveDraft))
 	mux.HandleFunc("POST /metadata/definitions/{id}/preview", h.wrap(h.preview))
 	mux.HandleFunc("POST /metadata/definitions/{id}/publish", h.wrap(h.publish))
+	mux.HandleFunc("GET /metadata/definitions/{id}/delete-preview", h.wrap(h.deleteDraft(true)))
+	mux.HandleFunc("DELETE /metadata/definitions/{id}", h.wrap(h.deleteDraft(false)))
 	mux.HandleFunc("GET /metadata/definitions/{id}/disable-preview", h.wrap(h.callableLifecycle(false, true)))
 	mux.HandleFunc("GET /metadata/definitions/{id}/restore-preview", h.wrap(h.callableLifecycle(true, true)))
 	mux.HandleFunc("POST /metadata/definitions/{id}/disable", h.wrap(h.callableLifecycle(false, false)))
@@ -482,6 +484,9 @@ func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, p contracts.
 		}
 		if err := matchHeader(r, expected); err != nil {
 			return err
+		}
+		if row.status == "deleted" {
+			return sql.ErrNoRows
 		}
 		if row.status == disabledDefinition {
 			return problem(409, "definition_disabled", "请先恢复定义再保存草稿")

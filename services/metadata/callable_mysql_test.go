@@ -117,6 +117,21 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		t.Helper()
 		request("POST", "/metadata/definitions/"+record.Definition.ID+"/publish", record.ETag, nil, status, nil)
 	}
+	discardBody := executableAction()
+	discardBody.Name = "discardable-draft"
+	discard := create(discardBody)
+	discardPath := "/metadata/definitions/" + discard.Definition.ID
+	request("GET", discardPath+"/delete-preview", discard.ETag, nil, 204, nil)
+	request("GET", discardPath+"/draft", "", nil, 200, nil)
+	request("DELETE", discardPath, "stale", nil, 412, nil)
+	request("DELETE", discardPath, discard.ETag, nil, 204, nil)
+	request("DELETE", discardPath, discard.ETag, nil, 204, nil)
+	request("GET", discardPath+"/draft", "", nil, 404, nil)
+	request("PUT", discardPath+"/draft", discard.ETag, discard.Definition, 404, nil)
+	var deletedEvents int
+	if err := engine.DB().QueryRow("SELECT COUNT(*) FROM af_meta_outbox WHERE tenant_id=? AND event_type='definition.deleted' AND object_id=?", tenant, discard.Definition.ID).Scan(&deletedEvents); err != nil || deletedEvents != 1 {
+		t.Fatalf("want one deletion audit event, got %d: %v", deletedEvents, err)
+	}
 	function := create(executableFunction())
 	publish(function, 200)
 	functionPath := "/metadata/definitions/" + function.Definition.ID
