@@ -387,6 +387,9 @@ func (h *handler) createDefinition(w http.ResponseWriter, r *http.Request, p con
 		if err := validateOrg(r.Context(), tx, d); err != nil {
 			return err
 		}
+		if err := validateActionFunctionReference(r.Context(), tx, d); err != nil {
+			return err
+		}
 		if err := validateActionTargetReferences(r.Context(), tx, d); err != nil {
 			return err
 		}
@@ -487,6 +490,9 @@ func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, p contracts.
 			return problem(422, "unsupported_change", "定义不能改变类型或跨分类移动")
 		}
 		if err := validateOrg(r.Context(), tx, d); err != nil {
+			return err
+		}
+		if err := validateActionFunctionReference(r.Context(), tx, d); err != nil {
 			return err
 		}
 		if err := validateActionTargetReferences(r.Context(), tx, d); err != nil {

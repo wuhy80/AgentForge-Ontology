@@ -34,3 +34,22 @@ func validateActionTargetReferences(ctx context.Context, tx *sql.Tx, d contracts
 	}
 	return nil
 }
+
+// Draft binding and Function lifecycle changes share the tenant write guard.
+// Signature validation remains part of publication.
+func validateActionFunctionReference(ctx context.Context, tx *sql.Tx, d contracts.Definition) error {
+	if d.Action == nil || d.Action.FunctionID == "" {
+		return nil
+	}
+	var exists bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM af_meta_definitions
+ WHERE tenant_id=? AND id=? AND kind='function' AND status='active' AND current_json IS NOT NULL)`,
+		d.TenantID, d.Action.FunctionID).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return problem(422, "invalid_dependency", "动作实现必须引用同租户已生效的 Function")
+	}
+	return nil
+}

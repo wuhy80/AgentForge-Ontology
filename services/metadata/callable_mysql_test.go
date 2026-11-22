@@ -179,6 +179,29 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	actionDefinition.Kind, actionDefinition.Name, actionDefinition.Action, actionDefinition.Function = c.KindAction, "调用Python", actionDefinition.Function, nil
 	actionDefinition.Action.Runtime, actionDefinition.Action.FunctionID = nil, function.Definition.ID
 	actionDefinition.Action.Input[0].ID, actionDefinition.Action.Output[0].ID = "action-in", "action-out"
+	actionDefinition.ID, actionDefinition.TenantID = "", ""
+	actionDefinition.CategoryID, actionDefinition.GroupID = category.ID, group.ID
+	draftBody := executableAction()
+	draftBody.Name = "待编辑的独立动作"
+	draftAction := create(draftBody)
+	draftPath := "/metadata/definitions/" + draftAction.Definition.ID + "/draft"
+	request("POST", functionPath+"/disable", function.ETag, nil, 200, nil)
+	request("POST", "/metadata/definitions", "", actionDefinition, 422, &blocked)
+	if blocked.Code != "invalid_dependency" {
+		t.Fatalf("new draft accepted or disclosed a disabled Function: %+v", blocked)
+	}
+	edit := actionDefinition
+	edit.ID = draftAction.Definition.ID
+	request("PUT", draftPath, draftAction.ETag, edit, 422, &blocked)
+	if blocked.Code != "invalid_dependency" {
+		t.Fatalf("draft update accepted or disclosed a disabled Function: %+v", blocked)
+	}
+	var retainedDraft c.CurrentDefinition
+	request("GET", draftPath, "", nil, 200, &retainedDraft)
+	if retainedDraft.ETag != draftAction.ETag || retainedDraft.Definition.Action.FunctionID != "" {
+		t.Fatalf("rejected edit changed the draft: %+v", retainedDraft)
+	}
+	request("POST", functionPath+"/restore", function.ETag, nil, 200, nil)
 	action := create(actionDefinition)
 	request("POST", functionPath+"/disable", function.ETag, nil, 409, nil)
 	request("GET", functionPath+"/disable-preview", function.ETag, nil, 409, nil)
@@ -298,8 +321,10 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	foreign := actionDefinition
 	foreign.Name = "不存在的函数"
 	foreign.Action = &c.Callable{FunctionID: c.NewID(), SideEffects: "none"}
-	foreignAction := create(foreign)
-	publish(foreignAction, 422)
+	request("POST", "/metadata/definitions", "", foreign, 422, &blocked)
+	if blocked.Code != "invalid_dependency" {
+		t.Fatalf("unexpected missing Function error: %+v", blocked)
+	}
 	// Declared writes must resolve a current same-tenant Schema even in drafts.
 	schemaDefinition := validSchema()
 	schemaDefinition.Name = "事务写入对象"
