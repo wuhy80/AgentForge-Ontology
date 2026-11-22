@@ -92,6 +92,38 @@ func TestMySQLManagedLinkLifecycleFencesWrites(t *testing.T) {
 		t.Fatalf("preview HTTP %d: %s", w.Code, w.Body)
 	}
 	ctx := context.Background()
+	// A saved row join has a direct Link dependency even while the table is empty.
+	queryID := c.NewID()
+	template := mustMutationJSON(t, c.SavedQueryInput{Query: c.QuerySpec{
+		From: c.Source{SchemaID: link.Definition.Link.SourceSchemaID},
+		Rows: &c.RowQuery{
+			Nodes: []c.RowQueryNode{
+				{ID: "n0", SchemaID: link.Definition.Link.SourceSchemaID, Alias: "source"},
+				{ID: "n1", SchemaID: link.Definition.Link.TargetSchemaID, Alias: "target"},
+			},
+			Joins: []c.RowQueryJoin{{Type: "inner", From: "n0", To: "n1", LinkID: link.Definition.ID, Direction: "out"}},
+		},
+	}})
+	if _, err := f.engine.DB().ExecContext(ctx, `INSERT INTO af_data_saved_queries
+ (tenant_id,user_id,id,name,name_key,template_json,etag,created_at,updated_at)
+ VALUES (?,?,?,?,?,?,?,NOW(6),NOW(6))`, f.p.TenantID, f.p.Subject, queryID, "join", "join", template, link.ETag); err != nil {
+		t.Fatal(err)
+	}
+	removeSaved := func() {
+		if _, err := f.engine.DB().ExecContext(ctx, "DELETE FROM af_data_saved_queries WHERE tenant_id=? AND user_id=? AND id=?", f.p.TenantID, f.p.Subject, queryID); err != nil {
+			t.Error(err)
+		}
+	}
+	defer removeSaved()
+	for _, check := range []c.ManagedLinkLifecycle{preview, command} {
+		if w := invoke(check); w.Code != 409 || !bytes.Contains(w.Body.Bytes(), []byte("definition_saved_query_in_use")) {
+			t.Fatalf("saved join did not block pause (preview=%t): HTTP %d %s", check.Preview, w.Code, w.Body)
+		}
+	}
+	removeSaved()
+	if w := invoke(preview); w.Code != 204 {
+		t.Fatalf("preview after removing saved join: HTTP %d %s", w.Code, w.Body)
+	}
 	// A Link writer holding the same gate must drain before storage can pause.
 	tx, err := f.engine.DB().BeginTx(ctx, nil)
 	if err != nil {
