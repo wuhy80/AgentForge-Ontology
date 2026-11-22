@@ -125,3 +125,9 @@ Function与Action的`testCases`随定义草稿保存，最多10项、总JSON最�
 ## 定义停用与恢复
 
 已开放无副作用 Action／Function 和 Enum 的停用与恢复。Enum 由 `enumLifecycle=true` 声明，正式停用复查当前定义、草稿及 Data 保存查询引用。权限、状态和并发约束见[定义生效与迁移](../../docs/发布与迁移.md#enum-停用与恢复)。
+
+### 账号提及目标校验
+
+内部服务调用 `POST /internal/identity/mention-targets`，提交 `actor` 和最多 20 个去重的 `targetIds`。接口使用服务凭据，调用方从可信会话取得 actor。成功返回 204，目标不可提及时整批返回 403。校验复用账号提及目录的同租户、启用状态和共享组规则。该接口只确认账号范围，记录读取权限由 Data 单独校验。
+
+隔离 MySQL 验证管理员、共享组成员、未启用共享目录、停用组及跨租户拒绝。Metadata 测试及构建通过。

@@ -1,6 +1,7 @@
 package identity_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/url"
 	"testing"
@@ -64,5 +65,37 @@ func TestMySQLSharedMentionAccounts(t *testing.T) {
 	f.check(result, 200)
 	if err := json.Unmarshal(result.Body.Bytes(), &body); err != nil || len(body.Data) != 0 {
 		t.Fatal("disabled group returned accounts")
+	}
+}
+
+func TestMySQLMentionTargetValidation(t *testing.T) {
+	f := newGroupFixture(t)
+	users := f.seedUsers(3)
+	group := f.createGroup(contracts.UserGroupInput{Name: "Mention validation", Enabled: true, UserIDs: []string{users[0].ID, users[1].ID}})
+	ctx := context.Background()
+	check := contracts.MentionTargetCheck{Actor: contracts.Principal{TenantID: f.tenant, Subject: users[0].ID}, TargetIDs: []string{users[1].ID}}
+	if err := f.store.ValidateMentionTargets(ctx, check); err == nil {
+		t.Fatal("shared directory is disabled")
+	}
+	f.store.SharedGroupMentionAccounts = true
+	if err := f.store.ValidateMentionTargets(ctx, check); err != nil {
+		t.Fatal(err)
+	}
+	check.TargetIDs = append(check.TargetIDs, users[2].ID)
+	if err := f.store.ValidateMentionTargets(ctx, check); err == nil {
+		t.Fatal("accepted user outside shared groups")
+	}
+	check.TargetIDs = check.TargetIDs[:1]
+	f.updateGroup(group, contracts.UserGroupInput{Name: group.Name, Enabled: false, UserIDs: []string{users[0].ID, users[1].ID}})
+	if err := f.store.ValidateMentionTargets(ctx, check); err == nil {
+		t.Fatal("accepted target after shared group was disabled")
+	}
+	check.Actor.Subject = f.admin.session.User.ID
+	if err := f.store.ValidateMentionTargets(ctx, check); err != nil {
+		t.Fatal(err)
+	}
+	check.Actor.TenantID = contracts.NewID()
+	if err := f.store.ValidateMentionTargets(ctx, check); err == nil {
+		t.Fatal("accepted actor in an unrelated tenant")
 	}
 }

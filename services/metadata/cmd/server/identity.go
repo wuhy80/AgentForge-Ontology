@@ -73,3 +73,17 @@ func internalDecision(service string, store *identity.Store) http.Handler {
 		platform.WriteJSON(w, 200, decision)
 	})
 }
+
+func internalMentionTargets(service string, store *identity.Store) http.Handler {
+	return internalIdentityCall(service, func(w http.ResponseWriter, r *http.Request) {
+		var check contracts.MentionTargetCheck
+		if !decodeIdentity(w, r, &check) {
+			return
+		}
+		if err := store.ValidateMentionTargets(r.Context(), check); err != nil {
+			writeIdentityError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+}

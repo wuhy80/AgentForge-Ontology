@@ -25,3 +25,10 @@ type RecordNoticePage struct {
 type RecordFollow struct {
 	Following bool `json:"following"`
 }
+
+const MaxMentionTargets = 20
+
+type MentionTargetCheck struct {
+	Actor     Principal `json:"actor"`
+	TargetIDs []string  `json:"targetIds"`
+}

@@ -72,6 +72,7 @@ func run() error {
 	mux.Handle("/oauth/", accounts.NewHandler())
 	mux.Handle("/.well-known/oauth-authorization-server", accounts.NewHandler())
 	mux.Handle("POST /internal/identity/session", internalSession(service, accounts))
+	mux.Handle("POST /internal/identity/mention-targets", internalMentionTargets(service, accounts))
 	mux.Handle("POST /internal/metadata/query-directory", metadata.NewQueryDirectoryHandler(service, accounts, app))
 	mux.Handle("POST /internal/authorization/decision", internalDecision(service, accounts))
 	mux.Handle("/", app)
