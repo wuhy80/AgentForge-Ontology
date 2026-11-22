@@ -147,6 +147,9 @@ func writeError(w http.ResponseWriter, err error) {
 	var dbError *mysql.MySQLError
 	if errors.As(err, &dbError) {
 		switch dbError.Number {
+		case 3024:
+			writeJSON(w, http.StatusGatewayTimeout, c.Error{Code: "request_timeout", Message: "数据库执行超过查询时限，请缩小查询范围"})
+			return
 		case 1062:
 			writeJSON(w, http.StatusConflict, c.Error{Code: "constraint_conflict", Message: "写入与当前唯一约束冲突"})
 			return

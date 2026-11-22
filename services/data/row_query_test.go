@@ -101,6 +101,9 @@ func TestRowQueryCompilesJoinBeforeLimitAndBindsAllPolicies(t *testing.T) {
 	if strings.Contains(compiled.SQL, "P' OR") || strings.Contains(compiled.SQL, "DISTINCT") || strings.Contains(compiled.SQL, "OFFSET") || strings.Count(compiled.SQL, " LIMIT ") != 1 || strings.Count(compiled.SQL, " JOIN ") != 2 {
 		t.Fatalf("unsafe join semantics: %s", compiled.SQL)
 	}
+	if !strings.HasPrefix(compiled.SQL, "SELECT /*+ MAX_EXECUTION_TIME(10000) */ ") {
+		t.Fatalf("MySQL row query is missing a server-side deadline: %s", compiled.SQL)
+	}
 	if len(compiled.Args) != 7 || compiled.Args[0] != "P' OR 1=1" || compiled.Args[2] != "A" || compiled.Args[4] != "B" || compiled.Args[6] != 3 {
 		t.Fatalf("policy/tenant binding mismatch: %#v", compiled.Args)
 	}

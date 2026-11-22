@@ -227,6 +227,15 @@ func rowTableSQL(node rowQueryNode) string {
 	}
 	return node.table.qualified()
 }
+
+func rowQuerySelect(driver string) string {
+	if driver == "mysql" {
+		// Bound the statement on the server as well as the client. Closing
+		// the client connection can leave a MySQL join running after HTTP 504.
+		return "SELECT /*+ MAX_EXECUTION_TIME(10000) */ "
+	}
+	return "SELECT "
+}
 func rowColumn(node rowQueryNode, column string) string {
 	return node.table.quoted(node.node.ID) + "." + node.table.quoted(column)
 }
@@ -527,7 +536,7 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 			columns = append(columns, expression)
 		}
 		compiled.Fields = append(groupFields, fields...)
-		statement := "SELECT " + strings.Join(columns, ",") + " FROM " + from + " WHERE " + strings.Join(conditions, " AND ")
+		statement := rowQuerySelect(plan.driver) + strings.Join(columns, ",") + " FROM " + from + " WHERE " + strings.Join(conditions, " AND ")
 		if len(groupColumns) > 0 {
 			statement += " GROUP BY " + strings.Join(groupColumns, ",")
 			order := make([]string, len(groupColumns))
@@ -655,7 +664,14 @@ func compileRowQuery(plan *rowQueryPlan, p c.Principal, q c.QuerySpec, secret st
 			}
 		}
 	}
-	compiled.SQL = sourceBind(plan.driver, "SELECT "+strings.Join(columns, ",")+" FROM "+from+" WHERE "+strings.Join(conditions, " AND ")+" ORDER BY "+strings.Join(orderParts, ",")+" LIMIT ?")
+	prefix := rowQuerySelect(plan.driver)
+	if plan.driver == "mysql" && len(plan.edges) > 1 && plan.nodes[0].platformStorage() {
+		// Managed paths follow tenant-prefixed edge indexes from each bound
+		// endpoint. Starting with two independent edge scans can expand work
+		// before MySQL applies their shared endpoint join.
+		prefix = "SELECT /*+ MAX_EXECUTION_TIME(10000) JOIN_FIXED_ORDER() */ "
+	}
+	compiled.SQL = sourceBind(plan.driver, prefix+strings.Join(columns, ",")+" FROM "+from+" WHERE "+strings.Join(conditions, " AND ")+" ORDER BY "+strings.Join(orderParts, ",")+" LIMIT ?")
 	compiled.Args = append(args, compiled.Limit+1)
 	compiled.Fields = safeQueryProperties(compiled.Fields)
 	return compiled, nil

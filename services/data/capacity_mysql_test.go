@@ -70,6 +70,18 @@ func TestMySQLQueryCapacityBaseline(t *testing.T) {
 		Joins: []c.RowQueryJoin{{From: "n0", To: "n1", LinkID: link.ID, Direction: "out"}, {From: "n1", To: "n2", LinkID: link.ID, Direction: "out"}},
 	}}
 	fixed.Where = &c.Expression{Op: "eq", Field: fixed.Select[0], Value: raw("group-00")}
+	if os.Getenv("ONTOLOGY_TEST_CAPACITY_WIDE_PATH") == "1" {
+		wide := fixed
+		wide.Where = nil
+		started := time.Now()
+		response := f.request("POST", "/data/query", wide, false)
+		if response.Code == 504 {
+			requireBudgetError(t, response, 504, "request_timeout")
+		} else if response.Code != 200 {
+			t.Fatalf("wide fixed path: %d %s", response.Code, response.Body)
+		}
+		t.Logf("unfiltered fixed path returned HTTP %d in %s", response.Code, time.Since(started))
+	}
 	grouped := fixed
 	grouped.Rows = &c.RowQuery{Nodes: fixed.Rows.Nodes[:2], Joins: fixed.Rows.Joins[:1]}
 	grouped.Select = nil
