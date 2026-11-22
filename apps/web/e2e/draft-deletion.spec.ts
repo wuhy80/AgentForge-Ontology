@@ -1,9 +1,13 @@
-﻿import { test, expect } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import { ontologyFixture } from './fixtures/ontology'
 
-for (const width of [1440, 390]) test(`草稿删除在 ${width}px 下需要预览与确认`, async ({ page }) => {
+for (const kind of ['schema', 'link']) for (const width of [1440, 390]) test(`草稿删除在 ${kind} ${width}px 下需要预览与确认`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
-  await ontologyFixture(page)
+  const fixture = await ontologyFixture(page)
+  if (kind === 'link') {
+    const definition = { ...fixture.current.find(item => item.definition.id === 'note-tags')!.definition, id: 'draft-only' }
+    await page.route('**/api/metadata/definitions/draft-only/draft', route => route.fulfill({ json: { definition, status: 'draft', etag: 'draft-only' } }))
+  }
   let deleted = false
   await page.route('**/api/metadata/capabilities', route => route.fulfill({ json: { unpublishedDraftDelete: true } }))
   await page.route('**/api/metadata/definitions/draft-only/delete-preview', async route => {
@@ -36,6 +40,7 @@ for (const width of [1440, 390]) test(`草稿删除在 ${width}px 下需要预�
   }
   await page.getByRole('button', { name: '删除草稿', exact: true }).click()
   await page.getByRole('button', { name: '确认删除', exact: true }).click()
+  await expect(page).not.toHaveURL(/draft-only/)
   await expect(page.getByRole('heading', { name: '未发布的秘密模型' })).toHaveCount(0)
   expect(deleted).toBe(true)
 })
