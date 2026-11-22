@@ -137,6 +137,9 @@ func (s *platformMutationStore) Delete(ctx context.Context, old c.Instance) erro
 	if err := mutationAffected(result); err != nil {
 		return err
 	}
+	if _, err := s.tx.ExecContext(ctx, "DELETE FROM af_data_record_comments WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
+		return err
+	}
 	for _, property := range s.current.Definition.Schema.Properties {
 		if property.FileKind != "" {
 			_, err = s.tx.ExecContext(ctx, "DELETE FROM af_data_property_files WHERE tenant_id=? AND schema_id=? AND entity_id=?", s.p.TenantID, old.SchemaID, old.ID)
