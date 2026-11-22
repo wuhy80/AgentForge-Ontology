@@ -245,4 +245,6 @@ OntologySQL编译器和HTTP测试覆盖残缺文本与fuzz seeds、有界嵌套�
 事务实体校验失败并回滚时，失败回执可包含 `error.fieldId` 和原操作的 `error.clientKey`，用于定位客户端输入。并发冲突仍返回事务级错误。
 ## 记录评论
 
+`GET .../instances/{entityId}/comment-replies` 返回当前记录内回复了当前用户评论的未读总数，以及最近 25 条未读回复的 ID 和时间。回复自己不计入通知。`PUT .../comment-replies/{replyId}` 幂等标记已读，只允许原评论作者调用。两个接口均重新校验对象读取权限。需要显式应用 `014_data_comment_reply_reads`，对象删除时同步清除已读记录。
+
 平台托管对象提供 `GET/POST /data/schemas/{schemaId}/instances/{entityId}/comments` 和 `PATCH .../comments/{commentId}`。读取沿用对象行级读取授权。写入额外要求同一记录的 `instance.update` 权限。POST 提交 UUID requestId，同记录同作者同正文和回复目标重试可返回已有评论。作者由会话主体生成，回复目标必须属于同一个对象，编辑仅允许原作者并校验强 If-Match。GET 每页 25 条，按创建时间和 ID 升序，返回下一页游标和当前用户的发帖能力。上线前显式应用 `013_data_record_comments`，对象删除在同一事务内清除评论。

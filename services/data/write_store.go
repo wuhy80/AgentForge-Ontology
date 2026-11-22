@@ -137,6 +137,9 @@ func (s *platformMutationStore) Delete(ctx context.Context, old c.Instance) erro
 	if err := mutationAffected(result); err != nil {
 		return err
 	}
+	if _, err := s.tx.ExecContext(ctx, "DELETE FROM af_data_comment_reply_reads WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
+		return err
+	}
 	if _, err := s.tx.ExecContext(ctx, "DELETE FROM af_data_record_comments WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
 		return err
 	}
