@@ -325,9 +325,18 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	if blocked.Code != "definition_in_use" {
 		t.Fatalf("current definition did not block enum disable: %+v", blocked)
 	}
+	var capabilities map[string]any
+	request("GET", "/metadata/capabilities", "", nil, 200, &capabilities)
+	if capabilities["unpublishedDraftDelete"] != true || capabilities["delete"] != false {
+		t.Fatalf("unexpected deletion capabilities: %+v", capabilities)
+	}
 	withoutPolicy := config
 	withoutPolicy.CallablePolicyReferences = nil
 	api = NewHandler(withoutPolicy)
+	request("GET", "/metadata/capabilities", "", nil, 200, &capabilities)
+	if capabilities["unpublishedDraftDelete"] != false {
+		t.Fatalf("unconfigured deletion advertised: %+v", capabilities)
+	}
 	for _, op := range []struct{ method, suffix string }{{"GET", "/disable-preview"}, {"POST", "/disable"}} {
 		request(op.method, functionPath+op.suffix, function.ETag, nil, 503, &blocked)
 		if blocked.Code != "policy_impact_unavailable" {

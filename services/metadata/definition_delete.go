@@ -9,6 +9,15 @@ import (
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
 
+type deletionPolicyReferences interface {
+	HasDeletionPolicyReference(context.Context, *sql.Tx, string, string, c.Kind, bool) (bool, error)
+}
+
+func (h *handler) supportsDraftDeletion() bool {
+	_, ok := h.cfg.CallablePolicyReferences.(deletionPolicyReferences)
+	return ok
+}
+
 func (h *handler) deleteDraft(preview bool) endpoint {
 	return func(w http.ResponseWriter, r *http.Request, p c.Principal) error {
 		ctx, id := r.Context(), r.PathValue("id")
@@ -58,9 +67,7 @@ func (h *handler) deleteDraft(preview bool) endpoint {
 					return problem(409, "definition_in_use", "当前或草稿定义仍引用此定义")
 				}
 			}
-			policies, ok := h.cfg.CallablePolicyReferences.(interface {
-				HasDeletionPolicyReference(context.Context, *sql.Tx, string, string, c.Kind, bool) (bool, error)
-			})
+			policies, ok := h.cfg.CallablePolicyReferences.(deletionPolicyReferences)
 			if !ok {
 				return problem(503, "policy_impact_unavailable", "无法复核定义相关策略")
 			}
