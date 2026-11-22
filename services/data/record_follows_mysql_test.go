@@ -53,6 +53,10 @@ func TestMySQLFollowedRecordUpdate(t *testing.T) {
 	if len(page.Data) != 1 || page.Data[0].Kind != recordUpdateNoticeKind || page.Unread == nil || page.Unread.Count != 1 {
 		t.Fatalf("expected one unread update: %+v", page)
 	}
+	delivery := page.Data[0].Delivery
+	if delivery == nil || delivery.Channel != "inbox" || delivery.Status != "delivered" || delivery.At != page.Data[0].At || delivery.Failure != "" {
+		t.Fatalf("unexpected delivery: %+v", delivery)
+	}
 	notice := inbox + "/" + recordUpdateNoticeKind + "/" + row.SchemaID + "/" + row.ID + "/" + page.Data[0].ID
 	call("PUT", notice, 204)
 	call("PUT", notice, 204)

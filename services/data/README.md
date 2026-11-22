@@ -275,3 +275,7 @@ Data capabilities 声明 `recordFollows: true`。托管记录的 `GET /data/sche
 托管记录创建、修改及批量事务识别字符串、文本或长文本字段中新增的 `[@显示名](#onto-mention-account-账号UUID)` 标记。每条记录一次最多新增 20 个不同账号，本人不接收通知。Data 通过 Metadata 复核同租户账号目录，再校验收件人能读取更新后的记录及包含提及的字段。校验失败回滚保存与通知，单字段重复提及、保留原标记的保存及已成功请求重放均不重复生成。
 
 类型 `account_mention` 使用通用通知历史及标记已读接口。字段 ID 仅作服务端重新授权，响应不包含正文及字段 ID。需要先升级 Metadata，再显式应用 Data 迁移 `018_data_mention_notices`。
+
+### 站内通知送达结果
+
+通知历史返回授权条目的 `delivery`。已提交的站内通知返回 `channel: inbox`、`status: delivered` 和通知入箱时间 `at`。结果不随阅读状态改变。字段或记录撤权后，条目与送达结果一并过滤。协议预留可选的 `failure` 说明。当前站内写入失败随事务回滚，真实失败记录尚未持久化。

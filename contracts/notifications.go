@@ -1,13 +1,21 @@
 package contracts
 
-// RecordNotice identifies a notification about a record without embedding record data.
+// NoticeDelivery describes an authorized delivery result.
+type NoticeDelivery struct {
+	Channel string `json:"channel"`
+	Status  string `json:"status"`
+	At      string `json:"at"`
+	Failure string `json:"failure,omitempty"`
+}
+
 type RecordNotice struct {
-	ID       string `json:"id"`
-	Kind     string `json:"kind"`
-	SchemaID string `json:"schemaId"`
-	RecordID string `json:"recordId"`
-	At       string `json:"at"`
-	Read     bool   `json:"read"`
+	Delivery *NoticeDelivery `json:"delivery,omitempty"`
+	ID       string          `json:"id"`
+	Kind     string          `json:"kind"`
+	SchemaID string          `json:"schemaId"`
+	RecordID string          `json:"recordId"`
+	At       string          `json:"at"`
+	Read     bool            `json:"read"`
 }
 
 // RecordUnreadSummary counts visible unread notifications within the server's scan budget.

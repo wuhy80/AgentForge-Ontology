@@ -35,7 +35,8 @@ func (h *handler) markRecordNotification(w http.ResponseWriter, r *http.Request)
 
 func recordNotice(item inboxReply) c.RecordNotice {
 	return c.RecordNotice{ID: item.ID, Kind: item.kind, SchemaID: item.SchemaID,
-		RecordID: item.RecordID, At: item.At, Read: item.read}
+		RecordID: item.RecordID, At: item.At, Read: item.read,
+		Delivery: &c.NoticeDelivery{Channel: "inbox", Status: "delivered", At: item.At}}
 }
 
 const unreadRecordBudget = 50
