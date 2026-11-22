@@ -245,6 +245,24 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	if err := engine.DB().QueryRow("SELECT COUNT(*) FROM af_meta_outbox WHERE tenant_id=? AND object_id=? AND event_type IN ('definition.disabled','definition.restored')", tenant, lifecycleSchema.Definition.ID).Scan(&events); err != nil || events != 2 {
 		t.Fatalf("lifecycle retry produced %d events, want 2: %v", events, err)
 	}
+	deletableEnum := create(c.Definition{Kind: c.KindEnum, Name: "待删除枚举", Enum: &c.Enum{Values: []c.EnumValue{{Code: "on", Label: "有效"}}}})
+	publish(deletableEnum, 200)
+	enumDeletePath := "/metadata/definitions/" + deletableEnum.Definition.ID
+	request("DELETE", enumDeletePath, deletableEnum.ETag, nil, 409, nil)
+	request("POST", enumDeletePath+"/disable", deletableEnum.ETag, nil, 200, nil)
+	request("GET", enumDeletePath+"/delete-preview", deletableEnum.ETag, nil, 204, nil)
+	savedEnumReference.Store(true)
+	var enumDeleteError c.Error
+	request("DELETE", enumDeletePath, deletableEnum.ETag, nil, 409, &enumDeleteError)
+	if enumDeleteError.Code != "definition_saved_query_in_use" {
+		t.Fatalf("unexpected Enum deletion blocker: %+v", enumDeleteError)
+	}
+	savedEnumReference.Store(false)
+	request("DELETE", enumDeletePath, deletableEnum.ETag, nil, 204, nil)
+	request("DELETE", enumDeletePath, deletableEnum.ETag, nil, 204, nil)
+	request("GET", enumDeletePath, "", nil, 404, nil)
+	request("POST", enumDeletePath+"/restore", deletableEnum.ETag, nil, 404, nil)
+	request("POST", enumDeletePath+"/publish", deletableEnum.ETag, nil, 404, nil)
 	enum := create(c.Definition{Kind: c.KindEnum, Name: "验收枚举", Enum: &c.Enum{Values: []c.EnumValue{{Code: "in", Label: "有效"}}}})
 	publish(enum, 200)
 	enumPath := "/metadata/definitions/" + enum.Definition.ID

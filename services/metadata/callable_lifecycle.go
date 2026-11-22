@@ -46,6 +46,9 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 					return problem(409, "publication_in_progress", "该租户发布状态已改变，请先读取权威生效状态")
 				}
 			}
+			if row.status == "deleted" {
+				return sql.ErrNoRows
+			}
 			if err = matchHeader(r, row.currentDigest); err != nil {
 				return err
 			}

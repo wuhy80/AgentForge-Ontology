@@ -18,7 +18,7 @@ func (h *handler) supportsDraftDeletion() bool {
 	return ok
 }
 
-func (h *handler) deleteDraft(preview bool) endpoint {
+func (h *handler) deleteDefinition(preview bool) endpoint {
 	return func(w http.ResponseWriter, r *http.Request, p c.Principal) error {
 		ctx, id := r.Context(), r.PathValue("id")
 		w.Header().Set("Cache-Control", "no-store")
@@ -45,26 +45,40 @@ func (h *handler) deleteDraft(preview bool) endpoint {
 			if row.status == "deleted" && !preview {
 				return matchHeader(r, row.draftDigest)
 			}
-			if row.status != "draft" || row.current.Valid || !row.draft.Valid {
-				return problem(409, "unsupported_delete_state", "当前只支持删除从未发布的草稿")
+			draftOnly := row.status == "draft" && !row.current.Valid && row.draft.Valid
+			disabledEnum := row.status == disabledDefinition && row.d.Kind == c.KindEnum && row.current.Valid && !row.draft.Valid
+			if !draftOnly && !disabledEnum {
+				return problem(409, "unsupported_delete_state", "当前只支持删除从未发布的草稿或已停用的 Enum")
 			}
-			if err := matchHeader(r, row.draftDigest); err != nil {
+			digest := row.draftDigest
+			publicationQuery := "SELECT EXISTS(SELECT 1 FROM af_meta_publications WHERE tenant_id=? AND definition_id=?"
+			if disabledEnum {
+				digest = row.currentDigest
+				publicationQuery += " AND status NOT IN ('succeeded','rejected')"
+			}
+			if err := matchHeader(r, digest); err != nil {
 				return err
 			}
 			var publication bool
-			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM af_meta_publications WHERE tenant_id=? AND definition_id=?)", p.TenantID, id).Scan(&publication); err != nil {
+			if err := tx.QueryRowContext(ctx, publicationQuery+")", p.TenantID, id).Scan(&publication); err != nil {
 				return err
 			}
 			if publication {
-				return problem(409, "definition_publication_exists", "定义存在发布记录，无法删除")
+				return problem(409, "definition_publication_exists", "定义存在阻断删除的发布记录")
 			}
-			definitions, err := readImpactSnapshot(ctx, tx, p.TenantID)
-			if err != nil {
-				return err
-			}
-			for _, definition := range definitions {
-				if len(definition.refs[id]) != 0 {
-					return problem(409, "definition_in_use", "当前或草稿定义仍引用此定义")
+			if disabledEnum {
+				if err := h.checkEnumDisable(ctx, tx, p.TenantID, id); err != nil {
+					return err
+				}
+			} else {
+				definitions, err := readImpactSnapshot(ctx, tx, p.TenantID)
+				if err != nil {
+					return err
+				}
+				for _, definition := range definitions {
+					if len(definition.refs[id]) != 0 {
+						return problem(409, "definition_in_use", "当前或草稿定义仍引用此定义")
+					}
 				}
 			}
 			policies, ok := h.cfg.CallablePolicyReferences.(deletionPolicyReferences)
@@ -81,10 +95,10 @@ func (h *handler) deleteDraft(preview bool) endpoint {
 			if preview {
 				return nil
 			}
-			if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET status='deleted',draft_json=NULL WHERE tenant_id=? AND id=?", p.TenantID, id); err != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET status='deleted',current_json=NULL,current_digest='',draft_json=NULL,draft_digest=? WHERE tenant_id=? AND id=?", digest, p.TenantID, id); err != nil {
 				return err
 			}
-			payload, err := json.Marshal(map[string]string{"actor": p.Subject, "kind": string(row.d.Kind), "digest": row.draftDigest})
+			payload, err := json.Marshal(map[string]string{"actor": p.Subject, "kind": string(row.d.Kind), "digest": digest})
 			if err != nil {
 				return err
 			}
