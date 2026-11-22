@@ -258,7 +258,10 @@ func linkDDL(d c.Definition) (string, error) {
 	return "CREATE TABLE " + quote(linkTableName(d.ID)) + " (" + strings.Join(fields, ",") + ") ENGINE=InnoDB ROW_FORMAT=DYNAMIC", nil
 }
 
-func verifyLinkTable(ctx context.Context, db *sql.DB, d c.Definition) error {
+func verifyLinkTable(ctx context.Context, db interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, d c.Definition) error {
 	var engine, rowFormat string
 	if err := db.QueryRowContext(ctx, "SELECT engine,row_format FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=?", linkTableName(d.ID)).Scan(&engine, &rowFormat); err != nil {
 		return err

@@ -197,6 +197,12 @@ type ActivateRequest struct {
 	Digest       string `json:"digest"`
 }
 
+type ManagedLinkLifecycle struct {
+	Digest  string `json:"digest"`
+	Restore bool   `json:"restore,omitempty"`
+	Preview bool   `json:"preview,omitempty"`
+}
+
 type Instance struct {
 	ID       string                     `json:"id"`
 	SchemaID string                     `json:"schemaId"`

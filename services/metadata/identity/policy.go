@@ -36,7 +36,7 @@ func (s *Store) HasCallablePolicyReference(ctx context.Context, tx *sql.Tx, tena
 	operation := string(kind) + ".invoke"
 	hasReference := func(rules []contracts.PermissionRule) bool {
 		for _, rule := range rules {
-			if rule.ResourceID == id && rule.Operation == operation {
+			if rule.ResourceID == id && (rule.Operation == operation || kind == contracts.KindLink && strings.HasPrefix(rule.Operation, "link.")) {
 				return true
 			}
 		}

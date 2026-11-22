@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -56,8 +57,9 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 			if d.Kind == c.KindFunction {
 				callable = d.Function
 			}
-			if d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
-				return problem(422, "unsupported_lifecycle", "当前支持停用或恢复 Enum 及无副作用的 Action 和 Function")
+			managedLink := d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil && d.Link.StorageBinding.Mode == "managed"
+			if !managedLink && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
+				return problem(422, "unsupported_lifecycle", "当前支持 Enum、平台托管关系及无副作用的 Action 和 Function")
 			}
 			if row.draft.Valid {
 				return problem(409, "lifecycle_draft_exists", "请先处理已保存的草稿")
@@ -82,7 +84,7 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 					if err := h.checkEnumDisable(ctx, tx, p.TenantID, id); err != nil {
 						return err
 					}
-				} else {
+				} else if !managedLink {
 					var referenced bool
 					err = tx.QueryRowContext(ctx, `SELECT
  EXISTS (SELECT 1 FROM af_meta_dependencies WHERE tenant_id=? AND target_id=?) OR
@@ -103,6 +105,11 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 							return problem(409, "definition_policy_in_use", "存在引用此定义的调用授权，请由权限管理员处理后重试")
 						}
 					}
+				}
+			}
+			if managedLink {
+				if err := h.checkManagedLinkLifecycle(ctx, tx, d, row.currentDigest, restore, preview); err != nil {
+					return err
 				}
 			}
 			if !preview && row.status != next {
@@ -148,6 +155,69 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 		}
 		return nil
 	}
+}
+
+func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c.Definition, digest string, restore, preview bool) error {
+	policies := h.cfg.CallablePolicyReferences
+	checkPolicy := func(lock bool) error {
+		if policies == nil {
+			return problem(503, "policy_impact_unavailable", "无法复核关系授权")
+		}
+		referenced, err := policies.HasCallablePolicyReference(ctx, tx, d.TenantID, d.ID, d.Kind, lock)
+		if err != nil {
+			return err
+		}
+		if referenced {
+			return problem(409, "definition_policy_in_use", "仍有定向策略引用此关系")
+		}
+		return nil
+	}
+	if !restore {
+		if err := checkPolicy(false); err != nil {
+			return err
+		}
+	}
+	if h.cfg.DataURL == "" || len(h.cfg.ServiceToken) < 32 {
+		return problem(503, "link_lifecycle_unavailable", "无法复核关系存储")
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	body, _ := json.Marshal(c.ManagedLinkLifecycle{Digest: digest, Restore: restore, Preview: preview})
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost,
+		strings.TrimRight(h.cfg.DataURL, "/")+"/internal/definitions/"+url.PathEscape(d.ID)+"/managed-link-lifecycle", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+h.cfg.ServiceToken)
+	req.Header.Set("X-Tenant-ID", d.TenantID)
+	client := *h.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(req)
+	if err != nil {
+		return problem(503, "link_lifecycle_unavailable", "关系存储未确认，请重试原操作核对状态")
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 204 {
+		var failure c.Error
+		if response.StatusCode == 409 && json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&failure) == nil {
+			switch failure.Code {
+			case "definition_data_in_use":
+				return problem(409, failure.Code, "关系仍有实例")
+			case "definition_saved_query_in_use":
+				return problem(409, failure.Code, "仍有保存查询引用此关系")
+			case "mapping_unavailable":
+				return problem(409, failure.Code, "关系存储未就绪或已改变")
+			}
+		}
+		return problem(503, "link_lifecycle_unavailable", "无法复核关系存储")
+	}
+	if !restore && !preview {
+		// Take the policy lock after draining Data to avoid waiting on a
+		// transaction that still needs a live authorization check.
+		return checkPolicy(true)
+	}
+	return nil
 }
 
 func (h *handler) checkEnumDisable(ctx context.Context, tx *sql.Tx, tenant, id string) error {

@@ -33,7 +33,9 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   const [neighbors, setNeighbors] = useState(false)
   const [reverseView, setReverseView] = useState(false)
   const [selectedSchema, setSelectedSchema] = useState<string>()
-  const [busy, setBusy] = useState<'save' | 'preview' | 'publish' | 'reload' | ''>('')
+  const [busy, setBusy] = useState<'save' | 'preview' | 'publish' | 'reload' | 'lifecycle' | ''>('')
+  const [lifecycleAvailable, setLifecycleAvailable] = useState(false)
+  const [confirmLifecycle, setConfirmLifecycle] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [conflict, setConflict] = useState(false)
@@ -43,9 +45,12 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   const [preview, setPreview] = useState<Preview>()
   const tabId = useId()
   const dirty = JSON.stringify(definition) !== JSON.stringify(record?.definition ?? initialDefinition)
-  const locked = !!(record?.hasCurrent || record?.status === 'active')
+  const suspended = record?.status === 'disabled'
+  const locked = !!(record?.hasCurrent || record?.status === 'active' || suspended)
   const uncertain = !!publication && !['succeeded', 'rejected'].includes(publication.status)
-  const disabled = !!busy || uncertain
+  const disabled = !!busy || uncertain || suspended
+  const managed = record?.definition.link?.storageBinding?.mode === 'managed'
+  const lifecycleAllowed = lifecycleAvailable && managed && (record?.status === 'active' || suspended)
   const category = categories.find((item) => item.id === categoryId)
   const tenantId = definition.tenantId || category?.tenantId || ''
   const schemas = (currentEntries ?? entries).filter((item) => item.status === 'active' && item.definition.tenantId === tenantId && item.definition.schema)
@@ -59,6 +64,35 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   const changeRef = useRef(props.onDefinitionChange)
   changeRef.current = props.onDefinitionChange
   useEffect(() => { changeRef.current?.(definition, dirty) }, [definition, dirty])
+
+  useEffect(() => {
+    if (!active || !managed || typeof api.metadataCapabilities !== 'function') return
+    const request = new AbortController()
+    api.metadataCapabilities(request.signal).then((value) => {
+      if (!request.signal.aborted) setLifecycleAvailable(value.managedLinkLifecycle === true)
+    }).catch(() => {})
+    return () => request.abort()
+  }, [api, active, managed])
+
+  async function changeLifecycle(confirm: boolean) {
+    if (!record || !lifecycleAllowed || dirty || busy || uncertain) return
+    const operation = suspended ? 'restore' : 'disable'
+    setBusy('lifecycle'); setError(''); setMessage('')
+    try {
+      if (!confirm) {
+        const result = await api.previewCallableLifecycle(record.definition.id, operation, record.etag)
+        if (result.definitionId !== record.definition.id || result.targetStatus !== (suspended ? 'active' : 'disabled')) {
+          throw new Error('生命周期预览与当前关系不符，请重新读取。')
+        }
+        setConfirmLifecycle(true)
+        return
+      }
+      const result = await api.setCallableLifecycle(record.definition.id, operation, record.etag)
+      setRecord(result); setDefinition(cloneDefinition(result.definition)); setConfirmLifecycle(false)
+      setMessage(suspended ? '定义已恢复。' : '定义已停用。')
+      await onSaved(result)
+    } catch (cause) { report(cause) } finally { setBusy('') }
+  }
 
   useEffect(() => {
     if (!active || !categoryId) return
@@ -112,7 +146,7 @@ export function LinkVisualEditor(props: ModelEditorProps) {
     try { setPreview(await api.preview(record.definition.id)) } catch (cause) { report(cause) } finally { setBusy('') }
   }
   async function publish() {
-    if (!record || dirty || busy || conflict) return
+    if (!record || dirty || busy || conflict || suspended) return
     setBusy('publish'); setError(''); setMessage('')
     try {
       const completed = await api.publish(record.definition.id, record.etag)
@@ -163,8 +197,11 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   return <section className={`model-editor-page link-visual-editor ${embedded ? 'link-editor-embedded' : ''}`} aria-label="模型编辑">
     {!embedded && <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" disabled={!!busy} onClick={() => leave(onClose)}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑关系' : '新建关系'}</h1><p className="muted">连接业务对象，配置关系语义与真实数据来源。</p></div>{onGraph && <button type="button" className="button" disabled={!!busy} onClick={() => leave(onGraph)}><GitBranch size={15} />打开分类关系图</button>}</div>}
     <div className="model-editor link-editor-body">
-      <div className="model-editor-meta"><span className="badge model-kind-link">关系</span><span className="badge">{record?.status === 'active' ? '当前生效' : locked ? '待发布变更' : '草稿'}</span><span className="badge">{link.storageBinding ? link.storageBinding.mode === 'managed' ? '平台托管' : '外部只读' : '仅定义'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}</div>
-      {locked && <div className="notice model-lock-notice">{storageLocked ? '此关系已生效。两端、基数、删除策略与数据绑定保持锁定；可修改中文名称和描述。' : '此关系定义已生效。可补充关系存储映射；关系两端、基数及删除策略保持锁定。'}</div>}
+      <div className="model-editor-meta"><span className="badge model-kind-link">关系</span><span className="badge">{suspended ? '已停用' : record?.status === 'active' ? '当前生效' : locked ? '待发布变更' : '草稿'}</span><span className="badge">{link.storageBinding ? link.storageBinding.mode === 'managed' ? '平台托管' : '外部只读' : '仅定义'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}
+        {lifecycleAllowed && !confirmLifecycle && <button type="button" className="button subtle" disabled={dirty || !!busy || uncertain} onClick={() => void changeLifecycle(false)}>{suspended ? '恢复定义' : '停用定义'}</button>}
+      </div>
+      {confirmLifecycle && <div className="notice"><p>{suspended ? '恢复后，可按权限查询并维护这条关系。' : '停用前会检查关系记录、保存查询和定向策略。'}</p><div className="model-inline-actions"><button type="button" className="button primary" disabled={dirty || !!busy} onClick={() => void changeLifecycle(true)}>{suspended ? '确认恢复' : '确认停用'}</button><button type="button" className="button subtle" disabled={!!busy} onClick={() => setConfirmLifecycle(false)}>取消</button></div></div>}
+      {locked && !suspended && <div className="notice model-lock-notice">{storageLocked ? '此关系已生效。两端、基数、删除策略与数据绑定保持锁定；可修改中文名称和描述。' : '此关系定义已生效。可补充关系存储映射；关系两端、基数及删除策略保持锁定。'}</div>}
       {uncertain && <div className="notice notice-error" role="status"><strong>发布结果待确认</strong><p>编辑已暂停。请使用同一份已保存内容继续恢复发布。</p><span className="muted">阶段：{publication?.status}</span></div>}
       {error && <div className="notice notice-error" role="alert"><AlertCircle size={16} /><span>{error}</span></div>}
       {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
@@ -195,7 +232,7 @@ export function LinkVisualEditor(props: ModelEditorProps) {
       </div>
       <DefinitionDependencies api={api} record={record} dirty={dirty} active={active && !uncertain} />
       {preview && <section className="model-preview"><div className="model-section-heading"><div><h3><FileCode2 size={17} />存储计划预览</h3><p className="muted">预览不会执行 SQL。</p></div></div>{preview.statements?.length ? <pre>{preview.statements.join('\n\n')}</pre> : <p className="model-inline-empty">此变更没有需要执行的存储语句。</p>}</section>}
-      <div className="model-editor-footer link-editor-footer"><span className="muted">{dirty ? '修改仅在画布预览，保存草稿后再发布。' : record?.status === 'active' ? '当前关系已生效。' : '草稿保存后，预览并发布关系。'}</span><div className="model-inline-actions"><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle size={15} className="model-spin" /> : <FileCode2 size={15} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={15} className="model-spin" /> : <Save size={15} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle size={15} className="model-spin" /> : uncertain ? <RefreshCw size={15} /> : <Send size={15} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}</button></div></div>
+      {!suspended && <div className="model-editor-footer link-editor-footer"><span className="muted">{dirty ? '修改仅在画布预览，保存草稿后再发布。' : record?.status === 'active' ? '当前关系已生效。' : '草稿保存后，预览并发布关系。'}</span><div className="model-inline-actions"><button type="button" className="button" disabled={!!busy || !record || dirty || uncertain} onClick={() => void showPreview()}>{busy === 'preview' ? <LoaderCircle size={15} className="model-spin" /> : <FileCode2 size={15} />}预览计划</button>{!uncertain && <button type="button" className="button" disabled={!!busy || !dirty || conflict || !bindingReady} onClick={() => void save()}>{busy === 'save' ? <LoaderCircle size={15} className="model-spin" /> : <Save size={15} />}保存草稿</button>}<button type="button" className="button primary" disabled={!!busy || !record || dirty || conflict} onClick={() => void publish()}>{busy === 'publish' ? <LoaderCircle size={15} className="model-spin" /> : uncertain ? <RefreshCw size={15} /> : <Send size={15} />}{uncertain ? '继续恢复发布' : record?.status === 'active' ? '确认生效状态' : '发布定义'}</button></div></div>}
     </div>
   </section>
 }
