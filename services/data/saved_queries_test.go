@@ -161,11 +161,20 @@ func TestSavedQueryMySQLTenantImpact(t *testing.T) {
 	}
 	check(path, f.tenant, 200, true)
 	check(path, f.tenant+"-other", 200, false)
+	if len(saved.Parameters) != 1 || saved.Parameters[0].EnumID == "" {
+		t.Fatal("fixture did not persist an enum parameter binding")
+	}
+	enumPath := "/internal/definitions/" + saved.Parameters[0].EnumID + "/saved-query-impact"
+	check(enumPath, f.tenant, 200, true)
+	check(enumPath, f.tenant+"-other", 200, false)
 	check(path, "", 400, false)
 	check(path+"?extra=true", f.tenant, 422, false)
 	missing := "/internal/definitions/" + c.NewID() + "/saved-query-impact"
 	check(missing, f.tenant, 200, false)
 	for i := 0; i < savedQueryImpactBudget; i++ {
+		if i == savedQueryImpactBudget-1 {
+			check(missing, f.tenant, 200, false)
+		}
 		if _, err := f.engine.DB().Exec(`INSERT INTO af_data_saved_queries
  (tenant_id,user_id,id,name,name_key,template_json,etag,created_at,updated_at)
  SELECT tenant_id,?,id,name,name_key,template_json,etag,created_at,updated_at
@@ -175,6 +184,7 @@ func TestSavedQueryMySQLTenantImpact(t *testing.T) {
 		}
 	}
 	check(missing, f.tenant, 422, false)
+	check(enumPath, f.tenant, 200, true)
 	check(path, f.tenant, 200, true)
 }
 
