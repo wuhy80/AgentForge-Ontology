@@ -240,6 +240,14 @@ func TestMySQLDefinitionDependencyImpact(t *testing.T) {
 			request("/metadata/definitions/"+root.ID+"/dependencies", foreign, 422)
 		})
 	}
+	if _, err := engine.DB().Exec(`INSERT INTO af_meta_definitions
+ (id,tenant_id,category_id,group_id,kind,name,name_key,status)
+ WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<?)
+ SELECT UUID(),?,?,?,'action',CONCAT('deleted-',n),CONCAT('deleted-',n),'deleted' FROM seq`,
+		impactDefinitionBudget, tenant, c.NewID(), c.NewID()); err != nil {
+		t.Fatal(err)
+	}
+	request(url, tenant, 200)
 	// The reader never created a publication guard or wrote a dependency index.
 	var count int
 	if err := engine.DB().QueryRow("SELECT COUNT(*) FROM af_meta_tenant_guards WHERE tenant_id=?", tenant).Scan(&count); err != nil && err != sql.ErrNoRows {

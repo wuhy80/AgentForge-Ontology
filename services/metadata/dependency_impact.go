@@ -114,7 +114,7 @@ func readImpactSnapshot(ctx context.Context, tx *sql.Tx, tenant string) ([]impac
 	var bytes, maxJSON int64
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(current_size+draft_size),0),COALESCE(MAX(GREATEST(current_size,draft_size)),0)
  FROM (SELECT COALESCE(OCTET_LENGTH(current_json),0) current_size,COALESCE(OCTET_LENGTH(draft_json),0) draft_size
- FROM af_meta_definitions WHERE tenant_id=? ORDER BY id LIMIT ?) sizes`, tenant, impactDefinitionBudget+1).Scan(&count, &bytes, &maxJSON)
+ FROM af_meta_definitions WHERE tenant_id=? AND status<>'deleted' ORDER BY id LIMIT ?) sizes`, tenant, impactDefinitionBudget+1).Scan(&count, &bytes, &maxJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func readImpactSnapshot(ctx context.Context, tx *sql.Tx, tenant string) ([]impac
 		return nil, impactBudgetError()
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id,kind,current_json,current_digest,draft_json,draft_digest
- FROM af_meta_definitions WHERE tenant_id=? ORDER BY id LIMIT ?`, tenant, impactDefinitionBudget+1)
+ FROM af_meta_definitions WHERE tenant_id=? AND status<>'deleted' ORDER BY id LIMIT ?`, tenant, impactDefinitionBudget+1)
 	if err != nil {
 		return nil, err
 	}
