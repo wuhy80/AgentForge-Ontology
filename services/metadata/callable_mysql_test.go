@@ -134,6 +134,33 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		t.Fatalf("unexpected mapping failure: %+v", mappingFailure)
 	}
 	storageUnavailable.Store(false)
+	schemaPolicy, err := json.Marshal(c.PermissionPolicy{Rules: []c.PermissionRule{{Operation: "instance.read", ResourceID: lifecycleSchema.Definition.ID}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []struct{ current, draft any }{
+		{string(schemaPolicy), nil},
+		{`{"rules":[]}`, string(schemaPolicy)},
+	} {
+		if _, err := engine.DB().Exec(`INSERT INTO af_identity_tenants
+ (tenant_id,authorization_state,current_policy,draft_policy,policy_etag) VALUES (?,'state',?,?,'etag')
+ ON DUPLICATE KEY UPDATE current_policy=VALUES(current_policy),draft_policy=VALUES(draft_policy)`,
+			tenant, policy.current, policy.draft); err != nil {
+			t.Fatal(err)
+		}
+		var failure c.Error
+		request("GET", schemaPath+"/disable-preview", lifecycleSchema.ETag, nil, 409, &failure)
+		if failure.Code != "definition_policy_in_use" {
+			t.Fatalf("unexpected Schema policy blocker: %+v", failure)
+		}
+		request("POST", schemaPath+"/disable", lifecycleSchema.ETag, nil, 409, &failure)
+		if failure.Code != "definition_policy_in_use" || storagePaused.Load() {
+			t.Fatalf("Schema policy did not block storage pause: %+v", failure)
+		}
+	}
+	if _, err := engine.DB().Exec("DELETE FROM af_identity_tenants WHERE tenant_id=?", tenant); err != nil {
+		t.Fatal(err)
+	}
 	loseStorageResponse.Store(true)
 	request("POST", schemaPath+"/disable", lifecycleSchema.ETag, nil, 503, nil)
 	request("GET", schemaPath, "", nil, 200, &schemaState)
