@@ -277,7 +277,11 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
     })
   }
 
-  const editing = editor && editor.categoryId === categoryId ? <ModelEditor key={`${categoryId}:${editor.token}`} api={api} active={active} categoryId={categoryId} categories={categories} entries={models} currentEntries={currentEntries} initialKind={editor.kind} initialRecord={editor.record} initialLink={editor.initialLink} embedded={layout === 'graph' && editor.kind === 'link'} layoutScope={layoutScope} onDefinitionChange={(definition, dirty) => definitionChanged(definition, dirty, editor.token)} onGraph={() => { setLayout('graph'); onNavigate?.(editor.record ? `models/${encodeURIComponent(editor.record.definition.id)}?view=graph` : 'models/new?kind=link&view=graph', true) }} pending={editor.record ? pending[editor.record.definition.id] : undefined} onClose={() => closeEditor()} onOrganizations={onOrganizations} onSources={onSources} onNavigationGuard={registerGuard} onSaved={(record) => saved(record, editor.token)} onPending={(value) => {
+  const editing = editor && editor.categoryId === categoryId ? <ModelEditor key={`${categoryId}:${editor.token}`} api={api} active={active} categoryId={categoryId} categories={categories} entries={models} currentEntries={currentEntries} initialKind={editor.kind} initialRecord={editor.record} initialLink={editor.initialLink} embedded={layout === 'graph' && editor.kind === 'link'} layoutScope={layoutScope} onDefinitionChange={(definition, dirty) => definitionChanged(definition, dirty, editor.token)} onGraph={() => { setLayout('graph'); onNavigate?.(editor.record ? `models/${encodeURIComponent(editor.record.definition.id)}?view=graph` : 'models/new?kind=link&view=graph', true) }} pending={editor.record ? pending[editor.record.definition.id] : undefined} onClose={() => closeEditor()} onDeleted={() => {
+    if (editor.token !== editorSequence.current) return
+    closeEditor()
+    void refresh()
+  }} onOrganizations={onOrganizations} onSources={onSources} onNavigationGuard={registerGuard} onSaved={(record) => saved(record, editor.token)} onPending={(value) => {
     const directory = directoryRef.current
     // Late publication results may retain their original recovery identity only
     // while that exact draft remains authorized in the current directory.
