@@ -1,8 +1,14 @@
 package metadata
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
@@ -50,8 +56,8 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 			if d.Kind == c.KindFunction {
 				callable = d.Function
 			}
-			if callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0 {
-				return problem(422, "unsupported_lifecycle", "当前仅支持停用或恢复无副作用的 Action 和 Function")
+			if d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
+				return problem(422, "unsupported_lifecycle", "当前支持停用或恢复 Enum 及无副作用的 Action 和 Function")
 			}
 			if row.draft.Valid {
 				return problem(409, "lifecycle_draft_exists", "请先处理已保存的草稿")
@@ -70,6 +76,10 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 				}
 				if restore {
 					if err := validateReferences(ctx, tx, d); err != nil {
+						return err
+					}
+				} else if d.Kind == c.KindEnum {
+					if err := h.checkEnumDisable(ctx, tx, p.TenantID, id); err != nil {
 						return err
 					}
 				} else {
@@ -138,4 +148,45 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 		}
 		return nil
 	}
+}
+
+func (h *handler) checkEnumDisable(ctx context.Context, tx *sql.Tx, tenant, id string) error {
+	definitions, err := readImpactSnapshot(ctx, tx, tenant)
+	if err != nil {
+		return err
+	}
+	for _, definition := range definitions {
+		if len(definition.refs[id]) > 0 {
+			return problem(409, "definition_in_use", "当前或草稿定义仍引用此枚举")
+		}
+	}
+	if h.cfg.DataURL == "" || len(h.cfg.ServiceToken) < 32 {
+		return problem(503, "saved_query_impact_unavailable", "无法复核保存查询引用")
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(callCtx, http.MethodGet,
+		strings.TrimRight(h.cfg.DataURL, "/")+"/internal/definitions/"+url.PathEscape(id)+"/saved-query-impact", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+h.cfg.ServiceToken)
+	req.Header.Set("X-Tenant-ID", tenant)
+	client := *h.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(req)
+	if err != nil {
+		return problem(503, "saved_query_impact_unavailable", "无法复核保存查询引用")
+	}
+	defer response.Body.Close()
+	var impact struct {
+		Referenced *bool `json:"referenced"`
+	}
+	if response.StatusCode != 200 || json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&impact) != nil || impact.Referenced == nil {
+		return problem(503, "saved_query_impact_unavailable", "无法复核保存查询引用")
+	}
+	if *impact.Referenced {
+		return problem(409, "definition_saved_query_in_use", "仍有保存查询引用此枚举")
+	}
+	return nil
 }

@@ -102,9 +102,17 @@ func (h *handler) impactSnapshot(ctx context.Context, tenant string) ([]impactDe
 		return nil, err
 	}
 	defer tx.Rollback()
+	result, err := readImpactSnapshot(ctx, tx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	return result, tx.Commit()
+}
+
+func readImpactSnapshot(ctx context.Context, tx *sql.Tx, tenant string) ([]impactDefinition, error) {
 	var count int
 	var bytes, maxJSON int64
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(current_size+draft_size),0),COALESCE(MAX(GREATEST(current_size,draft_size)),0)
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(current_size+draft_size),0),COALESCE(MAX(GREATEST(current_size,draft_size)),0)
  FROM (SELECT COALESCE(OCTET_LENGTH(current_json),0) current_size,COALESCE(OCTET_LENGTH(draft_json),0) draft_size
  FROM af_meta_definitions WHERE tenant_id=? ORDER BY id LIMIT ?) sizes`, tenant, impactDefinitionBudget+1).Scan(&count, &bytes, &maxJSON)
 	if err != nil {
@@ -154,9 +162,6 @@ func (h *handler) impactSnapshot(ctx context.Context, tenant string) ([]impactDe
 		return nil, err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return result, nil

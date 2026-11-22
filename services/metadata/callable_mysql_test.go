@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
@@ -37,7 +38,12 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 			}
 		}
 	}()
+	var savedEnumReference atomic.Bool
 	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/saved-query-impact") {
+			writeJSON(w, 200, c.SavedQueryDefinitionImpact{Referenced: savedEnumReference.Load()})
+			return
+		}
 		if r.URL.Path == "/internal/publications/prepare" {
 			var input c.PrepareRequest
 			_ = json.NewDecoder(r.Body).Decode(&input)
@@ -89,6 +95,45 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	function := create(executableFunction())
 	publish(function, 200)
 	functionPath := "/metadata/definitions/" + function.Definition.ID
+	enum := create(c.Definition{Kind: c.KindEnum, Name: "验收枚举", Enum: &c.Enum{Values: []c.EnumValue{{Code: "in", Label: "有效"}}}})
+	publish(enum, 200)
+	enumPath := "/metadata/definitions/" + enum.Definition.ID
+	request("GET", enumPath+"/disable-preview", enum.ETag, nil, 200, nil)
+	savedEnumReference.Store(true)
+	var blocked c.Error
+	request("POST", enumPath+"/disable", enum.ETag, nil, 409, &blocked)
+	if blocked.Code != "definition_saved_query_in_use" {
+		t.Fatalf("saved query did not block enum disable: %+v", blocked)
+	}
+	savedEnumReference.Store(false)
+	var enumState c.CurrentDefinition
+	request("POST", enumPath+"/disable", enum.ETag, nil, 200, &enumState)
+	if enumState.Status != disabledDefinition || enumState.Definition.ID != enum.Definition.ID {
+		t.Fatalf("enum did not retain identity: %+v", enumState)
+	}
+	enumUser := executableFunction()
+	enumUser.ID, enumUser.TenantID = "", ""
+	enumUser.Name = "草稿引用枚举"
+	enumUser.Function.Input = []c.Property{{Name: "状态", DataType: "string", EnumID: enum.Definition.ID}}
+	enumUser.CategoryID, enumUser.GroupID = category.ID, group.ID
+	request("POST", "/metadata/definitions", "", enumUser, 422, &blocked)
+	if blocked.Code != "invalid_enum_reference" {
+		t.Fatalf("disabled enum accepted as a new reference: %+v", blocked)
+	}
+	request("POST", enumPath+"/restore", enum.ETag, nil, 200, &enumState)
+	if enumState.Status != "active" {
+		t.Fatalf("enum did not restore: %+v", enumState)
+	}
+	enumUserDraft := create(enumUser)
+	request("POST", enumPath+"/disable", enum.ETag, nil, 409, &blocked)
+	if blocked.Code != "definition_in_use" {
+		t.Fatalf("draft did not block enum disable: %+v", blocked)
+	}
+	publish(enumUserDraft, 200)
+	request("GET", enumPath+"/disable-preview", enum.ETag, nil, 409, &blocked)
+	if blocked.Code != "definition_in_use" {
+		t.Fatalf("current definition did not block enum disable: %+v", blocked)
+	}
 	request("GET", functionPath+"/disable-preview", function.ETag, nil, 200, nil)
 	actionDefinition := executableFunction()
 	actionDefinition.Kind, actionDefinition.Name, actionDefinition.Action, actionDefinition.Function = c.KindAction, "调用Python", actionDefinition.Function, nil

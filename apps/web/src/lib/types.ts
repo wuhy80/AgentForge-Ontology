@@ -233,13 +233,14 @@ export interface SourceDiagnostic { code: string; message: string; line: number;
 export type ScriptLanguage = 'python' | 'javascript' | 'go'
 export interface ScriptRuntime { language: ScriptLanguage; source: string; entrypoint: string; timeoutSeconds: number }
 export interface SourceToolResult { source: string; diagnostics: SourceDiagnostic[] }
-export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; actionInlineSource?: boolean; draftInvocation?: boolean; dataWriteTransactions?: boolean; dataWriteDraftInvocation?: boolean; maxTransactionItems?: number; sideEffects?: string[]; reason?: string }
+export interface ExecutionCapabilities { invocation: boolean; runtimes: string[]; synchronous: boolean; async?: boolean; actionInlineSource?: boolean; draftInvocation?: boolean; dataWriteTransactions?: boolean; dataWriteDraftInvocation?: boolean; maxTransactionItems?: number; sideEffects?: string[]; reason?: string }
 export interface Invocation {
   id: string
   definitionId: string
   definitionName: string
   kind: Kind
-  status: 'running' | 'committing' | 'succeeded' | 'failed' | 'timed_out' | 'canceled' | 'interrupted'
+  status: 'queued' | 'running' | 'committing' | 'succeeded' | 'failed' | 'timed_out' | 'canceled' | 'interrupted'
+  attempt?: number
   transaction?: { status: string; committed: boolean; operationCount: number }
   output?: Values
   error?: { code: string; message: string }
@@ -250,6 +251,8 @@ export interface Invocation {
   draftEtag?: string
   diagnostics?: SourceDiagnostic[]
 }
+export type InvocationSummary = Pick<Invocation, 'id' | 'definitionName' | 'kind' | 'status' | 'createdAt' | 'finishedAt'> & { attempt: number }
+export interface InvocationPage { data: InvocationSummary[]; nextCursor?: string }
 export interface Definition {
   id: string
   tenantId: string
@@ -363,6 +366,7 @@ export interface QueryFieldInsertionResult { requestId: string; textHash: string
 export interface MetadataCapabilities {
   callableLifecycle?: 'pure-only'
   callableLifecyclePreview?: boolean
+  enumLifecycle?: boolean
   actionRecordRead?: boolean
   dependencyImpact?: 'direct-definitions'
   definitions: Kind[]
