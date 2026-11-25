@@ -309,3 +309,17 @@
 .model-property-default { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; max-width: 100%; }
 .model-property-default > label { display: flex; flex: 1 1 180px; min-width: 0; flex-direction: column; gap: 5px; }
 .model-property-default input, .model-property-default select, .model-property-default textarea { min-width: 0; max-width: 100%; }
+
+/* 记录流程：阶段与流转的配置行 */
+.model-lifecycle-note { font-size: 11px; line-height: 1.7; margin: -4px 0 2px; color: var(--muted); }
+.model-lifecycle-row { display: grid; grid-template-columns: minmax(0, 1.4fr) auto auto; gap: 10px; align-items: end; margin-top: 13px; }
+.model-lifecycle-row.model-lifecycle-transition { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto; }
+.model-lifecycle-row > label { min-width: 0; }
+.model-lifecycle-initial { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); padding-bottom: 9px; white-space: nowrap; }
+.model-lifecycle-heading { margin-top: 20px; }
+.model-lifecycle-heading h4 { font-size: 13px; margin: 0; color: var(--ink); font-weight: 600; }
+@media (max-width: 760px) {
+  .model-lifecycle-row, .model-lifecycle-row.model-lifecycle-transition { grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--line); padding-bottom: 15px; }
+  .model-lifecycle-row > label:not(.model-lifecycle-initial) { grid-column: 1 / -1; }
+  .model-lifecycle-transition > label { grid-column: 1 / -1; }
+}

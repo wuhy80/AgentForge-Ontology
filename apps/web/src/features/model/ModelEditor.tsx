@@ -5,6 +5,7 @@ import type { Definition, DefinitionRecord, Index, Invocation, Kind, Link, Metad
 import { PropertyEditor } from './PropertyEditor'
 import { SchemaStorageEditor } from './SchemaStorageEditor'
 import { SchemaPropertiesEditor } from './SchemaPropertiesEditor'
+import { SchemaLifecycleEditor } from './SchemaLifecycleEditor'
 import { ModelDataPreview } from './ModelDataPreview'
 import { ModelWriteOperations } from './ModelWriteOperations'
 import { RelatedDefinitions } from './RelatedDefinitions'
@@ -28,6 +29,7 @@ const schemaTabs = [
   { id: 'basics', label: '基础信息' },
   { id: 'properties', label: '属性配置' },
   { id: 'indexes', label: '索引信息' },
+  { id: 'lifecycle', label: '记录流程' },
   { id: 'links', label: 'Link 信息' },
   { id: 'actions', label: '动作信息' },
   { id: 'data', label: '数据预览' },
@@ -98,6 +100,13 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const diagnosticEpoch = useRef(0)
   const tabId = useId()
   const dirty = JSON.stringify(definition) !== JSON.stringify(record?.definition ?? initialDefinition)
+  // External mapped schemas keep their stages in the source system, so the
+  // lifecycle tab is only offered for platform-managed objects.
+  const lifecycleTabHidden = !!definition.schema?.storageBinding
+  const visibleSchemaTabs = lifecycleTabHidden ? schemaTabs.filter((item) => item.id !== 'lifecycle') : schemaTabs
+  useEffect(() => {
+    if (lifecycleTabHidden && tab === 'lifecycle') setTab('basics')
+  }, [lifecycleTabHidden, tab])
   const suspended = record?.status === 'disabled'
   const locked = !!(record?.hasCurrent || record?.status === 'active' || suspended)
   const canDeleteEnum = disabledEnumDeleteAvailable && suspended && record?.definition.kind === 'enum'
@@ -185,13 +194,14 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
     return definition.schema ? { role: 'tabpanel', id: `${tabId}-panel-${id}`, 'aria-labelledby': `${tabId}-tab-${id}`, hidden: tab !== id, tabIndex: 0 } : {}
   }
   function navigateTabs(event: KeyboardEvent<HTMLButtonElement>, index: number) {
-    const next = event.key === 'ArrowRight' ? (index + 1) % schemaTabs.length
-      : event.key === 'ArrowLeft' ? (index + schemaTabs.length - 1) % schemaTabs.length
-      : event.key === 'Home' ? 0 : event.key === 'End' ? schemaTabs.length - 1 : -1
+    const count = visibleSchemaTabs.length
+    const next = event.key === 'ArrowRight' ? (index + 1) % count
+      : event.key === 'ArrowLeft' ? (index + count - 1) % count
+      : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : -1
     if (next < 0) return
     event.preventDefault()
-    setTab(schemaTabs[next].id)
-    document.getElementById(`${tabId}-tab-${schemaTabs[next].id}`)?.focus()
+    setTab(visibleSchemaTabs[next].id)
+    document.getElementById(`${tabId}-tab-${visibleSchemaTabs[next].id}`)?.focus()
   }
 
   useEffect(() => {
@@ -244,7 +254,8 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
       setError(invalid)
       if (definition.schema) {
         const basicError = invalid === '请填写业务名称。' || /分类|分组|建模方向|主数据源|主表|数据库为准/.test(invalid)
-        setTab(/索引/.test(invalid) ? 'indexes' : basicError ? 'basics' : 'properties')
+        const lifecycleError = /记录流程|阶段|流转/.test(invalid)
+        setTab(/索引/.test(invalid) ? 'indexes' : lifecycleError ? 'lifecycle' : basicError ? 'basics' : 'properties')
       }
       return
     }
@@ -382,7 +393,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
       {conflict && <div className="notice model-conflict"><p>服务器内容已改变，本地编辑仍然保留。载入最新内容会放弃当前未保存的修改。</p><button type="button" className="button subtle" disabled={!!busy} onClick={() => setConfirmReload(true)}><RefreshCw size={15} />载入最新内容</button></div>}
       {confirmReload && <div className="notice notice-error"><p>确定放弃本地编辑并载入服务器最新内容？</p><div className="model-inline-actions"><button type="button" className="button primary" onClick={() => void reload()}>确认载入</button><button type="button" className="button subtle" onClick={() => setConfirmReload(false)}>保留本地编辑</button></div></div>}
       {confirmClose && <div className="notice notice-error" role="alert"><p>还有未保存的修改。返回列表后这些修改将丢失。</p><div className="model-inline-actions"><button type="button" className="button subtle" onClick={() => setConfirmClose(false)}>继续编辑</button><button type="button" className="button" onClick={onClose}>放弃修改并返回</button></div></div>}
-      {definition.schema && <div className="model-editor-tabs" role="tablist" aria-label="模型配置">{schemaTabs.map((item, index) => <button type="button" role="tab" key={item.id} id={`${tabId}-tab-${item.id}`} aria-controls={`${tabId}-panel-${item.id}`} aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} onClick={() => setTab(item.id)} onKeyDown={(event) => navigateTabs(event, index)}>{item.label}{(item.id === 'properties' || item.id === 'indexes') && <span aria-hidden="true">{item.id === 'properties' ? definition.schema!.properties.length : definition.schema!.indexes?.length ?? 0}</span>}</button>)}</div>}
+      {definition.schema && <div className="model-editor-tabs" role="tablist" aria-label="模型配置">{visibleSchemaTabs.map((item, index) => <button type="button" role="tab" key={item.id} id={`${tabId}-tab-${item.id}`} aria-controls={`${tabId}-panel-${item.id}`} aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} onClick={() => setTab(item.id)} onKeyDown={(event) => navigateTabs(event, index)}>{item.label}{(item.id === 'properties' || item.id === 'indexes') && <span aria-hidden="true">{item.id === 'properties' ? definition.schema!.properties.length : definition.schema!.indexes?.length ?? 0}</span>}</button>)}</div>}
       <fieldset disabled={disabled} className="model-fieldset">
         <section className="model-editor-panel" {...panelProps('basics')}>
         <div className="form-grid model-basics">
@@ -410,6 +421,9 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
               <label>第二个属性<select className="field" disabled={indexLocked || !index.fieldIds[0]} aria-label={`索引${position + 1}第二个属性`} value={index.fieldIds[1] ?? ''} onChange={(event) => updateIndex(position, { fieldIds: [index.fieldIds[0], event.target.value].filter(Boolean) })}><option value="">不组合</option>{definition.schema!.properties.filter((property) => property.id && property.id !== index.fieldIds[0] && property.dataType !== 'text' && property.dataType !== 'longtext').map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}</select></label>
               {!indexLocked && <button type="button" className="button subtle model-icon-button" aria-label={`删除索引${position + 1}`} onClick={() => update({ schema: { ...definition.schema!, indexes: definition.schema!.indexes!.filter((_, offset) => offset !== position) } })}><Trash2 size={16} /></button>}
             </div>})}
+          </section>
+          <section className="model-editor-panel" {...panelProps('lifecycle')}>
+            <SchemaLifecycleEditor schema={definition.schema} disabled={disabled} onChange={(schema) => update({ schema })} />
           </section>
           <section className="model-editor-panel" {...panelProps('links')}><RelatedDefinitions kind="link" definition={definition} entries={authorizedEntries} currentEntries={currentEntries} categories={categories} /></section>
           <section className="model-editor-panel" {...panelProps('actions')}>

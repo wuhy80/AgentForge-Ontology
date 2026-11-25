@@ -1,10 +1,13 @@
-import type { Definition, DefinitionRecord, Kind, Property } from '../../lib/types'
+import type { Definition, DefinitionRecord, Kind, Property, Schema } from '../../lib/types'
 import { newProperty } from './PropertyEditor'
 import { languageLabels, validEntrypoint } from '../../lib/runtime-language'
 import { draftText, parseFieldValue } from '../query/query'
 
 export const MAX_SCHEMA_PROPERTIES = 100
 export const MAX_SCHEMA_INDEXES = 32
+export const MAX_LIFECYCLE_STAGES = 20
+export const MAX_LIFECYCLE_TRANSITIONS = 40
+export const MAX_LIFECYCLE_NAME = 64
 
 export const kindLabels: Record<Kind, string> = {
   schema: '对象模型', enum: '枚举', link: '关系', action: '动作', function: '函数',
@@ -26,6 +29,44 @@ export function newDefinition(kind: Kind, categoryId = '', groupId = ''): Defini
   if (kind === 'action') definition.action = { input: [], output: [], sideEffects: 'none' }
   if (kind === 'function') definition.function = { input: [], output: [], sideEffects: 'none' }
   return definition
+}
+
+function lifecycleKey(name: string) {
+  return name.normalize('NFC').trim().toLocaleLowerCase()
+}
+
+export function validateLifecycle(schema: Schema): string | undefined {
+  const lifecycle = schema.lifecycle
+  if (!lifecycle) return undefined
+  if (schema.storageBinding) return '外部映射模型不支持记录流程。'
+  const stages = lifecycle.stages ?? []
+  if (stages.length === 0 || stages.length > MAX_LIFECYCLE_STAGES) return `记录流程需要 1–${MAX_LIFECYCLE_STAGES} 个阶段。`
+  const stageIds = new Set<string>(), stageNames = new Set<string>()
+  for (const stage of stages) {
+    if (!stage.id || stageIds.has(stage.id)) return '阶段缺少稳定标识或标识重复，请重新添加该阶段。'
+    stageIds.add(stage.id)
+    const name = stage.name.trim()
+    if (!name) return '请填写每个阶段的名称。'
+    if (name.length > MAX_LIFECYCLE_NAME) return `阶段名称不能超过 ${MAX_LIFECYCLE_NAME} 个字符。`
+    const key = lifecycleKey(name)
+    if (stageNames.has(key)) return '阶段名称不能重复。'
+    stageNames.add(key)
+  }
+  if (!stageIds.has(lifecycle.initialStageId)) return '请选择一个已声明的初始阶段。'
+  const transitions = lifecycle.transitions ?? []
+  if (transitions.length > MAX_LIFECYCLE_TRANSITIONS) return `流转不能超过 ${MAX_LIFECYCLE_TRANSITIONS} 条。`
+  const transitionIds = new Set<string>(), transitionNames = new Set<string>()
+  for (const transition of transitions) {
+    if (!transition.id || transitionIds.has(transition.id)) return '流转缺少稳定标识或标识重复，请重新添加该流转。'
+    transitionIds.add(transition.id)
+    const name = transition.name.trim()
+    if (!name) return '请填写每条流转的名称。'
+    if (name.length > MAX_LIFECYCLE_NAME) return `流转名称不能超过 ${MAX_LIFECYCLE_NAME} 个字符。`
+    const key = lifecycleKey(name)
+    if (transitionNames.has(key)) return '流转名称不能重复。'
+    transitionNames.add(key)
+    if (!stageIds.has(transition.from) || !stageIds.has(transition.to) || transition.from === transition.to) return '每条流转必须连接两个不同的已声明阶段。'
+  }
 }
 
 function validateProperties(properties: Property[], title: string): string | undefined {
@@ -87,6 +128,8 @@ export function validateDefinition(definition: Definition): string | undefined {
       if (index.fieldIds.length < 1 || index.fieldIds.length > 2 || new Set(index.fieldIds).size !== index.fieldIds.length || index.fieldIds.some((id) => !definition.schema!.properties.some((property) => property.id && property.id === id))) return '每个索引请选择 1–2 个不同的已保存属性。'
       if (index.fieldIds.some((id) => definition.schema!.properties.some((property) => property.id === id && (property.dataType === 'text' || property.dataType === 'longtext')))) return '长文本和超长文本属性不支持索引。'
     }
+    const lifecycleError = validateLifecycle(schema)
+    if (lifecycleError) return lifecycleError
   }
   if (definition.enum) {
     if (definition.enum.values.length === 0) return '枚举至少需要一个业务值。'

@@ -62,6 +62,25 @@ export interface Schema {
   properties: Property[]
   indexes?: Index[]
   storageBinding?: StorageBinding
+  lifecycle?: SchemaLifecycle
+}
+
+export interface LifecycleStage {
+  id: string
+  name: string
+}
+
+export interface LifecycleTransition {
+  id: string
+  name: string
+  from: string
+  to: string
+}
+
+export interface SchemaLifecycle {
+  initialStageId: string
+  stages: LifecycleStage[]
+  transitions?: LifecycleTransition[]
 }
 
 export type DataSourceDriver = 'mysql' | 'postgresql'
