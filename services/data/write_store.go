@@ -96,6 +96,13 @@ func (s *platformMutationStore) Insert(ctx context.Context, out c.Instance) erro
 		args = append(args, value)
 	}
 	_, err := s.tx.ExecContext(ctx, "INSERT INTO "+quote(tableName(out.SchemaID))+" ("+strings.Join(cols, ",")+") VALUES ("+strings.Join(marks, ",")+")", args...)
+	if err != nil {
+		return err
+	}
+	if lifecycle := s.current.Definition.Schema.Lifecycle; lifecycle != nil {
+		_, err = s.tx.ExecContext(ctx, "INSERT INTO af_data_record_lifecycles (tenant_id,schema_id,entity_id,stage_id,updated_at,updated_by) VALUES (?,?,?,?,UTC_TIMESTAMP(6),?)",
+			s.p.TenantID, out.SchemaID, out.ID, lifecycle.InitialStageID, s.p.Subject)
+	}
 	return err
 }
 
@@ -144,7 +151,7 @@ func (s *platformMutationStore) Delete(ctx context.Context, old c.Instance) erro
 	if _, err := s.tx.ExecContext(ctx, "DELETE FROM af_data_record_comments WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
 		return err
 	}
-	for _, table := range []string{"af_data_record_follows", "af_data_record_notices", "af_data_record_approvals"} {
+	for _, table := range []string{"af_data_record_follows", "af_data_record_notices", "af_data_record_approvals", "af_data_record_lifecycles", "af_data_record_lifecycle_runs"} {
 		if _, err := s.tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+commentScope, s.p.TenantID, old.SchemaID, old.ID); err != nil {
 			return err
 		}

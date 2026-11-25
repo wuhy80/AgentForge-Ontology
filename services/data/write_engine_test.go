@@ -30,7 +30,7 @@ type mutationFixture struct {
 	mentionCheck func(c.MentionTargetCheck) int
 }
 
-func newMutationFixture(t *testing.T) *mutationFixture {
+func newMutationFixture(t *testing.T, mutate ...func(*c.Definition)) *mutationFixture {
 	t.Helper()
 	dsn := os.Getenv("MYSQL_TEST_DSN")
 	if dsn == "" {
@@ -47,6 +47,9 @@ func newMutationFixture(t *testing.T) *mutationFixture {
 		t.Fatal("migrate mutation test MySQL failed")
 	}
 	d := testDefinition()
+	for _, apply := range mutate {
+		apply(&d)
+	}
 	d.ID, d.TenantID = c.NewID(), c.NewID()
 	d.Schema.Indexes = []c.Index{{ID: c.NewID(), Name: "编码唯一", Unique: true, FieldIDs: []string{testFieldCode}}, {ID: c.NewID(), Name: "金额唯一", Unique: true, FieldIDs: []string{testFieldPrice}}}
 	f := &mutationFixture{t: t, engine: engine, p: c.Principal{TenantID: d.TenantID, Subject: "mutation-user"}, current: c.CurrentDefinition{Definition: d, ETag: digest(d), Status: "active"}, policy: map[string]c.Decision{}}

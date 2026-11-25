@@ -1,0 +1,147 @@
+package data
+
+import (
+	"strings"
+	"testing"
+
+	c "github.com/wuhy80/AgentForge-Ontology/contracts"
+)
+
+const (
+	lifecycleDraftStage  = "6f6f6666-6666-4666-8666-666666666666"
+	lifecycleReviewStage = "7a7a7777-7777-4777-8777-777777777777"
+	lifecycleDoneStage   = "8b8b8888-8888-4888-8888-888888888888"
+	lifecycleSubmitMove  = "9c9c9999-9999-4999-8999-999999999999"
+	lifecycleFinishMove  = "adaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+)
+
+func lifecycleDeclaration() *c.SchemaLifecycle {
+	return &c.SchemaLifecycle{InitialStageID: lifecycleDraftStage,
+		Stages: []c.LifecycleStage{{ID: lifecycleDraftStage, Name: "草稿"}, {ID: lifecycleReviewStage, Name: "审核中"}, {ID: lifecycleDoneStage, Name: "已完成"}},
+		Transitions: []c.LifecycleTransition{
+			{ID: lifecycleSubmitMove, Name: "提交审核", From: lifecycleDraftStage, To: lifecycleReviewStage},
+			{ID: lifecycleFinishMove, Name: "归档", From: lifecycleReviewStage, To: lifecycleDoneStage},
+		}}
+}
+
+func lifecycleFixture(t *testing.T) *mutationFixture {
+	t.Helper()
+	return newMutationFixture(t, func(d *c.Definition) { d.Schema.Lifecycle = lifecycleDeclaration() })
+}
+
+func lifecycleTransitionBody(transition, note string) map[string]string {
+	body := map[string]string{"transitionId": transition}
+	if note != "" {
+		body["note"] = note
+	}
+	return body
+}
+
+func (f *mutationFixture) lifecycle(record string, status int) c.RecordLifecycle {
+	f.t.Helper()
+	return mutationDecode[c.RecordLifecycle](f.t, f.call("GET", "/instances/"+record+"/lifecycle", nil, "", status))
+}
+
+func TestMySQLRecordLifecycleTransitions(t *testing.T) {
+	f := lifecycleFixture(t)
+	row := f.create("LIFECYCLE-1")
+	var persisted int
+	if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_lifecycles WHERE tenant_id=?", f.p.TenantID).Scan(&persisted); err != nil || persisted != 1 {
+		t.Fatalf("create did not open the initial stage: %d %v", persisted, err)
+	}
+
+	view := f.lifecycle(row.ID, 200)
+	if view.StageID != lifecycleDraftStage || !view.Persisted || view.StageUnknown ||
+		len(view.Stages) != 3 || len(view.Transitions) != 2 || len(view.History) != 0 ||
+		!strings.Contains(strings.Join(view.Available, ","), lifecycleSubmitMove) {
+		t.Fatalf("unexpected initial lifecycle: %+v", view)
+	}
+
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(c.NewID(), ""), "", 422)
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleFinishMove, ""), "", 409)
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions",
+		lifecycleTransitionBody(lifecycleSubmitMove, strings.Repeat("注", c.MaxLifecycleNoteRunes+1)), "", 422)
+
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, "请审核"), "", 204)
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, "请审核"), "", 409)
+
+	view = f.lifecycle(row.ID, 200)
+	if view.StageID != lifecycleReviewStage || !view.Persisted || len(view.History) != 1 {
+		t.Fatalf("transition did not commit one run: %+v", view)
+	}
+	run := view.History[0]
+	if run.TransitionID != lifecycleSubmitMove || run.Name != "提交审核" || run.Note != "请审核" ||
+		run.From != lifecycleDraftStage || run.To != lifecycleReviewStage || run.At == "" {
+		t.Fatalf("history run does not describe the transition: %+v", run)
+	}
+	if len(view.Available) != 1 || view.Available[0] != lifecycleFinishMove {
+		t.Fatalf("available transitions do not follow the new stage: %+v", view.Available)
+	}
+
+	// A stage removed from the definition never silently moves the record: the
+	// current stage is reported and further transitions are refused.
+	unknown := c.NewID()
+	if _, err := f.engine.DB().Exec("UPDATE af_data_record_lifecycles SET stage_id=? WHERE tenant_id=?", unknown, f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	view = f.lifecycle(row.ID, 200)
+	if view.StageID != unknown || !view.StageUnknown || len(view.Available) != 0 {
+		t.Fatalf("removed stage not reported: %+v", view)
+	}
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleFinishMove, ""), "", 409)
+}
+
+func TestMySQLRecordLifecycleAuthorizationAndCleanup(t *testing.T) {
+	f := lifecycleFixture(t)
+	row := f.create("LIFECYCLE-2")
+	path := "/instances/" + row.ID + "/lifecycle/transitions"
+
+	f.mu.Lock()
+	f.policy["instance.update"] = c.Decision{Allow: false}
+	f.mu.Unlock()
+	view := f.lifecycle(row.ID, 200)
+	if len(view.Available) != 0 {
+		t.Fatalf("read-only account saw available transitions: %+v", view.Available)
+	}
+	f.call("POST", path, lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 403)
+	f.mu.Lock()
+	delete(f.policy, "instance.update")
+	f.mu.Unlock()
+
+	f.mu.Lock()
+	f.policy["instance.read"] = c.Decision{Allow: false}
+	f.mu.Unlock()
+	f.lifecycle(row.ID, 403)
+	f.mu.Lock()
+	delete(f.policy, "instance.read")
+	f.mu.Unlock()
+
+	// Records created before the lifecycle existed stay on the declared initial
+	// stage until the first transition opens their row.
+	if _, err := f.engine.DB().Exec("DELETE FROM af_data_record_lifecycles WHERE tenant_id=?", f.p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	view = f.lifecycle(row.ID, 200)
+	if view.Persisted || view.StageID != lifecycleDraftStage {
+		t.Fatalf("legacy record did not report the initial stage: %+v", view)
+	}
+	f.call("POST", path, lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
+	if view = f.lifecycle(row.ID, 200); !view.Persisted || view.StageID != lifecycleReviewStage {
+		t.Fatalf("lazy stage row was not committed: %+v", view)
+	}
+
+	f.call("DELETE", "/instances/"+row.ID, nil, row.ETag, 204)
+	for _, table := range []string{"af_data_record_lifecycles", "af_data_record_lifecycle_runs"} {
+		var remaining int
+		if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM "+table+" WHERE tenant_id=?", f.p.TenantID).Scan(&remaining); err != nil || remaining != 0 {
+			t.Fatalf("%s not cleaned up on delete: %d %v", table, remaining, err)
+		}
+	}
+}
+
+func TestMySQLRecordLifecycleRequiresDeclaration(t *testing.T) {
+	f := newMutationFixture(t)
+	row := f.create("LIFECYCLE-3")
+	f.lifecycle(row.ID, 404)
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 404)
+}

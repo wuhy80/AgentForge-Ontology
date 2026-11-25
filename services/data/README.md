@@ -287,3 +287,9 @@ Data 能力 `recordApprovals: true` 启用托管记录的 `/data/schemas/{schema
 启用前显式应用 `019_data_record_approvals`。隔离 MySQL 验证提交冲突、非审批人拒绝、退回意见必填、并发决定只能有一个成功，以及按参与者隔离历史。审批绑定单条记录；流程定义及管理操作仍待接入。
 
 失败类型为 `account_mention_failed`，与通知历史共用分页，仅当前仍能读取该记录的提交人可见。失败不计入未读数，不支持标记已读。失败说明由预定义错误类型生成，不携带收件人或数据库错误。跨记录事务的确定失败在写入回滚后，与失败回执一并提交。单笔写入失败回滚后尝试独立写入日志。创建失败时不存在可重新授权的记录，存储不可用期间也可能无法持久化失败日志。启用前显式应用 `020_data_notice_failures`。
+
+### 托管记录生命周期
+
+Schema 当前定义声明 `lifecycle` 后，托管记录可读取阶段并提交受权流转。Data 能力 `recordLifecycle: true` 启用 `/data/schemas/{schemaId}/instances/{entityId}/lifecycle`。GET 返回声明的阶段与流转、当前阶段、本账号此刻可提交的流转 ID 及最近 50 条历史。当前阶段尚未落库时按声明的初始阶段返回 `persisted: false`；记录阶段已从当前定义移除时返回 `stageUnknown: true`，并拒绝继续流转。POST 到 `/lifecycle/transitions` 提交 `{transitionId,note}`，要求当前记录的读取与更新授权及行条件，并按读取到的阶段做一次条件更新，说明最多 500 字。成功返回 204；未知流转返回 422；阶段已变化、并发流转或重复提交返回 409。创建记录时写入初始阶段，删除记录时一并清理阶段与历史。
+
+启用前显式应用 `021_data_record_lifecycles` 与 `022_data_record_lifecycle_runs`。隔离 MySQL 验证初始阶段、流转提交与重复提交拒绝、跨阶段流转拒绝、说明预算、移除阶段后的拒绝与未知阶段报告、只读及无更新权账号的可用流转裁剪、旧记录首次流转补建阶段行，以及删除清理。外部映射模型不声明平台生命周期；流程定义的管理操作仍待接入。

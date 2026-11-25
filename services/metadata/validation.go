@@ -77,6 +77,9 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 				return problem(422, "invalid_file_property", "文件属性须为平台托管模型的可空 longtext 属性")
 			}
 		}
+		if err := canonicalLifecycle(s); err != nil {
+			return err
+		}
 		if err := canonicalStorageMappings(s); err != nil {
 			return err
 		}
@@ -378,6 +381,13 @@ func compatibleUpdate(old, next contracts.Definition) error {
 	// immutable snapshot; later invocations resolve the new current definition.
 	if a.Kind == contracts.KindFunction && a.Function != nil && b.Function != nil && a.Function.SideEffects == b.Function.SideEffects && (a.Function.SideEffects == "none" || a.Function.SideEffects == "dataWrite") && a.Function.ArtifactRef == "" && b.Function.ArtifactRef == "" {
 		a.Function.Runtime, b.Function.Runtime = nil, nil
+	}
+	// A record lifecycle is runtime configuration, not a storage structure, so
+	// stage and transition edits need no DDL. Data reports a current stage that
+	// disappeared from the definition as unknown and refuses further transitions
+	// from it, so a publication never silently moves an existing record.
+	if a.Schema != nil && b.Schema != nil {
+		a.Schema.Lifecycle, b.Schema.Lifecycle = nil, nil
 	}
 	if !reflect.DeepEqual(a, b) {
 		if _, err := contracts.ValidateSchemaAddition(a, b); err == nil {

@@ -34,11 +34,12 @@ type Definition struct {
 }
 
 type Schema struct {
-	Mode           string          `json:"mode"`
-	StorageLayout  string          `json:"storageLayout"`
-	StorageBinding *StorageBinding `json:"storageBinding,omitempty"`
-	Properties     []Property      `json:"properties"`
-	Indexes        []Index         `json:"indexes,omitempty"`
+	Mode           string           `json:"mode"`
+	StorageLayout  string           `json:"storageLayout"`
+	StorageBinding *StorageBinding  `json:"storageBinding,omitempty"`
+	Properties     []Property       `json:"properties"`
+	Indexes        []Index          `json:"indexes,omitempty"`
+	Lifecycle      *SchemaLifecycle `json:"lifecycle,omitempty"`
 }
 
 // StorageBinding identifies the primary table that determines entity identity.
