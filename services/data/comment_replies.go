@@ -52,7 +52,7 @@ func replyInboxCursor(secret string, p c.Principal, token string, position reply
 		}
 		payload, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], scope)
 		if err != nil || json.Unmarshal(payload, &position) != nil || position.Expires <= time.Now().Unix() ||
-			(position.Kind != "" && position.Kind != commentReplyNoticeKind && position.Kind != recordUpdateNoticeKind && position.Kind != accountMentionNoticeKind) ||
+			(position.Kind != "" && position.Kind != commentReplyNoticeKind && position.Kind != recordUpdateNoticeKind && position.Kind != accountMentionNoticeKind && position.Kind != mentionFailureKind) ||
 			!uuidPattern.MatchString(position.ID) || !uuidPattern.MatchString(position.SchemaID) || !uuidPattern.MatchString(position.RecordID) || position.At.IsZero() {
 			return position, "", bad
 		}
@@ -76,13 +76,14 @@ LEFT JOIN af_data_comment_reply_reads rr ON rr.tenant_id=reply.tenant_id AND rr.
 WHERE parent.tenant_id=? AND parent.author=? AND reply.author<>parent.author`
 
 type inboxReply struct {
-	ID       string `json:"id"`
-	SchemaID string `json:"schemaId"`
-	RecordID string `json:"recordId"`
-	At       string `json:"at"`
-	read     bool
-	kind     string
-	fieldID  string
+	ID          string `json:"id"`
+	SchemaID    string `json:"schemaId"`
+	RecordID    string `json:"recordId"`
+	At          string `json:"at"`
+	read        bool
+	kind        string
+	fieldID     string
+	failureCode string
 }
 
 func (h *handler) commentReplyInbox(w http.ResponseWriter, r *http.Request) {
@@ -111,7 +112,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 	// Bound the candidate set before checking each target object's current permissions.
 	candidates := []inboxReply{}
 	err = h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
-		query := "SELECT id,schema_id,entity_id,created_at,is_read,kind,field_id FROM (" + replyNoticeSelect
+		query := "SELECT id,schema_id,entity_id,created_at,is_read,kind,field_id,failure_code FROM (" + replyNoticeSelect
 		args := []any{p.TenantID, p.Subject}
 		if includeRead {
 			query += " UNION ALL " + updateNoticeSelect
@@ -136,7 +137,7 @@ func (h *handler) readReplyInbox(w http.ResponseWriter, r *http.Request, include
 		for rows.Next() {
 			var item inboxReply
 			var at time.Time
-			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at, &item.read, &item.kind, &item.fieldID); err != nil {
+			if err := rows.Scan(&item.ID, &item.SchemaID, &item.RecordID, &at, &item.read, &item.kind, &item.fieldID, &item.failureCode); err != nil {
 				return err
 			}
 			item.At = at.UTC().Format(time.RFC3339Nano)

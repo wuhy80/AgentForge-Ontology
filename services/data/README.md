@@ -278,10 +278,12 @@ Data capabilities 声明 `recordFollows: true`。托管记录的 `GET /data/sche
 
 ### 站内通知送达结果
 
-通知历史返回授权条目的 `delivery`。已提交的站内通知返回 `channel: inbox`、`status: delivered` 和通知入箱时间 `at`。结果不随阅读状态改变。字段或记录撤权后，条目与送达结果一并过滤。协议预留可选的 `failure` 说明。当前站内写入失败随事务回滚，真实失败记录尚未持久化。
+通知历史返回授权条目的 `delivery`。已提交的站内通知返回 `channel: inbox`、`status: delivered` 和通知入箱时间 `at`。结果不随阅读状态改变。字段或记录撤权后，条目与送达结果一并过滤。协议预留可选的 `failure` 说明。已有记录的账号提及投递失败随业务事务回滚，并由 Data 为提交人保留失败类型和时间。
 
 ### 托管记录审批
 
 Data 能力 `recordApprovals: true` 启用托管记录的 `/data/schemas/{schemaId}/instances/{entityId}/approvals`。GET 返回当前账号提交或获分派的最近 50 条记录及 `canDecide`。POST 提交 `{assignee}`，校验提交者的记录读取和更新权限、账号目录及审批人读取权限。同一记录最多有一项待办。PUT 到 `/approvals/{approvalId}` 提交 `{decision,note}`，仅分派的审批人可从 pending 转为 approved 或 returned。退回意见必填，意见最多 1000 字。两类写入成功返回 204，重复处理返回 409。读取及决定复核当前记录权限，记录删除时一并清理审批数据。
 
 启用前显式应用 `019_data_record_approvals`。隔离 MySQL 验证提交冲突、非审批人拒绝、退回意见必填、并发决定只能有一个成功，以及按参与者隔离历史。审批绑定单条记录；流程定义及管理操作仍待接入。
+
+失败类型为 `account_mention_failed`，与通知历史共用分页，仅当前仍能读取该记录的提交人可见。失败不计入未读数，不支持标记已读。失败说明由预定义错误类型生成，不携带收件人或数据库错误。跨记录事务的确定失败在写入回滚后，与失败回执一并提交。单笔写入失败回滚后尝试独立写入日志。创建失败时不存在可重新授权的记录，存储不可用期间也可能无法持久化失败日志。启用前显式应用 `020_data_notice_failures`。

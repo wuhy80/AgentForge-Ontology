@@ -181,6 +181,9 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 				if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT af_transaction_writes"); rollbackErr != nil {
 					return rollbackErr
 				}
+				if err := saveNoticeFailure(ctx, tx, p, txErr); err != nil {
+					return err
+				}
 				saved = transactionSaved{Status: "failed", Error: failure}
 				result = c.WriteTransactionResult{Atomic: true, Status: "failed", Results: []c.WriteResult{}, Error: failure}
 			}
@@ -198,6 +201,7 @@ func (h *handler) executeGuardedWriteTransaction(ctx context.Context, p c.Princi
 		if attempt < 2 && callbackErr != nil && ctx.Err() == nil && errors.As(callbackErr, &db) && (db.Number == 1213 || db.Number == 1205) {
 			continue
 		}
+		h.logNoticeFailure(ctx, p, err)
 		return c.WriteTransactionResult{}, err
 	}
 	return c.WriteTransactionResult{}, problem(409, "transaction_conflict", "并发操作冲突，请核对后重试")

@@ -37,4 +37,5 @@ entity_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, id char(36) C
 assignee varbinary(255) NOT NULL, submitted_by varbinary(255) NOT NULL,
 submitted_at datetime(6) NOT NULL, decided_at datetime(6), state varchar(16) NOT NULL, note text NOT NULL,
 PRIMARY KEY(tenant_id,schema_id,entity_id,id), KEY pending(tenant_id,schema_id,entity_id,state)) ENGINE=InnoDB`},
+	{ID: "020_data_notice_failures", SQL: `ALTER TABLE af_data_record_notices ADD COLUMN failure_code varchar(32) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT ''`},
 }, SavedQueryMigrations...)

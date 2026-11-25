@@ -12,9 +12,10 @@ import (
 const commentReplyNoticeKind = "comment_reply"
 const recordUpdateNoticeKind = "record_updated"
 const accountMentionNoticeKind = "account_mention"
+const mentionFailureKind = "account_mention_failed"
 
-const replyNoticeSelect = `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL AS is_read,'comment_reply' AS kind,'' AS field_id` + replyInboxScope
-const updateNoticeSelect = `SELECT id,schema_id,entity_id,created_at,is_read,kind,field_id FROM af_data_record_notices WHERE tenant_id=? AND subject_id=?`
+const replyNoticeSelect = `SELECT reply.id,reply.schema_id,reply.entity_id,reply.created_at,rr.reply_id IS NOT NULL AS is_read,'comment_reply' AS kind,'' AS field_id,'' AS failure_code` + replyInboxScope
+const updateNoticeSelect = `SELECT id,schema_id,entity_id,created_at,is_read,kind,field_id,failure_code FROM af_data_record_notices WHERE tenant_id=? AND subject_id=?`
 
 func (h *handler) recordNotifications(w http.ResponseWriter, r *http.Request) {
 	h.readReplyInbox(w, r, true)
@@ -34,9 +35,14 @@ func (h *handler) markRecordNotification(w http.ResponseWriter, r *http.Request)
 }
 
 func recordNotice(item inboxReply) c.RecordNotice {
+	delivery := &c.NoticeDelivery{Channel: "inbox", Status: "delivered", At: item.At}
+	if item.kind == mentionFailureKind {
+		delivery.Status = "failed"
+		delivery.Failure = noticeFailureMessage(item.failureCode)
+	}
 	return c.RecordNotice{ID: item.ID, Kind: item.kind, SchemaID: item.SchemaID,
 		RecordID: item.RecordID, At: item.At, Read: item.read,
-		Delivery: &c.NoticeDelivery{Channel: "inbox", Status: "delivered", At: item.At}}
+		Delivery: delivery}
 }
 
 const unreadRecordBudget = 50

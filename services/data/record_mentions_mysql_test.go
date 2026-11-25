@@ -41,6 +41,22 @@ func TestMySQLAccountMentionNotice(t *testing.T) {
 		}
 		return w
 	}
+	failed := mutationDecode[c.RecordNoticePage](t, call("GET", inbox, 200))
+	if len(failed.Data) != 1 || failed.Data[0].Kind != mentionFailureKind ||
+		failed.Data[0].Delivery == nil || failed.Data[0].Delivery.Status != "failed" ||
+		failed.Data[0].Delivery.Failure == "" || failed.Unread == nil || failed.Unread.Count != 0 {
+		t.Fatalf("unexpected sender delivery history: %+v", failed)
+	}
+	f.mu.Lock()
+	f.policy["instance.read"] = c.Decision{Allow: false}
+	f.mu.Unlock()
+	revoked := mutationDecode[c.RecordNoticePage](t, call("GET", inbox, 200))
+	if len(revoked.Data) != 0 {
+		t.Fatal("revoked sender can see delivery failure")
+	}
+	f.mu.Lock()
+	delete(f.policy, "instance.read")
+	f.mu.Unlock()
 	f.p.Subject = recipient
 	page := mutationDecode[c.RecordNoticePage](t, call("GET", inbox, 200))
 	if len(page.Data) != 1 || page.Data[0].Kind != accountMentionNoticeKind || page.Unread == nil || page.Unread.Count != 1 {

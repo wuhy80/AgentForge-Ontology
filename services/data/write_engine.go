@@ -335,6 +335,7 @@ func (h *handler) executeMutations(ctx context.Context, p c.Principal, current c
 		if attempt < 2 && ctx.Err() == nil && errors.As(err, &db) && (db.Number == 1213 || db.Number == 1205 || db.Number == 1062 && req.Operation == "upsert") {
 			continue
 		}
+		h.logNoticeFailure(ctx, p, err)
 		return c.BulkWriteResult{}, err
 	}
 	return c.BulkWriteResult{}, problem(409, "transaction_conflict", "并发操作冲突，请核对后重试")
@@ -783,6 +784,9 @@ func applyMutation(ctx context.Context, store mutationStore, current c.CurrentDe
 		}
 		if platformStore, ok := store.(*platformMutationStore); ok {
 			if err := platformStore.notifyMentions(ctx, old, item.Instance, input); err != nil {
+				if exists {
+					err = &noticeFailure{cause: err, schema: old.SchemaID, record: old.ID}
+				}
 				return mutationSavedItem{}, err
 			}
 		}
