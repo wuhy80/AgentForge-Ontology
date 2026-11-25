@@ -366,6 +366,7 @@ export interface QueryFieldInsertionResult { requestId: string; textHash: string
 export interface MetadataCapabilities {
   callableLifecycle?: 'pure-only'
   unpublishedDraftDelete?: boolean
+  disabledEnumDelete?: boolean
   callableLifecyclePreview?: boolean
   enumLifecycle?: boolean
   managedLinkLifecycle?: boolean
