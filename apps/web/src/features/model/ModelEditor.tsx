@@ -45,6 +45,7 @@ export interface ModelEditorProps {
   currentEntries?: DefinitionRecord[]
   initialRecord?: DefinitionRecord
   initialKind: Kind
+  openBasics?: boolean
   pending?: PendingPublication
   onClose: () => void
   onDeleted?: () => void
@@ -68,7 +69,7 @@ export function ModelEditor(props: ModelEditorProps) {
     : <LegacyModelEditor {...props} />
 }
 
-function LegacyModelEditor({ api, categoryId, categories, entries, currentEntries, initialRecord, initialKind, pending, onClose, onDeleted, onOrganizations, onSources, onSaved, onPending, onPublished, onNavigationGuard, active = true }: ModelEditorProps) {
+function LegacyModelEditor({ api, categoryId, categories, entries, currentEntries, initialRecord, initialKind, openBasics, pending, onClose, onDeleted, onOrganizations, onSources, onSaved, onPending, onPublished, onNavigationGuard, active = true }: ModelEditorProps) {
   const [record, setRecord] = useState(initialRecord)
   const [definition, setDefinition] = useState(() => initialRecord ? cloneDefinition(initialRecord.definition) : newDefinition(initialKind, categoryId))
   const [initialDefinition] = useState(() => initialRecord ? cloneDefinition(initialRecord.definition) : newDefinition(initialKind, categoryId))
@@ -96,7 +97,8 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const [confirmReload, setConfirmReload] = useState(false)
   const [publication, setPublication] = useState(pending?.publication)
   const [preview, setPreview] = useState<Preview>()
-  const [tab, setTab] = useState<EditorTab>(initialRecord?.definition.schema ? 'properties' : 'basics')
+  const [tab, setTab] = useState<EditorTab>(!openBasics && initialRecord?.definition.schema ? 'properties' : 'basics')
+  useEffect(() => { if (openBasics) setTab('basics') }, [openBasics])
   const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<{ source: string; items: SourceDiagnostic[] }>()
   const [diagnosticFocus, setDiagnosticFocus] = useState<SourceDiagnostic>()
   const diagnosticEpoch = useRef(0)

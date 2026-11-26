@@ -67,6 +67,7 @@ export interface OntologyGraphInput {
   focusId?: string
   rootIds?: string[]
   panorama?: boolean
+  focusedGroup?: string
 }
 const expectedKinds: Record<DefinitionReferenceKind, Kind> = { enum: 'enum', target: 'schema', function: 'function', source: 'schema', destination: 'schema' }
 const emptyGraph = (): OntologyGraphModel => ({ nodes: [], edges: [], omittedNodes: 0, omittedEdges: 0, unavailableRelations: false })
@@ -163,9 +164,16 @@ export function buildOntologyGraph(input: OntologyGraphInput): OntologyGraphMode
   const candidateEdges = edges.filter(edge => visibleScope.has(edge.source) && visibleScope.has(edge.target))
   const important = new Set([selectedId, focusId].filter((id): id is string => !!id))
   const priority = new Set(important)
-  candidateEdges.forEach(edge => { if (important.has(edge.source) || important.has(edge.target)) { priority.add(edge.source); priority.add(edge.target) } })
+  const focusedNodes = input.panorama && input.focusedGroup
+    ? new Set([...visibleScope].filter(id => current.get(id)?.definition.groupId === input.focusedGroup)) : new Set<string>()
+  candidateEdges.forEach(edge => {
+    if (important.has(edge.source) || important.has(edge.target) || focusedNodes.has(edge.source) || focusedNodes.has(edge.target)) {
+      priority.add(edge.source); priority.add(edge.target)
+    }
+  })
   const compare = (left: DefinitionRecord, right: DefinitionRecord) =>
     Number(important.has(right.definition.id)) - Number(important.has(left.definition.id))
+    || Number(focusedNodes.has(right.definition.id)) - Number(focusedNodes.has(left.definition.id))
     || Number(priority.has(right.definition.id)) - Number(priority.has(left.definition.id))
     || left.definition.name.localeCompare(right.definition.name, 'zh-CN') || left.definition.id.localeCompare(right.definition.id)
   const candidates = [...visibleScope].map(id => current.get(id)!).sort(compare)

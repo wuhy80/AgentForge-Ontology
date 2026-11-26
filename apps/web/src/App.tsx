@@ -608,7 +608,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
               </section>
               {(view === 'ontology' || view === 'panorama') && <Suspense fallback={<p className="muted">正在加载本体全景…</p>}><OntologyPage
                 panorama={view === 'panorama'} api={session.api} categoryId={categoryId} categories={categories} layoutScope={`${session.identity.tenantId}:${session.account.user.id}`}
-                onOpenDefinition={(id, targetCategory) => { selectCategory(targetCategory); navigate(`models/${encodeURIComponent(id)}`) }}
+                onOpenDefinition={(id, targetCategory, tab) => { selectCategory(targetCategory); navigate(`models/${encodeURIComponent(id)}${tab ? `?tab=${tab}` : ''}`) }}
                 onQuery={(id, targetCategory) => { selectCategory(targetCategory); query(id) }}
               /></Suspense>}
               <section hidden={view !== 'models'}>

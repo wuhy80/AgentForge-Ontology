@@ -22,7 +22,7 @@
   border-radius: 0;
   background: transparent;
 }
-.panorama-layout .ontology-space { order: 1; height: clamp(555px, 69vh, 780px); overflow: hidden; }
+.panorama-layout .ontology-space { order: 1; height: clamp(580px, 72vh, 800px); overflow: hidden; }
 .panorama-hud { position: absolute; z-index: 4; top: 12px; left: 12px; right: calc(var(--drawer-gap) + 12px); display: grid; gap: 4px; justify-items: start; pointer-events: none; }
 .panorama-filter-row, .panorama-tools, .panorama-drawer-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .panorama-filter-row, .panorama-tools {
@@ -95,9 +95,9 @@
 .panorama-layout [data-slab='L1'] { --slab-color: var(--schema); }
 .panorama-pillar { stroke: var(--muted); stroke-opacity: .26; stroke-dasharray: 3 5; vector-effect: non-scaling-stroke; }
 .panorama-slab-wall { fill: var(--slab-color); fill-opacity: .14; stroke: var(--slab-color); stroke-opacity: .28; vector-effect: non-scaling-stroke; }
-.panorama-layout .ontology-layer-plane { fill: var(--slab-color); fill-opacity: .055; stroke: var(--slab-color); stroke-opacity: .43; }
+.panorama-layout .ontology-layer-plane { fill: var(--slab-color); fill-opacity: .035; stroke: var(--slab-color); stroke-opacity: .43; }
 .panorama-layout .ontology-layer-plane[data-panorama-layer='M0'] { stroke-dasharray: 6 5; }
-.panorama-layout .panorama-zone { fill: currentColor; fill-opacity: .105; stroke: currentColor; stroke-opacity: .47; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.panorama-layout .panorama-zone { fill: currentColor; fill-opacity: .075; stroke: currentColor; stroke-opacity: .47; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
 .panorama-zone-name { position: absolute; transform: translate(-50%, -40%); max-width: 126px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; border-radius: 4px; padding: 0 5px; background: var(--canvas); font-size: 11px; font-weight: 650; }
 .panorama-layout .ontology-layer-caption[data-slab] { z-index: 1; display: grid; padding: 1px 5px; max-width: 19%; color: var(--slab-color); background: transparent; text-align: right; transform: translate(-100%, -52%); }
 .panorama-layout .ontology-layer-caption b { display: flex; justify-content: end; gap: 4px; font-size: 12px; }
@@ -155,3 +155,29 @@
   .panorama-layout .ontology-layer-caption[data-slab] { padding-right: 2px; transform: translate(-72%, -52%); }
   .panorama-layout [data-panorama-kind] > strong { max-width: 72px; }
 }
+
+/* Preserve visual anchors while de-emphasizing unrelated areas. */
+.panorama-layout .ontology-space-edge[data-emphasis=group] { opacity: .83; stroke-width: 1.65; }
+.panorama-layout :is(.panorama-zone, .panorama-zone-name)[data-muted=true] { opacity: .31; }
+.panorama-layout [data-panorama-kind][data-muted=true]:not(:focus-visible, :hover) { opacity: .36; }
+.panorama-layout [data-panorama-kind][data-muted=true]:not(:focus-visible, :hover) > strong { display: none; }
+.panorama-filter-row button[data-slab][aria-pressed=true] {
+  color: var(--slab-color);
+  border-color: color-mix(in srgb, var(--slab-color) 48%, var(--line));
+  border-left-color: var(--slab-color);
+  background: color-mix(in srgb, var(--slab-color) 12%, var(--surface));
+}
+.panorama-drop { color: var(--accent); pointer-events: none; }
+.panorama-drop :is(line, ellipse) { stroke: currentColor; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.panorama-drop line { stroke-dasharray: 4 4; opacity: .68; }
+.panorama-drop ellipse { fill: var(--accent-soft); }
+.panorama-drop circle, .panorama-flow { fill: var(--accent); }
+.panorama-flow { pointer-events: none; }
+.panorama-layout .ontology-graph-toolbar button:disabled { opacity: .48; cursor: default; }
+.panorama-layout .ontology-inspector .panorama-schema-heading { padding-block: 8px 4px; }
+.panorama-schema-heading .model-tag-list .button { padding: 4px 7px; min-height: 26px; font-size: 11px; }
+.panorama-schema-heading .model-tag-list .button:not(:last-child) { color: var(--accent); background: var(--accent-soft); }
+@media (max-width: 600px) {
+  .panorama-layout .ontology-space-label:not(:focus-visible, :hover) > span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .panorama-flow { display: none; } }

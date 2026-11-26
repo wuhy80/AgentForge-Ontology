@@ -6,21 +6,23 @@ import type { Organization } from '../../lib/types'
 import type { OntologyLayers } from './OntologyLayers'
 import './ontology-graph-3d.css'
 
-const initialCamera = { yaw: -.25, pitch: .38, zoom: 1, x: 0, y: 0 }
-const panoramaCamera = { yaw: .46, pitch: .42, zoom: .69, x: 0, y: 0 }
+const initialCamera = { yaw: -.25, pitch: .38, zoom: 1, x: 0, y: 0, target: { x: 0, y: 0, z: 0 } }
+const panoramaCamera = { ...initialCamera, yaw: .46, pitch: .36, zoom: .68 }
+const panoramaHeights: Record<string, number> = { L4: -216, L3: -108, L2: 0, L1: 108, pending: 162, M0: 216 }
 const schemaLayerSymbols: Record<string, string> = { L1: 'P', L2: 'C', L3: 'T' }
 const panoramaColors = ['--schema', '--link', '--enum', '--action', '--function', '--success']
 const depthByKind = { schema: 0, link: 1, enum: -1, action: 1, function: 2 }
 const kindNames = { schema: '对象模型', link: '关系', enum: '枚举', action: '动作', function: '函数' }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
-export function OntologyGraph3D({ flat = false, panorama = false, groups = [], layers, layerFocus, onLayerFocus, onSelect, showZones = true, showLabels = false, showAllEdges = false, ...input }: OntologyGraphProps & {
+export function OntologyGraph3D({ flat = false, panorama = false, groups = [], layers, layerFocus, onLayerFocus, onSelect, hiddenLayers, focusedGroup, showZones = true, showLabels = false, showAllEdges = false, ...input }: Omit<OntologyGraphProps, 'onFocus'> & {
+  hiddenLayers?: ReadonlySet<string>; focusedGroup?: string;
   showZones?: boolean; showLabels?: boolean; showAllEdges?: boolean;
   flat?: boolean; panorama?: boolean; groups?: Organization[]; layers?: OntologyLayers; layerFocus?: string; onLayerFocus?: (id?: string) => void
 }) {
   const { records, categories, categoryId, mode, selectedId, focusId, rootIds } = input
-  const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode, selectedId, focusId, rootIds, panorama }),
-    [records, categories, categoryId, mode, selectedId, focusId, rootIds, panorama])
+  const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode, selectedId, focusId, rootIds, panorama, focusedGroup }),
+    [records, categories, categoryId, mode, selectedId, focusId, rootIds, panorama, focusedGroup])
   const defaultCamera = panorama ? panoramaCamera : initialCamera
   const [camera, setCamera] = useState(defaultCamera)
   const [hoveredId, setHoveredId] = useState<string>()
@@ -49,12 +51,13 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
   const sinPitch = Math.sin(camera.pitch)
 
   function project(x: number, y: number, z: number) {
+    x -= camera.target.x; y -= camera.target.y; z -= camera.target.z
     const horizontal = x * cosYaw + z * sinYaw
     const rotatedDepth = z * cosYaw - x * sinYaw
     const vertical = y * cosPitch + rotatedDepth * sinPitch * (panorama ? 1 : -1)
     const depth = y * sinPitch * (panorama ? -1 : 1) + rotatedDepth * cosPitch
     const scale = panorama ? 1280 / Math.max(180, 1520 - depth) : 1250 / (1250 - depth * .55)
-    if (panorama) return { x: 532 + camera.x + horizontal * scale * camera.zoom, y: 300 + camera.y + vertical * scale * camera.zoom, depth, scale }
+    if (panorama) return { x: 532 + camera.x + horizontal * scale * camera.zoom, y: 288 + camera.y + vertical * scale * camera.zoom, depth, scale }
     return { x: 500 + camera.x + horizontal * scale * camera.zoom, y: 300 + camera.y + vertical * scale * camera.zoom, depth, scale }
   }
 
@@ -81,13 +84,15 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
     else buckets.set(id, [node])
   }
   const visibleLayers = layers ? [...layers.layers, { id: unassigned, name: '未分层' }]
-    .filter(layer => (buckets.has(layer.id) || panorama && layer.id !== unassigned) && (layerFocus === undefined || layerFocus === layer.id)) : []
+    .filter(layer => (buckets.has(layer.id) || panorama && layer.id !== unassigned) && (layerFocus === undefined || layerFocus === layer.id) && !hiddenLayers?.has(layer.id)) : []
   const occupied = new Set(model.nodes.map(node => node.record.definition.groupId))
   const namedGroups = groups.filter(group => occupied.has(group.id)).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   const groupSlots = [...namedGroups.map(group => group.id), ...[...occupied].filter(id => !namedGroups.some(group => group.id === id)).sort()]
   const groupWidth = 1050 / Math.max(1, groupSlots.length)
   const lanes = visibleLayers.map((layer, index) => {
     const members = buckets.get(layer.id) ?? []
+    // Keep node slots stable when selection changes the graph's budget priority.
+    if (panorama) members.sort((a, b) => a.record.definition.name.localeCompare(b.record.definition.name, 'zh-CN') || a.id.localeCompare(b.id))
     const divisions = new Map<string, typeof members>()
     if (panorama) for (const node of members) {
       const group = node.record.definition.groupId
@@ -105,7 +110,7 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
     })
     const columns = Math.max(1, Math.min(4, members.length))
     const rows = Math.max(1, Math.ceil(members.length / columns))
-    const y = visibleLayers.length === 1 ? 0 : -200 + index * (panorama ? 365 : 400) / (visibleLayers.length - 1)
+    const y = panorama ? panoramaHeights[layer.id] : visibleLayers.length === 1 ? 0 : -200 + index * 400 / (visibleLayers.length - 1)
     return { ...layer, members, columns, rows, y, zones }
   })
   const totalRows = lanes.reduce((sum, lane) => sum + lane.rows, 0)
@@ -125,9 +130,9 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
     const point = flat
       ? { x: (column + .5) * 1000 / lane.columns, y: lane.top + (row + .65) * (lane.bottom - lane.top) / lane.rows, depth: 0, scale: 1 }
       : project(x, lane.y, z)
-    return { ...node, point }
+    return { ...node, point, world: { x, y: lane.y, z } }
   })) : model.nodes.map(node => ({
-    ...node,
+    ...node, world: undefined,
     point: project((node.position.x - middleX) * 660 / unit, (node.position.y - middleY) * 660 / unit,
       depthByKind[node.record.definition.kind] * 84 + Math.sin(node.position.y / 170) * 62),
   }))).sort((a, b) => a.point.depth - b.point.depth)
@@ -135,23 +140,35 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
   const halfDepth = panorama ? 285 : 340
   const slabCorners = [[-halfWidth, -halfDepth], [halfWidth, -halfDepth], [halfWidth, halfDepth], [-halfWidth, halfDepth]]
   const coordinates = (points: { x: number; y: number }[]) => points.map(point => `${point.x},${point.y}`).join(' ')
-  const points = new Map(nodes.map(node => [node.id, node.point]))
+  const placed = new Map(nodes.map(node => [node.id, node]))
+  const inGroup = (id: string) => !!focusedGroup && placed.get(id)?.record.definition.groupId === focusedGroup
   const edges = model.edges.flatMap(edge => {
-    const from = points.get(edge.source)
-    const to = points.get(edge.target)
+    const from = placed.get(edge.source)?.point
+    const to = placed.get(edge.target)?.point
     if (!from || !to) return []
     const loop = edge.source === edge.target
     const offset = loop ? -70 - Math.abs(edge.offset) * .4 : edge.offset * .65 - (panorama ? 12 : 0)
     const x = (from.x + to.x) / 2
     const y = (from.y + to.y) / 2 + offset
     const related = (id?: string) => !!id && (edge.record.definition.id === id || edge.source === id || edge.target === id)
-    const active = related(selectedId) || (panorama && related(hoveredId))
+    const selected = related(selectedId)
+    const active = selected || (panorama && related(hoveredId))
+    const inFocus = inGroup(edge.source) || inGroup(edge.target)
     const path = loop
       ? `M ${from.x - 22} ${from.y} Q ${x - 95} ${y}, ${x} ${y} Q ${x + 95} ${y}, ${to.x + 22} ${to.y}`
       : `M ${from.x} ${from.y} Q ${(from.x + x) / 2} ${(from.y + y) / 2 + offset / 2}, ${x} ${y} Q ${(to.x + x) / 2} ${(to.y + y) / 2 + offset / 2}, ${to.x} ${to.y}`
-    return [{ edge, x, y, active, path, crossLayer: !!layers && layerOf(edge.source) !== layerOf(edge.target) }]
+    return [{ edge, x: x + (panorama && !loop && Math.abs(from.x - to.x) < 50 ? 25 : 0), y, selected, active, inFocus, path, crossLayer: !!layers && layerOf(edge.source) !== layerOf(edge.target) }]
   })
-  const neighbors = new Set(edges.filter(item => item.active).flatMap(({ edge }) => [edge.source, edge.target]))
+  const neighbors = new Set(edges.filter(item => item.active || item.inFocus).flatMap(({ edge }) => [edge.source, edge.target]))
+  const movingEdges = panorama ? edges.filter(item => item.selected).slice(0, 16) : []
+  const anchor = placed.get(hoveredId ?? selectedId ?? '')
+  const landing = panorama && anchor?.world && anchor.world.y !== panoramaHeights.L1 && !hiddenLayers?.has('L1')
+    ? project(anchor.world.x, panoramaHeights.L1, anchor.world.z) : undefined
+  function focusNode(id: string) {
+    const target = placed.get(id)?.world
+    if (!target) return
+    setCamera(current => ({ ...current, target, x: -32, y: 12, zoom: Math.max(1.23, current.zoom) }))
+  }
   function orbit(yaw: number, pitch = 0) {
     setCamera(current => ({ ...current, yaw: current.yaw + yaw, pitch: clamp(current.pitch + pitch, -1.2, 1.2) }))
   }
@@ -173,7 +190,8 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
         <button type="button" onClick={() => setCamera(defaultCamera)}>复位</button>
         {panorama && <><button type="button" onClick={() => setCamera(panoramaCamera)}>立体全景</button>
           <button type="button" onClick={() => setCamera({ ...defaultCamera, yaw: 0, pitch: .06 })}>正视</button>
-          <button type="button" onClick={() => setCamera({ ...defaultCamera, yaw: 0, pitch: 1.2 })}>俯视</button></>}
+          <button type="button" onClick={() => setCamera({ ...defaultCamera, yaw: 0, pitch: 1.2 })}>俯视</button>
+          <button type="button" disabled={!selectedId || !placed.has(selectedId)} onClick={() => selectedId && focusNode(selectedId)}>聚焦节点</button></>}
       </div>
     </div>}
     {(nodes.length > 0 || panorama) ? <div ref={surface} className={`ontology-graph-surface ontology-space${flat ? ' ontology-space-flat' : ''}`}
@@ -187,7 +205,7 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
       }}
       onDoubleClick={event => {
         const node = (event.target as Element).closest<HTMLButtonElement>('[data-panorama-node]')
-        if (panorama && node?.dataset.panoramaNode) input.onFocus(node.dataset.panoramaNode)
+        if (panorama && node?.dataset.panoramaNode) focusNode(node.dataset.panoramaNode)
       }}
       onPointerDown={event => {
         if (flat || (event.button !== 0 && (!panorama || event.button !== 2)) || !event.isPrimary || (event.target as Element).closest('button')) return
@@ -226,20 +244,28 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
             {showZones && plane.zones.map(zone => {
               const left = zone.left + 7, right = zone.left + zone.width - 7
               const pad = [project(left, plane.y, -255), project(right, plane.y, -255), project(right, plane.y, 255), project(left, plane.y, 255)]
-              return <polygon key={zone.id} className="panorama-zone" style={{ color: `var(${zone.color})` }} points={coordinates(pad)} />
+              return <polygon key={zone.id} className="panorama-zone" data-muted={!!focusedGroup && zone.id !== focusedGroup} style={{ color: `var(${zone.color})` }} points={coordinates(pad)} />
             })}
           </g>
         })}
-        {edges.map(({ edge, path, active, crossLayer }) => <path key={edge.id} d={path} className="ontology-space-edge" data-active={active} data-cross-layer={crossLayer}
-          data-connection={panorama ? edge.kind : undefined} data-emphasis={panorama && !active ? (showAllEdges ? 'all' : selectedId || hoveredId ? 'muted' : undefined) : undefined}
+        {landing && anchor && <g className="panorama-drop" data-layer={layerOf(anchor.id)}>
+          <line x1={anchor.point.x} y1={anchor.point.y} x2={landing.x} y2={landing.y} />
+          <ellipse cx={landing.x} cy={landing.y} rx={11} ry={5} />
+          <circle cx={landing.x} cy={landing.y} r={2.6} />
+        </g>}
+        {edges.map(({ edge, path, active, inFocus, crossLayer }) => <path key={edge.id} d={path} className="ontology-space-edge" data-active={active} data-cross-layer={crossLayer}
+          data-connection={panorama ? edge.kind : undefined} data-emphasis={panorama && !active ? (inFocus ? 'group' : showAllEdges ? 'all' : focusedGroup || selectedId || hoveredId ? 'muted' : undefined) : undefined}
           strokeDasharray={edge.kind === 'dependency' ? '5 4' : undefined}
           markerMid={!panorama || active ? `url(#${markerId})` : undefined} />)}
+        {movingEdges.map(({ edge, path }) => <circle key={edge.id} r={3.4} className="panorama-flow">
+          <animateMotion path={path} dur="2.1s" repeatCount="indefinite" />
+        </circle>)}
       </svg>
       {panorama && showZones && planes.flatMap(plane => plane.zones.map(zone => {
         const name = groups.find(group => group.id === zone.id)?.name
         if (!name) return null
         const label = project(zone.left + zone.width / 2, plane.y, 248)
-        return <span key={`${plane.id}:${zone.id}`} className="panorama-zone-name" style={{ left: `${label.x / 10}%`, top: `${label.y / 6}%`, color: `var(${zone.color})` }}>{name}</span>
+        return <span key={`${plane.id}:${zone.id}`} className="panorama-zone-name" data-muted={!!focusedGroup && zone.id !== focusedGroup} style={{ left: `${label.x / 10}%`, top: `${label.y / 6}%`, color: `var(${zone.color})` }}>{name}</span>
       }))}
       {planes.map(plane => {
         const label = flat ? { x: 16, y: plane.top } : panorama ? project(-570, plane.y, 0) : project(-380, plane.y, -340)
@@ -251,7 +277,7 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
       </button>)}
       {nodes.map(({ id, record: { definition }, point }) => <button type="button" key={id} className={`ontology-space-node kind-${definition.kind}`}
         style={{ left: `${point.x / 10}%`, top: `${point.y / 6}%`, transform: `translate(-50%, -50%) scale(${panorama ? Math.min(1.17, point.scale) : point.scale})` }}
-        data-panorama-kind={panorama ? definition.kind : undefined} data-panorama-node={panorama ? id : undefined} data-layer={layers ? layerOf(id) : undefined} data-emphasis={panorama && (id === selectedId || id === hoveredId || neighbors.has(id) || showLabels || nodes.length <= 12) ? 'label' : undefined}
+        data-panorama-kind={panorama ? definition.kind : undefined} data-panorama-node={panorama ? id : undefined} data-layer={layers ? layerOf(id) : undefined} data-muted={panorama && !!focusedGroup && !inGroup(id) && !neighbors.has(id) && id !== selectedId && id !== hoveredId} data-emphasis={panorama && (id === selectedId || id === hoveredId || neighbors.has(id) || showLabels || nodes.length <= 12) ? 'label' : undefined}
         onPointerEnter={panorama ? () => setHoveredId(id) : undefined} onPointerLeave={panorama ? () => setHoveredId(undefined) : undefined}
         aria-pressed={input.selectedId === id} aria-label={`${kindNames[definition.kind]}：${definition.name}`} title={definition.name} onClick={() => onSelect(id)}>
         <span aria-hidden={panorama || undefined}>{panorama

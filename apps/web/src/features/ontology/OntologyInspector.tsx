@@ -10,6 +10,8 @@ type Props = {
   groups: Organization[]
   categoryId: string
   onSelect: (id: string) => void
+  filterTag?: (tag: string) => void
+  onEditClassification?: (id: string) => void
   onOpenDefinition: (id: string) => void
   onQuery: (schemaId: string) => void
 }
@@ -19,7 +21,7 @@ const kindIcons = { schema: Box, enum: List, link: GitBranch, action: Workflow, 
 const languageNames = { python: 'Python', javascript: 'JavaScript', go: 'Go' }
 const effectNames = { none: '无副作用计算', dataWrite: '数据写入声明', externalWrite: '外部写入声明' }
 
-export function OntologyInspector({ record, records, categories, groups, categoryId, onSelect, onOpenDefinition, onQuery }: Props) {
+export function OntologyInspector({ record, records, categories, groups, categoryId, onSelect, onOpenDefinition, onQuery, filterTag, onEditClassification }: Props) {
   const tenantId = categories.find((category) => category.id === categoryId)?.tenantId
   const catalog = [...new Map(records.filter((item) => tenantId && item.status === 'active' && item.definition.tenantId === tenantId).map((item) => [item.definition.id, item])).values()]
   // Resolve the selection against the current authorized catalog. An old selected
@@ -69,6 +71,11 @@ export function OntologyInspector({ record, records, categories, groups, categor
 
   return <article className="ontology-inspector" aria-label="本体资源详情">
     <header className="ontology-inspector-heading"><span className={`ontology-inspector-kind ontology-inspector-kind-${definition.kind}`}><Icon size={18} />{kindNames[definition.kind]}</span><span className="ontology-inspector-current">已生效</span><h2>{definition.name}</h2><p>{definition.description || '尚未填写业务说明。'}</p></header>
+    {filterTag && definition.schema && <section className="ontology-inspector-section panorama-schema-heading">
+      <h3>Schema 标签 {definition.schema.panoramaLayer && <span>{definition.schema.panoramaLayer}</span>}</h3>
+      <div className="model-tag-list">{definition.schema.tags?.map(tag => <button type="button" className="button subtle" key={tag} onClick={() => filterTag(tag)}>{tag}</button>)}
+        <button type="button" className="button subtle" onClick={() => onEditClassification?.(definition.id)}>编辑标签与层位<ArrowUpRight size={13} /></button></div>
+    </section>}
     <div className="ontology-inspector-actions"><button type="button" className="button" onClick={() => onOpenDefinition(definition.id)}>查看定义<ArrowUpRight size={14} /></button>{definition.kind === 'schema' && <button type="button" className="button subtle" onClick={() => onQuery(definition.id)}><Search size={14} />查看数据</button>}</div>
     <dl className="ontology-inspector-facts ontology-inspector-location"><div><dt>分类</dt><dd>{categoryName(definition.categoryId)}</dd></div><div><dt>分组</dt><dd>{groupName}</dd></div></dl>
 

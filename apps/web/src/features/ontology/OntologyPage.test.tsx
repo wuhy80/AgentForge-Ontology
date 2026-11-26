@@ -110,3 +110,46 @@ describe('本体全景浏览', () => {
     expect(api.listDefinitions).not.toHaveBeenCalled()
   })
 })
+
+it('在分层全景保持独立层位、跨分区邻接与检视入口', async () => {
+  const { api, props } = fixture()
+  const classified: DefinitionRecord[] = entries.map(record => {
+    const definition = record.definition
+    if (!definition.schema) return record
+    const panoramaLayer = definition.id === 'notes' ? 'L3' : 'L1'
+    return { ...record, definition: { ...definition, schema: { ...definition.schema, panoramaLayer } } }
+  })
+  classified.push({ ...classified[1], definition: { ...classified[1].definition, id: 'unrelated', name: '其他标签' } })
+  vi.mocked(api.listDefinitions).mockResolvedValue(classified)
+  const { container } = render(<OntologyPage {...props} panorama />)
+  const inspector = await screen.findByRole('article', { name: '本体资源详情' })
+  expect(within(inspector).getByRole('heading', { name: '笔记' })).toBeTruthy()
+  const plane = (id: string) => container.querySelector(`polygon[data-panorama-layer="${id}"]`)
+  const l1Points = plane('L1')?.getAttribute('points')
+  fireEvent.click(screen.getByRole('button', { name: 'L3 · 事件与单据' }))
+  fireEvent.click(screen.getByRole('button', { name: 'M0 · 预留' }))
+  expect(plane('L3')).toBeNull()
+  expect(plane('M0')).toBeNull()
+  expect(plane('L1')?.getAttribute('points')).toBe(l1Points)
+  fireEvent.click(screen.getByRole('button', { name: 'L3 · 事件与单据' }))
+  expect(plane('M0')).toBeNull()
+  expect(container.querySelector('.panorama-drop')).toBeTruthy()
+
+  const neighbor = screen.getByRole('button', { name: '对象模型：标签' })
+  const previousPosition = neighbor.style.left
+  fireEvent.click(within(screen.getByRole('group', { name: '聚焦分区' })).getByRole('button', { name: '内容' }))
+  expect(neighbor.getAttribute('data-muted')).toBe('false')
+  expect(neighbor.style.left).toBe(previousPosition)
+  expect(screen.getByRole('button', { name: '对象模型：其他标签' }).getAttribute('data-muted')).toBe('true')
+
+  fireEvent.click(screen.getByRole('button', { name: '聚焦节点' }))
+  const note = screen.getByRole('button', { name: '对象模型：笔记' })
+  expect(note.style.left).toBe('50%')
+  expect(note.style.top).toBe('50%')
+  expect(neighbor.style.left).not.toBe(previousPosition)
+  fireEvent.click(screen.getByRole('button', { name: '复位' }))
+  expect(neighbor.style.left).toBe(previousPosition)
+
+  fireEvent.click(within(inspector).getByRole('button', { name: '编辑标签与层位' }))
+  expect(props.onOpenDefinition).toHaveBeenCalledWith('notes', 'knowledge', 'basics')
+})
