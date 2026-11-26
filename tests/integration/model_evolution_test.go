@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,23 @@ import (
 	metadata "github.com/wuhy80/AgentForge-Ontology/services/metadata"
 	"github.com/wuhy80/AgentForge-Ontology/services/metadata/identity"
 )
+
+type lifecycleFixtureRunner struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r lifecycleFixtureRunner) Ready(context.Context) (string, error) { return "fixture-image", nil }
+
+func (r lifecycleFixtureRunner) Run(ctx context.Context, _ *c.ScriptRuntime, _ map[string]json.RawMessage, _ string) (map[string]json.RawMessage, error) {
+	close(r.started)
+	select {
+	case <-r.release:
+		return map[string]json.RawMessage{}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 // Public TLS/Cookie/CSRF requests exercise the definition coordinator and actual
 // typed MySQL tables; direct SQL is confined to fixture setup and cleanup.
@@ -44,16 +62,12 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	}
 	me, de := open(mdsn), open(ddsn)
 	var execStore *execution.SQLStore
-	executionURL := ""
 	if dsn := os.Getenv("ONTOLOGY_TEST_EXECUTION_DSN"); dsn != "" {
 		engine := open(dsn)
 		if err := storage.Migrate(ctx, engine.DB(), "execution", execution.Migrations); err != nil {
 			t.Fatal("explicit execution fixture migration")
 		}
 		execStore = &execution.SQLStore{DB: engine.DB()}
-		server := httptest.NewServer(execution.NewHandler(execution.Config{Store: execStore, ServiceToken: serviceToken}))
-		t.Cleanup(server.Close)
-		executionURL = server.URL
 	}
 	if err := storage.Migrate(ctx, me.DB(), "metadata", append(append([]storage.Migration{}, metadata.Migrations...), identity.Migrations...)); err != nil {
 		t.Fatal("explicit metadata fixture migration")
@@ -120,13 +134,25 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		}
 		platform.WriteJSON(w, 200, result)
 	}))
-	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, CallablePolicyReferences: accounts, DataURL: dataServer.URL, ExecutionURL: executionURL, ServiceToken: serviceToken, HTTPClient: dataServer.Client()}))
 	roots := x509.NewCertPool()
 	roots.AddCert(metaServer.Certificate())
 	roots.AddCert(dataServer.Certificate())
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 	t.Cleanup(transport.CloseIdleConnections)
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
+	executionURL := ""
+	runner := lifecycleFixtureRunner{started: make(chan struct{}), release: make(chan struct{})}
+	if execStore != nil {
+		app := execution.NewHandler(execution.Config{
+			Store: execStore, ServiceToken: serviceToken, Runner: runner, Authorizer: authorizer, SessionChecker: checker,
+			Metadata: &execution.RemoteMetadata{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()},
+		})
+		server := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, false, checker, app))
+		t.Cleanup(server.Close)
+		roots.AddCert(server.Certificate())
+		executionURL = server.URL
+	}
+	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, CallablePolicyReferences: accounts, DataURL: dataServer.URL, ExecutionURL: executionURL, ServiceToken: serviceToken, HTTPClient: client}))
 	login := func(id, username string) *publicSecurityHTTP {
 		browser := &publicSecurityHTTP{t: t, client: client}
 		var session c.Session
@@ -184,6 +210,71 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		return draft
 	}
 	if execStore != nil {
+		func() {
+			release := sync.OnceFunc(func() { close(runner.release) })
+			defer release()
+			var session c.Session
+			admin.request("GET", metaServer.URL+"/metadata/auth/session", nil, nil, 200, &session)
+			policyURL := metaServer.URL + "/metadata/admin/policy"
+			var policy c.PolicyRecord
+			admin.request("GET", policyURL, nil, nil, 200, &policy)
+			policy.Current.Rules = append(policy.Current.Rules, c.PermissionRule{ID: c.NewID(), RoleID: session.User.RoleIDs[0], Effect: "allow", Operation: "function.invoke", ResourceID: "*"})
+			headers := admin.request("PUT", policyURL, policy.Current, map[string]string{"If-Match": `"` + policy.ETag + `"`}, 200, nil)
+			admin.request("POST", policyURL+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
+			admin = login(tenant, "admin")
+			item := publish(c.Definition{Kind: c.KindFunction, Name: "Running deletion function", Function: &c.Callable{
+				SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 30, Source: "def main(inputs):\n    return {}\n"},
+			}})
+			path := definitionURL(item.Definition.ID)
+			match := map[string]string{"If-Match": `"` + item.ETag + `"`}
+			callContext, cancelCall := context.WithCancel(ctx)
+			defer cancelCall()
+			req, err := http.NewRequestWithContext(callContext, "POST", executionURL+"/execution/invocations", strings.NewReader(`{"definitionId":"`+item.Definition.ID+`","input":{}}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = "security.test:30011"
+			req.Header.Set("Origin", publicSecurityOrigin)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-CSRF-Token", admin.csrf)
+			req.Header.Set("Idempotency-Key", c.NewID())
+			for _, cookie := range admin.cookies {
+				req.AddCookie(cookie)
+			}
+			done := make(chan int, 1)
+			go func() {
+				response, err := client.Do(req)
+				if err != nil {
+					done <- 0
+					return
+				}
+				response.Body.Close()
+				done <- response.StatusCode
+			}()
+			select {
+			case <-runner.started:
+			case status := <-done:
+				t.Fatalf("public invocation ended before runner entry: HTTP %d", status)
+			case <-time.After(10 * time.Second):
+				t.Fatal("public invocation did not reach runner")
+			}
+			admin.request("POST", path+"/disable", nil, match, 200, nil)
+			var blocker c.Error
+			admin.request("DELETE", path, nil, match, 409, &blocker)
+			if blocker.Code != "definition_execution_in_use" {
+				t.Fatal("running invocation did not block deletion")
+			}
+			release()
+			select {
+			case status := <-done:
+				if status != 403 && status != 404 && status != 409 {
+					t.Fatalf("disabled definition did not block result delivery: HTTP %d", status)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("running invocation did not finish")
+			}
+			admin.request("DELETE", path, nil, match, 204, nil)
+		}()
 		function := publish(c.Definition{Kind: c.KindFunction, Name: "Deletion function", Function: &c.Callable{SideEffects: "none"}})
 		path := definitionURL(function.Definition.ID)
 		match := map[string]string{"If-Match": `"` + function.ETag + `"`}
