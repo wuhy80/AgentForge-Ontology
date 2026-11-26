@@ -22,6 +22,7 @@ export function LayeredPanorama({ records, categories, groups, categoryId, layou
   onSelect: (id: string) => void
   inspector: ReactNode
 }) {
+  const [drawer, setDrawer] = useState<'catalog' | 'detail' | 'closed'>('catalog')
   const [tag, setTag] = useState('')
   const [group, setGroup] = useState('')
   const [search, setSearch] = useState('')
@@ -51,22 +52,46 @@ export function LayeredPanorama({ records, categories, groups, categoryId, layou
       (source.id !== selectedId && target.id !== selectedId)) return []
     return [{ id: source.id === selectedId ? target.id : source.id, name: source.id === selectedId ? target.name : source.name, label: reference.label }]
   }))
+  const directory = local.filter(({ definition }) => ['schema', 'function', 'action'].includes(definition.kind) &&
+    (!rootIds || rootIds.includes(definition.id)) && (!layerFocus || configuration.assignments[definition.id] === layerFocus))
+  function inspect(id: string) {
+    setDrawer('detail')
+    setFocusId(undefined)
+    onSelect(id)
+  }
   return <div className="ontology-panorama">
-    <div className="ontology-graph-toolbar panorama-filters">
-      <label>分区 <select className="field" value={group} onChange={event => setGroup(event.target.value)}><option value="">全部分区</option>{groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-      <label>Schema 标签 <select className="field" value={tag} onChange={event => setTag(event.target.value)}><option value="">全部标签</option>{tags.map(item => <option key={item}>{item}</option>)}</select></label>
-      <label>名称 <input type="search" className="field" value={search} placeholder="搜索节点" onChange={event => setSearch(event.target.value)} /></label>
-      {selectedId && <button className="button subtle" type="button" aria-pressed={focusId === selectedId} onClick={() => setFocusId(focusId === selectedId ? undefined : selectedId)}>聚焦关联</button>}
-    </div>
-    <div className="panorama-layout">
+    <div className="panorama-layout" data-drawer={drawer}>
+      <div className="panorama-hud">
+        <div className="panorama-filter-row"><strong>分区</strong><button type="button" aria-pressed={!group} onClick={() => setGroup('')}>全部</button>
+          {groups.map(item => <button type="button" key={item.id} aria-pressed={group === item.id} onClick={() => setGroup(group === item.id ? '' : item.id)}>{item.name}</button>)}</div>
+        <div className="panorama-filter-row"><strong>图层</strong>{configuration.layers.map(layer => <button type="button" key={layer.id} data-slab={layer.id} aria-pressed={layerFocus === layer.id}
+          onClick={() => setLayerFocus(layerFocus === layer.id ? undefined : layer.id)}>{layer.name}</button>)}</div>
+        <div className="panorama-filter-row"><label>标签 <select aria-label="Schema 标签" value={tag} onChange={event => setTag(event.target.value)}><option value="">全部标签</option>{tags.map(item => <option key={item}>{item}</option>)}</select></label>
+          {selectedId && <button type="button" aria-pressed={focusId === selectedId} onClick={() => setFocusId(focusId === selectedId ? undefined : selectedId)}>聚焦关联</button>}
+        </div>
+      </div>
       <OntologyGraph3D panorama groups={groups} records={records} categories={categories} categoryId={categoryId} layoutKey={layoutKey}
         mode="dependencies" layers={configuration} layerFocus={layerFocus} onLayerFocus={setLayerFocus} rootIds={rootIds}
-        selectedId={selectedId} focusId={focusId} onSelect={id => { onSelect(id); setFocusId(undefined) }} onFocus={setFocusId} />
-      <aside className="ontology-canvas-panel" aria-label="分层节点详情">
-        {inspector}
+        selectedId={selectedId} focusId={focusId} onSelect={inspect} onFocus={setFocusId} />
+      {drawer === 'closed' && <button type="button" className="button panorama-open" onClick={() => setDrawer('catalog')}>展开目录</button>}
+      {drawer !== 'closed' && <aside className="ontology-canvas-panel" aria-label="分层节点详情">
+        <div className="panorama-drawer-tabs"><button type="button" aria-pressed={drawer === 'catalog'} onClick={() => setDrawer('catalog')}>节点目录 · {directory.length}</button>
+          <button type="button" aria-pressed={drawer === 'detail'} disabled={!selected} onClick={() => setDrawer('detail')}>节点详情</button>
+          <button type="button" onClick={() => setDrawer('closed')}>收起</button></div>
+        {drawer === 'catalog' ? <div className="panorama-index">
+          <input className="field" type="search" value={search} aria-label="搜索节点" placeholder="搜索节点名称" onChange={event => setSearch(event.target.value)} />
+          {configuration.layers.map(layer => {
+            const members = directory.filter(item => configuration.assignments[item.definition.id] === layer.id)
+            if (!members.length) return null
+            return <section key={layer.id}><h3>{layer.name}<small>{members.length}</small></h3>{members.map(({ definition }) =>
+              <button type="button" key={definition.id} onClick={() => inspect(definition.id)}>{definition.name}<small>{definition.kind === 'schema' ? definition.schema?.tags?.join(' · ') : definition.kind}</small></button>)}</section>
+          })}
+          {!directory.length && <p className="muted">当前筛选下没有节点。</p>}
+        </div> : <>{inspector}
         {selected?.definition.schema?.tags?.length ? <div className="panorama-evidence"><h3>Schema 标签</h3><div className="model-tag-list">{selected.definition.schema.tags.map(name => <button type="button" className="button subtle" key={name} onClick={() => setTag(name)}>{name}</button>)}</div></div> : null}
         {!!evidence.length && <div className="panorama-evidence"><h3>执行关联</h3>{evidence.map(item => <button type="button" className="button subtle" key={JSON.stringify(item)} onClick={() => { onSelect(item.id); setFocusId(undefined) }}>{item.label} · {item.name}</button>)}</div>}
-      </aside>
+        </>}
+      </aside>}
     </div>
   </div>
 }

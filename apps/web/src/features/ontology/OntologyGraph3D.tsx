@@ -145,7 +145,7 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
 
   const sceneLabel = flat ? '二维分层画布' : input.mode === 'relations' ? '本体对象关系三维画布' : '本体定义依赖三维画布'
   return <section className="ontology-graph" aria-label={sceneLabel}>
-    {layers && <div className="ontology-graph-toolbar"><label>聚焦层 <select className={panorama ? "field" : undefined} value={layerFocus === undefined ? 'all' : `layer:${layerFocus}`} onChange={event => {
+    {layers && !panorama && <div className="ontology-graph-toolbar"><label>聚焦层 <select className={panorama ? "field" : undefined} value={layerFocus === undefined ? 'all' : `layer:${layerFocus}`} onChange={event => {
       onLayerFocus?.(event.target.value === 'all' ? undefined : event.target.value.slice(6))
     }}><option value="all">全部层</option>{[...layers.layers, { id: '', name: '未分层' }].map(layer => <option key={layer.id} value={`layer:${layer.id}`}>{layer.name}</option>)}</select></label></div>}
     {!flat && <div className="ontology-graph-toolbar"><span>{panorama ? '拖动旋转 · Shift 拖动平移 · 聚焦后滚轮缩放' : '拖动画布旋转'}</span>

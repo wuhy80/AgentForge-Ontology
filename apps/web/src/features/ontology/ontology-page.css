@@ -151,3 +151,36 @@
 .panorama-filters label:has(input) { display: flex; align-items: center; }
 .ontology-panorama .ontology-graph-toolbar > label { display: flex; align-items: center; gap: 8px; }
 .ontology-panorama [data-panorama-kind] > strong { font-size: 11px; }
+/* The panorama uses one stage with scoped controls, a camera dock and a collapsible directory. */
+.panorama-layout { --drawer-width: clamp(245px, 24%, 318px); display: block; position: relative; isolation: isolate; padding-right: var(--drawer-width); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--canvas); }
+.panorama-layout[data-drawer='closed'] { padding-right: 0; }
+.panorama-layout > .ontology-graph { display: flex; flex-direction: column; border: 0; border-radius: 0; }
+.panorama-layout .ontology-graph-surface { order: 1; height: clamp(470px, 66vh, 780px); background-image: radial-gradient(var(--grid) .75px, transparent .9px); background-size: 18px 18px; }
+.panorama-layout .ontology-graph-toolbar { order: 2; border-top: 1px solid var(--line); }
+.panorama-layout .ontology-graph-footer { order: 3; }
+.panorama-layout > aside { position: absolute; top: 0; right: 0; bottom: 0; width: var(--drawer-width); overflow: auto; border: 0; border-left: 1px solid var(--line); border-radius: 0; background: var(--surface); }
+.panorama-hud { display: grid; gap: 5px; padding: 9px 12px; background: var(--surface-subtle); border-bottom: 1px solid var(--line); }
+.panorama-filter-row,.panorama-drawer-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.panorama-filter-row strong,.panorama-filter-row label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.panorama-filter-row strong { margin-right: 4px; }
+.panorama-filter-row button,.panorama-filter-row select,.panorama-drawer-tabs button,.panorama-index button { color: var(--ink); cursor: pointer; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; font: inherit; font-size: 12px; }
+.panorama-filter-row button[data-slab] { border-left: 3px solid var(--slab-color); }
+.panorama-filter-row button[aria-pressed=true],.panorama-drawer-tabs button[aria-pressed=true] { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+.panorama-drawer-tabs { position: sticky; top: 0; z-index: 2; padding: 10px; border-bottom: 1px solid var(--line); background: var(--nav); }
+.panorama-drawer-tabs button:last-child { margin-left: auto; }
+.panorama-drawer-tabs button:disabled { opacity: .5; }
+.panorama-index { padding: 12px; }
+.panorama-index section { margin-top: 12px; }
+.panorama-index h3,.panorama-index button { display: flex; justify-content: space-between; align-items: center; gap: 5px; }
+.panorama-index h3 { margin: 8px 0; font-size: 12px; color: var(--muted); }
+.panorama-index button { width: 100%; padding: 7px 8px; margin-bottom: 3px; text-align: left; }
+.panorama-index button:hover { background: var(--primary-soft); }
+.panorama-index small { color: var(--muted); }
+.panorama-open { position: absolute; right: 10px; bottom: 75px; }
+@media(max-width: 850px) {
+  .panorama-layout { padding-right: 0; }
+  .panorama-layout > aside { position: relative; width: 100%; max-height: 46vh; border-left: 0; border-top: 1px solid var(--line); }
+  .panorama-filter-row { flex-wrap: nowrap; overflow-x: auto; }
+  .panorama-filter-row > * { flex-shrink: 0; }
+  .panorama-layout .ontology-graph-surface { height: 405px; }
+}
