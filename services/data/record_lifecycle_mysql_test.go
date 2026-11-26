@@ -1,12 +1,13 @@
 package data
 
 import (
-	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
+	"bytes"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
+	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 )
 
 const (
@@ -72,15 +73,35 @@ func TestMySQLRecordLifecycleTransitions(t *testing.T) {
 	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions",
 		lifecycleTransitionBody(lifecycleSubmitMove, strings.Repeat("注", c.MaxLifecycleNoteRunes+1)), "", 422)
 
-	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, "请审核"), "", 204)
-	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, "请审核"), "", 409)
+	body := mustMutationJSON(t, lifecycleTransitionBody(lifecycleSubmitMove, "review"))
+	pathToTransition := "/data/schemas/" + row.SchemaID + "/instances/" + row.ID + "/lifecycle/transitions"
+	start := make(chan struct{})
+	results := make(chan int, 2)
+	for range 2 {
+		go func() {
+			req := httptest.NewRequest("POST", pathToTransition, bytes.NewReader(body))
+			req = req.WithContext(platform.WithPrincipal(req.Context(), f.p))
+			w := httptest.NewRecorder()
+			<-start
+			f.handler.ServeHTTP(w, req)
+			results <- w.Code
+		}()
+	}
+	close(start)
+	statuses := map[int]int{}
+	for range 2 {
+		statuses[<-results]++
+	}
+	if statuses[204] != 1 || statuses[409] != 1 {
+		t.Fatalf("concurrent transition results: %v", statuses)
+	}
 
 	view = f.lifecycle(row.ID, 200)
 	if view.StageID != lifecycleReviewStage || !view.Persisted || len(view.History) != 1 {
 		t.Fatalf("transition did not commit one run: %+v", view)
 	}
 	run := view.History[0]
-	if run.TransitionID != lifecycleSubmitMove || run.Name != "提交审核" || run.Note != "请审核" ||
+	if run.TransitionID != lifecycleSubmitMove || run.Name != "提交审核" || run.Note != "review" ||
 		run.From != lifecycleDraftStage || run.To != lifecycleReviewStage || run.At == "" {
 		t.Fatalf("history run does not describe the transition: %+v", run)
 	}
