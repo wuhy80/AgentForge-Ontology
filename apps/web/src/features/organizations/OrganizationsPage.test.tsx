@@ -24,7 +24,8 @@ describe('classification and definition-group management', () => {
     expect(screen.getByRole('button', { name: /生产管理/ }).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByRole('button', { name: /采购管理/ }))
     expect(onSelectCategory).toHaveBeenCalledWith(categories[1].id)
-    expect(screen.queryByRole('button', { name: /删除/ })).toBeNull()
+    expect(screen.getByRole('button', { name: '删除当前分类' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '确认删除' })).toBeNull()
     expect(screen.getByRole('button', { name: '重命名当前分类' })).toBeTruthy()
   })
 

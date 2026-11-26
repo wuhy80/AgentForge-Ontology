@@ -19,7 +19,7 @@
 .organizations-current-label { font-size: 11px; white-space: nowrap; color: var(--muted); }
 .organizations-category-list button > svg { flex-shrink: 0; color: var(--muted); }
 .organizations-group-list { padding: 0 24px 24px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.organizations-group-list > li { min-width: 0; display: flex; align-items: center; gap: 12px; padding: 15px; border: 1px solid var(--line); border-radius: 7px; }
+.organizations-group-list > li { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 15px; border: 1px solid var(--line); border-radius: 7px; }
 .organizations-group-list > li > div { display: grid; gap: 5px; min-width: 0; }
 .organizations-group-list strong { font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
 .organizations-group-list .muted { font-size: 11px; overflow-wrap: anywhere; }

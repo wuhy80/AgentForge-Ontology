@@ -25,6 +25,18 @@ async function fixture(page: Page, administrator = false) {
     if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema','enum','link','action','function'], lifecycle: ['draft','active'], schemaModes: ['schema_2_db'], storageLayouts: ['single'] })
     if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 200, maxSortFields: 1, operations: ['query'] })
     if (path === '/api/data/sources') return reply({ data: [], hasMore: false })
+    const directory = path.match(/^\/api\/metadata\/(categories|groups)\/([^/]+)$/)
+    if (method === 'DELETE' && directory) {
+      const collection = directory[1] === 'categories' ? categories : groups
+      const index = collection.findIndex((item) => item.id === directory[2])
+      const item = collection[index]
+      if (!item || item.name !== url.searchParams.get('previousName')) return reply({ error: { message: '目录已变动' } }, 409)
+      if (groups.some((group) => group.categoryId === item.id) || current.some(({ definition }) => definition.groupId === item.id)) {
+        return reply({ error: { message: '目录仍有分组或保留的定义，无法删除' } }, 409)
+      }
+      collection.splice(index, 1)
+      return route.fulfill({ status: 204 })
+    }
     if (path === '/api/metadata/categories') {
       if (method === 'GET') return reply({ data: categories, hasMore: false })
       const category = { id: `category-${categories.length}`, tenantId, name: String(data?.name) }
@@ -59,6 +71,41 @@ async function fixture(page: Page, administrator = false) {
     return reply({ error: { code: 'unhandled_fixture_request', message: `未定义的浏览器模拟接口：${method} ${path}` } }, 404)
   })
   return { writes, current, groups, queryCount: () => queries }
+}
+
+for (const width of [1440, 390]) {
+  for (const theme of ['deep', 'light']) {
+    test(`目录删除确认与刷新 ${width}px ${theme}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 960 })
+      await fixture(page, true)
+      await page.goto('/#organizations')
+      if (theme === 'light') await page.getByRole('button', { name: '精密白', exact: true }).click()
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+      const category = page.getByRole('button', { name: '删除当前分类' })
+      await category.click()
+      const categoryConfirm = page.getByRole('group', { name: '删除分类确认' })
+      await categoryConfirm.getByRole('button', { name: '确认删除' }).click()
+      await expect(page.getByRole('alert')).toContainText('无法删除')
+      await categoryConfirm.getByRole('button', { name: '取消', exact: true }).click()
+      await page.getByLabel('新分类名称').fill('临时目录')
+      await page.getByRole('button', { name: '创建分类', exact: true }).click()
+      await page.getByLabel('新分组名称').fill('临时分组')
+      await page.getByRole('button', { name: '创建分组', exact: true }).click()
+      await page.getByRole('button', { name: '删除分组 临时分组' }).click()
+      const groupConfirm = page.getByRole('group', { name: '删除分组确认' })
+      const cancel = groupConfirm.getByRole('button', { name: '取消', exact: true })
+      await cancel.focus()
+      await page.keyboard.press('Tab')
+      await expect(groupConfirm.getByRole('button', { name: '确认删除' })).toBeFocused()
+      await expect(groupConfirm).toBeInViewport()
+      await page.keyboard.press('Enter')
+      await expect(page.getByText('分组“临时分组”已删除。')).toBeVisible()
+      await category.click()
+      await categoryConfirm.getByRole('button', { name: '确认删除' }).click()
+      await expect(page.getByText('分类“临时目录”已删除。')).toBeVisible()
+      await expect(page.getByRole('button', { name: /临时目录/ })).toHaveCount(0)
+    })
+  }
 }
 
 test('本体建模分组独立导航五类定义及数据源，刷新、返回与未保存保护保留类型', async ({ page }) => {
