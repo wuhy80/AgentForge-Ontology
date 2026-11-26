@@ -160,6 +160,23 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	request("DELETE", discardPath, "stale", nil, 412, nil)
+	// Inject a failure after the deletion has cleared the draft in its transaction.
+	trigger := "deletion_audit_" + strings.ReplaceAll(c.NewID(), "-", "")
+	if _, err := engine.DB().Exec("CREATE TRIGGER " + trigger + " BEFORE INSERT ON af_meta_outbox FOR EACH ROW " +
+		"BEGIN IF NEW.event_type='definition.deleted' AND NEW.object_id='" + discard.Definition.ID +
+		"' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture deletion audit failure'; END IF; END"); err != nil {
+		t.Fatal(err)
+	}
+	defer engine.DB().Exec("DROP TRIGGER IF EXISTS " + trigger)
+	request("DELETE", discardPath, discard.ETag, nil, 500, nil)
+	var auditRollbackDraft c.CurrentDefinition
+	request("GET", discardPath+"/draft", "", nil, 200, &auditRollbackDraft)
+	if auditRollbackDraft.ETag != discard.ETag {
+		t.Fatalf("audit failure changed draft ETag: %s", auditRollbackDraft.ETag)
+	}
+	if _, err := engine.DB().Exec("DROP TRIGGER " + trigger); err != nil {
+		t.Fatal(err)
+	}
 	request("DELETE", discardPath, discard.ETag, nil, 204, nil)
 	request("DELETE", discardPath, discard.ETag, nil, 204, nil)
 	request("GET", discardPath+"/draft", "", nil, 404, nil)
