@@ -25,6 +25,7 @@ type Config struct {
 		HasCallablePolicyReference(context.Context, *sql.Tx, string, string, contracts.Kind, bool) (bool, error)
 	}
 	DataURL      string
+	ExecutionURL string
 	ServiceToken string
 	HTTPClient   *http.Client
 }

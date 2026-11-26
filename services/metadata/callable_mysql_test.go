@@ -39,8 +39,24 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		}
 	}()
 	var blockDelete atomic.Bool
+	var executionImpact atomic.Int32
 	var savedEnumReference, impactOverBudget, loseStorageResponse, storagePaused, storageUnavailable atomic.Bool
 	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/execution-impact") {
+			if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("p", 32) || r.Header.Get("X-Tenant-ID") != tenant {
+				w.WriteHeader(401)
+				return
+			}
+			switch executionImpact.Load() {
+			case 1:
+				writeJSON(w, 200, map[string]bool{"pending": true})
+			case 2:
+				writeJSON(w, 200, map[string]bool{})
+			default:
+				writeJSON(w, 200, map[string]bool{"pending": false})
+			}
+			return
+		}
 		if impactOverBudget.Load() && (strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") || strings.HasSuffix(r.URL.Path, "/saved-query-impact")) {
 			writeJSON(w, 422, c.Error{Code: "saved_query_impact_budget", Message: "internal details"})
 			return
@@ -86,7 +102,7 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		}
 	}))
 	defer data.Close()
-	config := Config{Engine: engine, DataURL: data.URL, ServiceToken: strings.Repeat("p", 32), CallablePolicyReferences: identity.NewStore(engine.DB(), nil, ""), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) {
+	config := Config{Engine: engine, DataURL: data.URL, ExecutionURL: data.URL, ServiceToken: strings.Repeat("p", 32), CallablePolicyReferences: identity.NewStore(engine.DB(), nil, ""), Authorizer: authorizerFunc(func(context.Context, c.Principal, c.AuthorizationRequest) (c.Decision, error) {
 		return c.Decision{Allow: true}, nil
 	})}
 	api := NewHandler(config)
@@ -350,6 +366,29 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	request("DELETE", enumDeletePath, deletableEnum.ETag, nil, 204, nil)
 	request("DELETE", enumDeletePath, deletableEnum.ETag, nil, 204, nil)
 	request("GET", enumDeletePath, "", nil, 404, nil)
+	for _, definition := range []c.Definition{
+		{Kind: c.KindAction, Name: "Disposable Action", Action: &c.Callable{SideEffects: "none"}},
+		{Kind: c.KindFunction, Name: "Disposable Function", Function: &c.Callable{SideEffects: "none"}},
+	} {
+		item := create(definition)
+		publish(item, 200)
+		path := "/metadata/definitions/" + item.Definition.ID
+		request("DELETE", path, item.ETag, nil, 409, nil)
+		request("POST", path+"/disable", item.ETag, nil, 200, nil)
+		request("GET", path+"/delete-preview", item.ETag, nil, 204, nil)
+		executionImpact.Store(1)
+		var blocked c.Error
+		request("DELETE", path, item.ETag, nil, 409, &blocked)
+		if blocked.Code != "definition_execution_in_use" {
+			t.Fatalf("unexpected execution blocker: %s", blocked.Code)
+		}
+		executionImpact.Store(2)
+		request("DELETE", path, item.ETag, nil, 503, nil)
+		executionImpact.Store(0)
+		request("DELETE", path, item.ETag, nil, 204, nil)
+		request("DELETE", path, item.ETag, nil, 204, nil)
+		request("POST", path+"/restore", item.ETag, nil, 404, nil)
+	}
 	request("POST", enumDeletePath+"/restore", deletableEnum.ETag, nil, 404, nil)
 	request("POST", enumDeletePath+"/publish", deletableEnum.ETag, nil, 404, nil)
 	enum := create(c.Definition{Kind: c.KindEnum, Name: "验收枚举", Enum: &c.Enum{Values: []c.EnumValue{{Code: "in", Label: "有效"}}}})

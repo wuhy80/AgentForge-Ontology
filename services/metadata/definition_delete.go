@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 )
@@ -51,6 +54,7 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 			draftOnly := row.status == "draft" && !row.current.Valid && row.draft.Valid
 			disabledEnum := row.status == disabledDefinition && row.d.Kind == c.KindEnum && row.current.Valid && !row.draft.Valid
 			var managedStorage bool
+			var disabledCallable bool
 			if row.status == disabledDefinition && row.current.Valid && !row.draft.Valid {
 				d, err := parseDefinition(row.current)
 				if err != nil {
@@ -59,8 +63,10 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 				managedStorage = d.Kind == c.KindSchema && d.Schema != nil && d.Schema.Mode == "schema_2_db" &&
 					d.Schema.StorageLayout == "single" && d.Schema.StorageBinding == nil ||
 					d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil && d.Link.StorageBinding.Mode == "managed"
+				callable := callableBody(d)
+				disabledCallable = callable != nil && (callable.SideEffects == "" || callable.SideEffects == "none") && len(callable.DataWrite) == 0
 			}
-			if !draftOnly && !disabledEnum && !managedStorage {
+			if !draftOnly && !disabledEnum && !managedStorage && !disabledCallable {
 				return problem(409, "unsupported_delete_state", "当前只支持删除从未发布的草稿或受支持的已停用定义")
 			}
 			digest := row.draftDigest
@@ -96,6 +102,11 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 			}
 			if managedStorage {
 				if err := h.checkManagedStorage(ctx, row.d, "managed-storage-delete-check", c.ManagedLinkLifecycle{Digest: digest, Preview: preview}); err != nil {
+					return err
+				}
+			}
+			if disabledCallable {
+				if err := h.checkCallableDeletionExecution(ctx, p.TenantID, id); err != nil {
 					return err
 				}
 			}
@@ -141,4 +152,35 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}
+}
+
+func (h *handler) checkCallableDeletionExecution(ctx context.Context, tenant, id string) error {
+	unavailable := problem(503, "execution_impact_unavailable", "无法复核未完成执行")
+	if h.cfg.ExecutionURL == "" || len(h.cfg.ServiceToken) < 32 {
+		return unavailable
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(h.cfg.ExecutionURL, "/")+
+		"/internal/definitions/"+url.PathEscape(id)+"/execution-impact", nil)
+	if err != nil {
+		return unavailable
+	}
+	req.Header.Set("Authorization", "Bearer "+h.cfg.ServiceToken)
+	req.Header.Set("X-Tenant-ID", tenant)
+	client := *h.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := client.Do(req)
+	if err != nil {
+		return unavailable
+	}
+	defer response.Body.Close()
+	var impact struct{ Pending *bool }
+	if response.StatusCode != 200 || json.NewDecoder(http.MaxBytesReader(nil, response.Body, 1024)).Decode(&impact) != nil || impact.Pending == nil {
+		return unavailable
+	}
+	if *impact.Pending {
+		return problem(409, "definition_execution_in_use", "定义仍有未完成执行")
+	}
+	return nil
 }
