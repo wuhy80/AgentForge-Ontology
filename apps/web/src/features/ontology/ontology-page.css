@@ -49,7 +49,6 @@
 .ontology-canvas-heading [role=tab] { border: 0; background: transparent; font-size: 11px; padding: 7px 9px; display: flex; align-items: center; gap: 6px; color: var(--muted); border-radius: 4px; white-space: nowrap; }
 .ontology-canvas-heading [aria-selected=true] { background: var(--primary-soft); color: var(--primary); box-shadow: 0 1px 4px var(--shadow); }
 .ontology-canvas-heading > button { padding: 5px; font-size: 11px; }
-.ontology-canvas-heading > button[aria-pressed=true] { background: var(--primary-soft); color: var(--primary); }
 .ontology-canvas-description { padding: 0 15px 12px; color: var(--muted); font-size: 11px; line-height: 1.8; }
 .ontology-canvas-panel > [role=tabpanel]:not([hidden]) { display: flex; flex: 1; flex-direction: column; }
 .ontology-canvas-panel > [role=tabpanel]:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
@@ -62,17 +61,6 @@
 .ontology-mobile-inspector { min-width: 0; }
 .ontology-mobile-inspector > .button { margin-top: 12px; width: 100%; }
 .ontology-empty { min-height: 360px; }
-.ontology-layer-form { display: grid; gap: 20px; }
-.ontology-layer-form .dialog-actions { margin-top: 0; }
-.ontology-layer-section { display: grid; gap: 12px; min-width: 0; }
-.ontology-layer-section + .ontology-layer-section { border-top: 1px solid var(--line); padding-top: 16px; }
-.ontology-layer-section h3 { font-size: 14px; }
-.ontology-layer-section .field { min-width: 0; overflow-wrap: anywhere; }
-.ontology-layer-heading, .ontology-layer-actions, .ontology-layer-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.ontology-layer-heading { align-items: center; justify-content: space-between; }
-.ontology-layer-row { align-items: end; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-subtle); }
-.ontology-layer-row label { flex: 1 1 160px; }
-.ontology-layer-assignments { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }
 @media (max-width: 1220px) {
   .ontology-panels { grid-template-columns: 190px minmax(0, 1fr); }
   .ontology-detail-panel { grid-column: 1 / -1; }

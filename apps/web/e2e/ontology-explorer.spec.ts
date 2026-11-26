@@ -100,61 +100,18 @@ test('分类切换拒绝旧目录响应，刷新403清除已显示目录、详�
   assertReadOnly(state)
 })
 
-test('画布仅使用二维，切换视图和分层时保留所选定义', async ({ page }) => {
+test('本体全景没有分层设置，切换关系和依赖视图时保留所选定义', async ({ page }) => {
   const state = await ontologyFixture(page)
   await page.goto('/#ontology')
   await directory(page).getByRole('button', { name: '查看对象模型：笔记', exact: true }).click()
   await expect(relationGraph(page)).toBeVisible()
   await expect(page.getByRole('group', { name: '画布维度' })).toHaveCount(0)
-  const toggle = page.getByRole('button', { name: '分层布局', exact: true })
-  await toggle.click()
-  const scene = page.getByRole('region', { name: '二维分层画布' })
-  const note = scene.getByRole('button', { name: '对象模型：笔记', exact: true })
-  await expect(note).toHaveAttribute('aria-pressed', 'true')
-  await scene.getByRole('button', { name: '对象模型：标签', exact: true }).click()
-  await expect(inspector(page).getByRole('heading', { name: '标签', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '分层布局', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '配置分层', exact: true })).toHaveCount(0)
+  await expect(inspector(page).getByRole('heading', { name: '笔记', exact: true })).toBeVisible()
   await page.getByRole('tab', { name: '定义依赖图' }).click()
-  await expect(scene.getByRole('button', { name: '对象模型：标签', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await toggle.click()
   await expect(dependencyGraph(page)).toBeVisible()
-  await expect(inspector(page).getByRole('heading', { name: '标签', exact: true })).toBeVisible()
-  assertReadOnly(state)
-})
-
-test('二维分层可初始化、调整、聚焦，并在刷新后保留配置', async ({ page }) => {
-  const state = await ontologyFixture(page)
-  await page.goto('/#ontology')
-  await page.getByRole('button', { name: '配置分层', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '配置业务分层' })
-  await dialog.getByRole('button', { name: '从分组初始化' }).click()
-  await dialog.getByRole('button', { name: '新增层' }).click()
-  await dialog.getByRole('textbox', { name: '层名称' }).last().fill('标签层')
-  await dialog.getByRole('combobox', { name: '标签', exact: true }).selectOption({ label: '标签层' })
-  for (const width of [1440, 390]) {
-    await page.setViewportSize({ width, height: 900 })
-    for (const theme of ['deep', 'light']) {
-      await page.locator('html').evaluate((element, value) => { element.dataset.theme = value }, theme)
-      const field = dialog.getByRole('textbox', { name: '层名称' }).last()
-      await field.focus()
-      expect(await field.evaluate(element => ({
-        focused: element === document.activeElement,
-        styled: element.closest('.field') !== null && parseFloat(getComputedStyle(element).paddingLeft) > 4,
-      }))).toMatchObject({ focused: true, styled: true })
-      expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
-      await expect(dialog.getByRole('button', { name: '保存分层' })).toBeEnabled()
-    }
-  }
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await dialog.getByRole('button', { name: '保存分层' }).click()
-  const flat = page.getByRole('region', { name: '二维分层画布' })
-  await expect(flat.getByText('标签层 · 1', { exact: true })).toBeVisible()
-  await expect(flat.locator('[data-cross-layer=true]')).not.toHaveCount(0)
-  await flat.getByRole('combobox', { name: '聚焦层' }).selectOption({ label: '标签层' })
-  await expect(flat.getByRole('button', { name: '对象模型：标签', exact: true })).toBeVisible()
-  await expect(flat.getByRole('button', { name: '对象模型：笔记', exact: true })).toHaveCount(0)
-  await page.reload()
-  await page.getByRole('button', { name: '分层布局', exact: true }).click()
-  await expect(flat.getByText('标签层 · 1', { exact: true })).toBeVisible()
+  await expect(inspector(page).getByRole('heading', { name: '笔记', exact: true })).toBeVisible()
   assertReadOnly(state)
 })
 
@@ -219,6 +176,8 @@ test('分层全景的二维泳道在桌面和 390px 双主题保留筛选、聚�
   await layer.click()
   await graph.getByRole('button', { name: '对象模型：标签', exact: true }).click()
   await expect(inspector(page).getByRole('heading', { name: '标签', exact: true })).toBeVisible()
+  await inspector(page).getByRole('button', { name: '编辑标签与层位' }).click()
+  await expect(page).toHaveURL(/#models\/tags\?tab=basics$/)
   assertReadOnly(state)
 })
 

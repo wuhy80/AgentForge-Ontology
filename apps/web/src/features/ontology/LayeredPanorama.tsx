@@ -85,8 +85,8 @@ export function LayeredPanorama({ records, categories, groups, categoryId, selec
           {drawer === 'closed' && <button type="button" onClick={() => setDrawer('catalog')}>展开目录</button>}
         </div>
       </div>
-      <OntologyLayerGraph panorama showZones={showZones} showLabels={showLabels} showAllEdges={showAllEdges} groups={groups} records={records} categories={categories} categoryId={categoryId}
-        mode="dependencies" layers={configuration} hiddenLayers={hiddenLayers} focusedGroup={group} rootIds={rootIds}
+      <OntologyLayerGraph showZones={showZones} showLabels={showLabels} showAllEdges={showAllEdges} groups={groups} records={records} categories={categories} categoryId={categoryId}
+        layers={configuration} hiddenLayers={hiddenLayers} focusedGroup={group} rootIds={rootIds}
         selectedId={selectedId} onSelect={inspect} />
       {drawer !== 'closed' && <aside className="ontology-canvas-panel" aria-label="分层节点详情">
         <div className="panorama-drawer-tabs">
