@@ -91,7 +91,20 @@ export function OntologyInspector({ record, records, categories, groups, categor
       {properties('属性', definition.schema.properties)}
       <section className="ontology-inspector-section"><h3>入站与出站关系</h3><ul className="ontology-inspector-relations">{links.flatMap((item) => {
         const link = item.definition.link!
-        return [link.sourceSchemaId === definition.id ? { direction: 'out', label: link.forwardName, target: link.targetSchemaId } : undefined, link.targetSchemaId === definition.id ? { direction: 'in', label: link.reverseName, target: link.sourceSchemaId } : undefined].filter((value) => value !== undefined).map((value) => <li key={`${item.definition.id}:${value.direction}`}><div><span>{value.direction === 'out' ? '出站' : '入站'}</span><strong>{value.label}</strong><code>{value.direction === 'in' ? ({ '1:1': '1:1', '1:N': 'N:1', 'N:1': '1:N', 'N:M': 'N:M' }[link.cardinality]) : link.cardinality}</code></div>{resource(item.definition.id, 'link')}<small>关联对象</small>{resource(value.target, 'schema')}</li>)
+        return [
+          link.sourceSchemaId === definition.id ? { direction: 'out', label: link.forwardName, target: link.targetSchemaId } : undefined,
+          link.targetSchemaId === definition.id ? { direction: 'in', label: link.reverseName, target: link.sourceSchemaId } : undefined,
+        ].filter((value) => value !== undefined).map((value) => <li key={`${item.definition.id}:${value.direction}`}>
+          <div className="ontology-inspector-relation-heading">
+            <span>{value.direction === 'out' ? '出站' : '入站'}</span>
+            <strong>{value.label}</strong>
+            <code>{value.direction === 'in' ? ({ '1:1': '1:1', '1:N': 'N:1', 'N:1': '1:N', 'N:M': 'N:M' }[link.cardinality]) : link.cardinality}</code>
+          </div>
+          <div className="ontology-inspector-relation-resources">
+            {resource(item.definition.id, 'link')}
+            <span><span aria-hidden="true">·</span><span className="sr-only">关联对象</span>{resource(value.target, 'schema')}</span>
+          </div>
+        </li>)
       })}</ul>{!links.some((item) => [item.definition.link!.sourceSchemaId, item.definition.link!.targetSchemaId].includes(definition.id)) && <p className="ontology-inspector-muted">当前已加载范围没有可见关系。</p>}</section>
     </>}
 

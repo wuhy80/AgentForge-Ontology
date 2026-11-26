@@ -31,7 +31,15 @@ describe('本体全景只读详情', () => {
     expect(within(attributeRow).getByTitle('必填').textContent).toBe('*必填')
     expect(within(attributeRow).getByText('string')).toBeTruthy()
     expect(attributeRow.textContent).not.toContain('映射列')
-    expect(screen.getByText('标记标签')).toBeTruthy()
+    const relation = screen.getByText('标记标签').closest('li')!
+    const [heading, resources] = relation.children
+    expect(relation.children).toHaveLength(2)
+    expect(within(heading as HTMLElement).getByText('出站')).toBeTruthy()
+    expect(within(heading as HTMLElement).getByText('N:M')).toBeTruthy()
+    fireEvent.click(within(resources as HTMLElement).getByRole('button', { name: '查看本体资源：笔记标记标签' }))
+    expect(options.onSelect).toHaveBeenCalledWith('note-tag')
+    fireEvent.click(within(resources as HTMLElement).getByRole('button', { name: '查看本体资源：标签' }))
+    expect(options.onSelect).toHaveBeenCalledWith('tag')
     fireEvent.click(screen.getAllByRole('button', { name: '查看本体资源：笔记状态' })[0])
     expect(options.onSelect).toHaveBeenCalledWith('status-enum')
     fireEvent.click(screen.getByRole('button', { name: '查看定义' }))
