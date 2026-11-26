@@ -49,10 +49,16 @@ export function OntologyInspector({ record, records, categories, groups, categor
 
   function properties(title: string, fields: Property[]) {
     return <section className="ontology-inspector-section"><h3>{title}<span>{fields.length}</span></h3>{!fields.length ? <p className="ontology-inspector-muted">未声明{title}</p> : <ul className="ontology-inspector-properties">{fields.map((field) => <li key={field.id}>
-      <div className="ontology-inspector-property-heading"><strong>{field.name}</strong><code>{field.dataType}{field.dataType === 'decimal' && field.precision ? `(${field.precision},${field.scale ?? 0})` : ''}</code></div>
-      <div className="ontology-inspector-property-meta">{field.required && <span>必填</span>}{field.nullable && <span>可为空</span>}{field.readOnly && <span>只读</span>}</div>
+      <div className="ontology-inspector-property-heading">
+        <span><strong>{field.name}</strong>{field.mapping?.column && <>:<code>{field.mapping.column}</code></>}
+          {field.required && <span className="ontology-inspector-required" title="必填"><span aria-hidden="true">*</span><span className="sr-only">必填</span></span>}
+        </span>
+        <div className="ontology-inspector-property-info">
+          <code>{field.dataType}{field.dataType === 'decimal' && field.precision ? `(${field.precision},${field.scale ?? 0})` : ''}</code>
+          {field.nullable && <span>可为空</span>}{field.readOnly && <span>只读</span>}
+        </div>
+      </div>
       {field.enumId && <div className="ontology-inspector-reference-value"><small>引用枚举</small>{resource(field.enumId, 'enum')}</div>}
-      {field.mapping?.column && <p className="ontology-inspector-mapping">映射列 <code>{field.mapping.column}</code></p>}
     </li>)}</ul>}</section>
   }
 

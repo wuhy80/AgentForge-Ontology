@@ -6,7 +6,7 @@ import { OntologyInspector } from './OntologyInspector'
 const base = { tenantId: 'tenant', categoryId: 'knowledge', groupId: 'models' }
 const categories = [{ id: 'knowledge', name: '个人知识库', tenantId: 'tenant' }, { id: 'shared', name: '公共字典', tenantId: 'tenant' }]
 const groups = [{ id: 'models', categoryId: 'knowledge', name: '知识建模', tenantId: 'tenant' }]
-const note: DefinitionRecord = { status: 'active', etag: 'note', definition: { ...base, id: 'note', kind: 'schema', name: '笔记', description: '保存知识条目', schema: { mode: 'db_2_schema', storageLayout: 'single', storageBinding: { dataSourceId: 'secret-source-id', namespace: 'public', table: 'notes', idColumn: 'id' }, properties: [{ id: 'status', name: '状态', dataType: 'string', enumId: 'status-enum', mapping: { dataSourceId: 'secret-source-id', column: 'status_code' } }] } } }
+const note: DefinitionRecord = { status: 'active', etag: 'note', definition: { ...base, id: 'note', kind: 'schema', name: '笔记', description: '保存知识条目', schema: { mode: 'db_2_schema', storageLayout: 'single', storageBinding: { dataSourceId: 'secret-source-id', namespace: 'public', table: 'notes', idColumn: 'id' }, properties: [{ id: 'status', name: '状态', dataType: 'string', required: true, enumId: 'status-enum', mapping: { dataSourceId: 'secret-source-id', column: 'status_code' } }] } } }
 const tag: DefinitionRecord = { ...note, etag: 'tag', definition: { ...base, id: 'tag', kind: 'schema', name: '标签', schema: { mode: 'schema_2_db', storageLayout: 'single', properties: [] } } }
 const enumeration: DefinitionRecord = { status: 'active', etag: 'enum', definition: { ...base, categoryId: 'shared', id: 'status-enum', kind: 'enum', name: '笔记状态', enum: { values: [{ code: '001', label: '草稿' }, { code: '9007199254740993', label: '历史状态', deprecated: true }] } } }
 const link: DefinitionRecord = { status: 'active', etag: 'link', definition: { ...base, id: 'note-tag', name: '笔记标记标签', kind: 'link', link: { sourceSchemaId: 'note', targetSchemaId: 'tag', forwardName: '标记标签', reverseName: '用于笔记', cardinality: 'N:M', onDelete: 'restrict', storageBinding: { mode: 'foreign_key', foreignKeySide: 'source', foreignKeyColumn: 'tag_id' } } } }
@@ -26,7 +26,11 @@ describe('本体全景只读详情', () => {
     expect(screen.getByText('知识建模')).toBeTruthy()
     expect(screen.getByText('public.notes')).toBeTruthy()
     expect(screen.getByText('状态')).toBeTruthy()
-    expect(screen.getByText('status_code')).toBeTruthy()
+    const attributeRow = screen.getByText('status_code').closest('li')!
+    expect(attributeRow.textContent).toContain('状态:status_code*')
+    expect(within(attributeRow).getByTitle('必填').textContent).toBe('*必填')
+    expect(within(attributeRow).getByText('string')).toBeTruthy()
+    expect(attributeRow.textContent).not.toContain('映射列')
     expect(screen.getByText('标记标签')).toBeTruthy()
     fireEvent.click(screen.getAllByRole('button', { name: '查看本体资源：笔记状态' })[0])
     expect(options.onSelect).toHaveBeenCalledWith('status-enum')

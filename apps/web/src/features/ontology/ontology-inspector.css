@@ -29,15 +29,16 @@
 .ontology-inspector-resource:hover > span { text-decoration: underline; text-underline-offset: 3px; }
 .ontology-inspector-resource:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; border-radius: 2px; }
 .ontology-inspector-properties, .ontology-inspector-resource-list, .ontology-inspector-relations, .ontology-inspector-references { display: grid; gap: 8px; padding: 0; margin: 0; list-style: none; }
-.ontology-inspector-properties > li { min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 10px 11px; background: var(--surface-subtle); }
-.ontology-inspector-property-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; font-size: 12px; }
-.ontology-inspector-property-heading strong { min-width: 0; font-weight: 600; }
-.ontology-inspector-property-heading code { flex: 0 1 auto; color: var(--muted); font-size: 11px; text-align: right; }
-.ontology-inspector-property-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; color: var(--muted); font-size: 11px; }
-.ontology-inspector-property-meta:empty { display: none; }
+.ontology-inspector-properties { gap: 4px; }
+.ontology-inspector-properties > li { min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; background: var(--surface-subtle); }
+.ontology-inspector-property-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 8px; font-size: 12px; }
+.ontology-inspector-property-heading strong { font-weight: 600; }
+.ontology-inspector-property-heading code, .ontology-inspector-property-info { color: var(--muted); font-size: 11px; }
+.ontology-inspector-property-info { display: flex; align-items: baseline; gap: 5px; }
+.ontology-inspector-property-info > span { white-space: nowrap; }
+.ontology-inspector-required { margin-inline-start: 4px; color: var(--danger); font-weight: 700; }
 .ontology-inspector-reference-value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-top: 6px; font-size: 12px; }
 .ontology-inspector-reference-value > small { color: var(--muted); font-size: 11px; }
-.ontology-inspector-mapping { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
 .ontology-inspector-relations > li { display: grid; gap: 4px; border-left: 2px solid var(--line); padding: 6px 0 6px 11px; font-size: 12px; }
 .ontology-inspector-relations > li > div { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
 .ontology-inspector-relations > li > div > span, .ontology-inspector-relations > li > small { color: var(--muted); font-size: 11px; }
