@@ -125,6 +125,43 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p, err := h.principal(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	schemaID, recordID, runID := r.PathValue("schemaId"), r.PathValue("entityId"), r.PathValue("runId")
+	if !uuidPattern.MatchString(schemaID) || !uuidPattern.MatchString(recordID) || !uuidPattern.MatchString(runID) {
+		writeError(w, problem(404, "not_found", "流转记录不可访问"))
+		return
+	}
+	err = h.withLifecycleTarget(ctx, p, schemaID, recordID, true, func(tx *sql.Tx, _ c.Decision, _ c.Definition, _ *c.SchemaLifecycle) error {
+		var failed bool
+		err := tx.QueryRowContext(ctx, "SELECT notification_failed FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" AND id=? AND actor=? FOR UPDATE",
+			p.TenantID, schemaID, recordID, runID, p.Subject).Scan(&failed)
+		if errors.Is(err, sql.ErrNoRows) {
+			return problem(404, "not_found", "流转记录不可访问")
+		}
+		if err != nil || !failed {
+			return err
+		}
+		if err := notifyRecordFollowers(ctx, tx, p, schemaID, recordID, runID, lifecycleNoticeKind); err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=FALSE WHERE "+lifecycleStageScope+" AND id=?",
+			p.TenantID, schemaID, recordID, runID)
+		return err
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // withLifecycleTarget applies the same record visibility rules as comments and
 // approvals: the current definition must declare a managed lifecycle, the
 // account must read the record, and a transition additionally needs the update

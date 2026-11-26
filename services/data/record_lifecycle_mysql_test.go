@@ -170,12 +170,31 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 		"BEGIN IF NEW.entity_id='" + row.ID + "' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture notice failure'; END IF; END"); err != nil {
 		t.Fatal(err)
 	}
-	defer f.engine.DB().Exec("DROP TRIGGER " + trigger)
+	defer f.engine.DB().Exec("DROP TRIGGER IF EXISTS " + trigger)
 
 	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
 	view := f.lifecycle(row.ID, 200)
 	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || !view.History[0].NotificationFailed {
 		t.Fatalf("expected committed transition and visible notification failure: %+v", view)
+	}
+	runID := view.History[0].ID
+	retry := "/instances/" + row.ID + "/lifecycle/runs/" + runID + "/retry-notification"
+	f.call("POST", retry, nil, "", 500)
+	if _, err := f.engine.DB().Exec("DROP TRIGGER " + trigger); err != nil {
+		t.Fatal(err)
+	}
+	f.p.Subject = c.NewID()
+	f.call("POST", retry, nil, "", 404)
+	f.p.Subject = actor
+	f.call("POST", retry, nil, "", 204)
+	f.call("POST", retry, nil, "", 204)
+	view = f.lifecycle(row.ID, 200)
+	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || view.History[0].NotificationFailed {
+		t.Fatalf("retry should only clear the failure: %+v", view)
+	}
+	var count int
+	if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_notices WHERE tenant_id=? AND id=?", f.p.TenantID, runID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("expected one notification after retry: count=%d err=%v", count, err)
 	}
 }
 

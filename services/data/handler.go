@@ -108,6 +108,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("PUT /data/schemas/{schemaId}/instances/{entityId}/approvals/{approvalId}", h.recordApprovals)
 	mux.HandleFunc("GET /data/schemas/{schemaId}/instances/{entityId}/lifecycle", h.recordLifecycle)
 	mux.HandleFunc("POST /data/schemas/{schemaId}/instances/{entityId}/lifecycle/transitions", h.recordLifecycle)
+	mux.HandleFunc("POST /data/schemas/{schemaId}/instances/{entityId}/lifecycle/runs/{runId}/retry-notification", h.retryLifecycleNotice)
 	for _, method := range []string{"GET", "PUT", "DELETE"} {
 		mux.HandleFunc(method+" /data/schemas/{schemaId}/instances/{entityId}/follow", h.recordFollow)
 	}

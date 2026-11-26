@@ -296,4 +296,4 @@ Schema 当前定义声明 `lifecycle` 后，托管记录可读取阶段并提交
 
 ### 流程流转通知
 
-成功流转时，同租户的其他记录关注者在同一事务内收到 `lifecycle_transition` 通知。每位关注者以流转执行 ID 为通知 ID。失败或已过期的流转不产生通知，记录撤权时历史及计数重新过滤。通知条目不包含阶段名称或流转意见，详情由记录权限控制。复用已有通知表。通知语句失败且事务可继续时，流转仍提交，授权历史返回 `notificationFailed: true`。需要显式应用 Data 迁移 `023_data_lifecycle_notice_failure`。自动重试仍待实现。
+成功流转时，同租户的其他记录关注者在同一事务内收到 `lifecycle_transition` 通知。每位关注者以流转执行 ID 为通知 ID。失败或已过期的流转不产生通知，记录撤权时历史及计数重新过滤。通知条目不包含阶段名称或流转意见，详情由记录权限控制。复用已有通知表。通知语句失败且事务可继续时，流转仍提交，授权历史返回 `notificationFailed: true`。需要显式应用 Data 迁移 `023_data_lifecycle_notice_failure`。原操作者可通过 Data 服务的 `POST /data/schemas/{schemaId}/instances/{entityId}/lifecycle/runs/{runId}/retry-notification` 重试，需仍有记录读写权限。重试使用当时的关注者列表，沿用原流转执行 ID，成功后清除失败标记并返回 204，重复请求也返回 204。网关、客户端和自动重试仍待实现。
