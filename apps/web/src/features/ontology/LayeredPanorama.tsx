@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import type { DefinitionRecord, Organization } from '../../lib/types'
-import { OntologyGraph3D } from './OntologyGraph3D'
+import { OntologyLayerGraph } from './OntologyLayerGraph'
 import { collectCallableTargets } from './panorama-references'
 import './layered-panorama.css'
 
@@ -13,12 +13,11 @@ const layers = [
   { id: 'M0', name: 'M0 · 预留' },
 ]
 
-export function LayeredPanorama({ records, categories, groups, categoryId, layoutKey, selectedId, onSelect, inspector }: {
+export function LayeredPanorama({ records, categories, groups, categoryId, selectedId, onSelect, inspector }: {
   records: DefinitionRecord[]
   categories: Organization[]
   groups: Organization[]
   categoryId: string
-  layoutKey: string
   selectedId?: string
   onSelect: (id: string) => void
   inspector: (onTag: (tag: string) => void) => ReactNode
@@ -71,24 +70,24 @@ export function LayeredPanorama({ records, categories, groups, categoryId, layou
   }
   return <div className="ontology-panorama">
     <div className="panorama-layout" data-drawer={drawer}>
-      <div className="panorama-tools" role="group" aria-label="画布显示">
-        <button type="button" aria-pressed={showZones} onClick={() => setShowZones(!showZones)}>分区网格</button>
-        <button type="button" aria-pressed={showLabels} onClick={() => setShowLabels(!showLabels)}>节点名称</button>
-        <button type="button" aria-pressed={showAllEdges} onClick={() => setShowAllEdges(!showAllEdges)}>全部连线</button>
-      </div>
       <div className="panorama-hud">
         <div className="panorama-filter-row" role="group" aria-label="聚焦分区"><strong>分区</strong><button type="button" aria-pressed={!group} onClick={() => setGroup('')}>全部</button>
           {groups.map(item => <button type="button" key={item.id} aria-pressed={group === item.id} onClick={() => setGroup(group === item.id ? '' : item.id)}>{item.name}</button>)}</div>
-        <div className="panorama-filter-row" role="group" aria-label="图层筛选"><strong>图层</strong>{configuration.layers.map(layer => <button type="button" key={layer.id} data-slab={layer.id} aria-label={layer.name} aria-pressed={!hiddenLayers.has(layer.id)}
+        <div className="panorama-filter-row" role="group" aria-label="图层筛选"><strong>图层</strong>{configuration.layers.map(layer => <button type="button" key={layer.id} data-panorama-layer={layer.id} aria-label={layer.name} aria-pressed={!hiddenLayers.has(layer.id)}
           onClick={() => toggleLayer(layer.id)}><span>{layer.id === 'pending' ? layer.name : layer.id}</span><span className="panorama-layer-button-name">{layer.id !== 'pending' && layer.name.slice(layer.id.length)}</span></button>)}</div>
-        <div className="panorama-filter-row"><label>标签 <select aria-label="Schema 标签" value={tag} onChange={event => setTag(event.target.value)}><option value="">全部标签</option>{tags.map(item => <option key={item}>{item}</option>)}</select></label>
-
+        <div className="panorama-filter-row">
+          <label>标签 <select aria-label="Schema 标签" value={tag} onChange={event => setTag(event.target.value)}><option value="">全部标签</option>{tags.map(item => <option key={item}>{item}</option>)}</select></label>
+          <div className="panorama-tools" role="group" aria-label="画布显示">
+            <button type="button" aria-pressed={showZones} onClick={() => setShowZones(!showZones)}>分区网格</button>
+            <button type="button" aria-pressed={showLabels} onClick={() => setShowLabels(!showLabels)}>节点名称</button>
+            <button type="button" aria-pressed={showAllEdges} onClick={() => setShowAllEdges(!showAllEdges)}>全部连线</button>
+          </div>
+          {drawer === 'closed' && <button type="button" onClick={() => setDrawer('catalog')}>展开目录</button>}
         </div>
       </div>
-      <OntologyGraph3D panorama showZones={showZones} showLabels={showLabels} showAllEdges={showAllEdges} groups={groups} records={records} categories={categories} categoryId={categoryId} layoutKey={layoutKey}
+      <OntologyLayerGraph panorama showZones={showZones} showLabels={showLabels} showAllEdges={showAllEdges} groups={groups} records={records} categories={categories} categoryId={categoryId}
         mode="dependencies" layers={configuration} hiddenLayers={hiddenLayers} focusedGroup={group} rootIds={rootIds}
         selectedId={selectedId} onSelect={inspect} />
-      {drawer === 'closed' && <button type="button" className="button panorama-open" onClick={() => setDrawer('catalog')}>展开目录</button>}
       {drawer !== 'closed' && <aside className="ontology-canvas-panel" aria-label="分层节点详情">
         <div className="panorama-drawer-tabs">
           <button type="button" aria-pressed={drawer === 'detail'} disabled={!selected} onClick={() => setDrawer('detail')}>节点详情</button>

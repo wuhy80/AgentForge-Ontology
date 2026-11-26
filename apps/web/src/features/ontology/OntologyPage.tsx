@@ -4,7 +4,7 @@ import { ApiClient, ApiError } from '../../lib/api'
 import type { Kind, Organization } from '../../lib/types'
 import { Dialog } from '../../components/Dialog'
 import { OntologyGraph } from './OntologyGraph'
-import { OntologyGraph3D } from './OntologyGraph3D'
+import { OntologyLayerGraph } from './OntologyLayerGraph'
 import { OntologyLayerDialog, readOntologyLayers } from './OntologyLayers'
 import { LayeredPanorama } from './LayeredPanorama'
 import { OntologyInspector } from './OntologyInspector'
@@ -51,7 +51,6 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, panorama,
   const [kind, setKind] = useState<Kind | ''>('')
   const [group, setGroup] = useState('')
   const [mode, setMode] = useState<'relations' | 'dependencies'>('relations')
-  const [dimension, setDimension] = useState<'2D' | '3D'>('2D')
   const layerKey = `agentforge:ontology-layers:${layoutScope}:${categoryId}`
   const [layers, setLayers] = useState(() => readOntologyLayers(layerKey))
   const [layered, setLayered] = useState(false)
@@ -147,7 +146,7 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, panorama,
         {catalog.referenceTruncated && <p>引用补齐已达到本次读取上限，当前视图不代表完整依赖范围。</p>}
       </div>}
       {panorama ? <LayeredPanorama records={records} categories={categories} groups={catalog.groups} categoryId={categoryId}
-        layoutKey={layoutScope} onSelect={select} selectedId={selectedId} inspector={renderInspector} /> : !local.length ? <div className="empty-state ontology-empty"><Network size={35} /><h2>当前分类还没有已生效定义</h2><p className="muted">在本体建模中维护并生效定义后，可在这里查看它们的联系。</p></div> : <>
+        onSelect={select} selectedId={selectedId} inspector={renderInspector} /> : !local.length ? <div className="empty-state ontology-empty"><Network size={35} /><h2>当前分类还没有已生效定义</h2><p className="muted">在本体建模中维护并生效定义后，可在这里查看它们的联系。</p></div> : <>
         <div className="ontology-type-summary" aria-label="本体定义数量">{kinds.map((item) => <button type="button" key={item.kind} className={`ontology-kind-summary ontology-kind-${item.kind} ${kind === item.kind ? 'is-selected' : ''}`} aria-pressed={kind === item.kind}
           onClick={() => changeFilter(() => { setKind(kind === item.kind ? '' : item.kind); if (!['schema', 'link'].includes(item.kind)) setMode('dependencies') })}><item.icon size={17} /><span>{item.name}</span><strong>{local.filter((record) => record.definition.kind === item.kind).length}</strong></button>)}</div>
         <div className="ontology-mobile-tabs" role="group" aria-label="浏览区域"><button type="button" aria-pressed={mobilePane === 'directory'} onClick={() => setMobilePane('directory')}><List size={15} />目录</button><button type="button" aria-pressed={mobilePane === 'canvas'} onClick={() => setMobilePane('canvas')}><Network size={15} />画布</button></div>
@@ -173,17 +172,14 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, panorama,
             }}>{(['relations', 'dependencies'] as const).map((view) => <button type="button" role="tab" key={view} id={`ontology-tab-${view}`} aria-controls={`ontology-panel-${view}`} aria-selected={mode === view} tabIndex={mode === view ? 0 : -1} onClick={() => changeCanvasMode(view)}>
               {view === 'relations' ? <><GitBranch size={15} aria-hidden="true" />对象关系图</> : <><Network size={15} aria-hidden="true" />定义依赖图</>}
             </button>)}</div>
-              <div className="ontology-dimensions" role="group" aria-label="画布维度">
-                {(['2D', '3D'] as const).map(value => <button key={value} type="button" aria-pressed={dimension === value} onClick={() => setDimension(value)}>{value}</button>)}
-              </div>
               <button type="button" className="button" aria-pressed={layered} onClick={() => { setLayered(!layered); setLayerFocus(undefined) }}>分层布局</button>
               <button type="button" className="button" onClick={() => setConfigureLayers(true)}>配置分层</button>
               {focusId && <button className="button subtle" type="button" onClick={() => setFocusId(undefined)}><X size={13} />取消聚焦</button>}</div>
             {(['relations', 'dependencies'] as const).map((view) => <div key={view} role="tabpanel" id={`ontology-panel-${view}`} aria-labelledby={`ontology-tab-${view}`} hidden={mode !== view} tabIndex={0}>
               {mode === view && <>
                 <p className="ontology-canvas-description">{view === 'relations' ? '对象通过 Link 连接，方向和基数说明业务关系。' : '沿已声明的引用，查看枚举、作用对象及函数绑定。'}</p>
-                {dimension === '3D' || layered
-                  ? <OntologyGraph3D {...graphProps} flat={dimension === '2D'} layers={layered ? layers : undefined} layerFocus={layerFocus} onLayerFocus={setLayerFocus} />
+                {layered
+                  ? <OntologyLayerGraph {...graphProps} layers={layers} layerFocus={layerFocus} onLayerFocus={setLayerFocus} />
                   : <OntologyGraph {...graphProps} />}
               </>}
             </div>)}
