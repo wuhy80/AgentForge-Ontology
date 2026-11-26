@@ -265,6 +265,31 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		match := map[string]string{"If-Match": `"` + model.ETag + `"`}
 		admin.request("PUT", path+"/draft", candidate, match, 400, nil)
 		candidate.GroupID = destinationGroup.ID
+		var foreignCategory, foreignGroup c.Organization
+		outsider.request("POST", categoriesPath, map[string]string{"name": "Foreign move destination"}, nil, 201, &foreignCategory)
+		outsider.request("POST", groupsPath, map[string]string{"name": "Foreign group", "categoryId": foreignCategory.ID}, nil, 201, &foreignGroup)
+		foreignCandidate := candidate
+		foreignCandidate.CategoryID, foreignCandidate.GroupID = foreignCategory.ID, foreignGroup.ID
+		admin.request("PUT", path+"/draft", foreignCandidate, match, 404, nil)
+
+		var moverRole c.Role
+		admin.request("POST", metaServer.URL+"/metadata/admin/roles", c.RoleInput{Name: "Model editor"}, nil, 201, &moverRole)
+		admin.request("POST", metaServer.URL+"/metadata/admin/users", c.UserInput{
+			Username: "model-editor", DisplayName: "Model editor", Password: password, Enabled: true, RoleIDs: []string{moverRole.ID},
+		}, nil, 201, nil)
+		policyPath := metaServer.URL + "/metadata/admin/policy"
+		var moverPolicy c.PolicyRecord
+		admin.request("GET", policyPath, nil, nil, 200, &moverPolicy)
+		for _, operation := range []string{"definition.edit", "definition.publish"} {
+			moverPolicy.Current.Rules = append(moverPolicy.Current.Rules, c.PermissionRule{
+				ID: c.NewID(), RoleID: moverRole.ID, Effect: "allow", Operation: operation, ResourceID: model.Definition.ID,
+			})
+		}
+		headers := admin.request("PUT", policyPath, moverPolicy.Current, map[string]string{"If-Match": `"` + moverPolicy.ETag + `"`}, 200, nil)
+		admin.request("POST", policyPath+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
+		admin = login(tenant, "admin")
+		editor := login(tenant, "model-editor")
+		editor.request("PUT", path+"/draft", candidate, match, 403, nil)
 		collision := candidate
 		collision.ID = ""
 		var other c.CurrentDefinition
@@ -281,13 +306,53 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			t.Fatal("destination group was not reserved by the saved draft")
 		}
 		draftMatch := map[string]string{"If-Match": `"` + draft.ETag + `"`}
+		editor.request("POST", path+"/publish", nil, draftMatch, 403, nil)
 		var conflict c.Error
 		admin.request("POST", path+"/publish", nil, draftMatch, 409, &conflict)
 		if conflict.Code != "name_conflict" {
 			t.Fatalf("unexpected target name conflict: %s", conflict.Code)
 		}
 		candidate.Name = "Moved model"
-		admin.request("PUT", path+"/draft", candidate, draftMatch, 200, &draft)
+		// Both writers start from the same saved draft. The tenant transaction
+		// must admit exactly one replacement.
+		statuses := make(chan int, 2)
+		start := make(chan struct{})
+		for _, name := range []string{candidate.Name, "Moved model alternate"} {
+			replacement := candidate
+			replacement.Name = name
+			raw, err := json.Marshal(replacement)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req, err := http.NewRequestWithContext(ctx, "PUT", path+"/draft", bytes.NewReader(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = "security.test:30011"
+			req.Header.Set("Origin", publicSecurityOrigin)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-CSRF-Token", admin.csrf)
+			req.Header.Set("If-Match", draftMatch["If-Match"])
+			for _, cookie := range admin.cookies {
+				req.AddCookie(cookie)
+			}
+			go func() {
+				<-start
+				response, err := client.Do(req)
+				if err != nil {
+					statuses <- 0
+					return
+				}
+				response.Body.Close()
+				statuses <- response.StatusCode
+			}()
+		}
+		close(start)
+		first, second := <-statuses, <-statuses
+		if !(first == 200 && second == 412 || first == 412 && second == 200) {
+			t.Fatalf("concurrent draft edits returned %d and %d, want one success and one precondition failure", first, second)
+		}
+		admin.request("GET", path+"/draft", nil, nil, 200, &draft)
 		admin.request("POST", path+"/publish", nil, draftMatch, 412, nil)
 		admin.request("POST", path+"/publish", nil, map[string]string{"If-Match": `"` + draft.ETag + `"`}, 200, nil)
 		admin.request("GET", path, nil, nil, 200, &current)
