@@ -42,7 +42,10 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 					return problem(409, "publication_in_progress", "该租户发布尚未完成，请稍后重试")
 				}
 			}
-			if row.status == "deleted" && !preview {
+			if row.status == "deleted" {
+				if preview {
+					return sql.ErrNoRows
+				}
 				return matchHeader(r, row.draftDigest)
 			}
 			draftOnly := row.status == "draft" && !row.current.Valid && row.draft.Valid
