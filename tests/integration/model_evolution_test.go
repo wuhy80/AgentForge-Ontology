@@ -1,6 +1,7 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -8,6 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,6 +222,30 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	reader.request("GET", dataServer.URL+"/data/inbox/notifications", nil, nil, 200, &notices)
 	if len(notices.Data) != 1 || notices.Data[0].ID != flow.History[0].ID || notices.Data[0].Kind != "lifecycle_transition" || notices.Data[0].RecordID != workflowRecord.ID {
 		t.Fatalf("configured account did not receive the committed run notice: %+v", notices)
+	}
+	if os.Getenv("ONTOLOGY_TEST_FLOW_BROWSER") == "1" {
+		browserCtx, cancelBrowser := context.WithTimeout(ctx, 45*time.Second)
+		defer cancelBrowser()
+		command := exec.CommandContext(browserCtx, "node", filepath.Join("..", "..", "apps", "web", "e2e", "flow-browser.mjs"))
+		var input bytes.Buffer
+		if err := json.NewEncoder(&input).Encode(map[string]string{
+			"inbox":      dataServer.URL + "/data/inbox/notifications",
+			"cookieName": reader.cookies[0].Name, "cookieValue": reader.cookies[0].Value,
+			"run": flow.History[0].ID, "record": workflowRecord.ID,
+		}); err != nil {
+			t.Fatal("encode isolated browser fixture")
+		}
+		command.Stdin = &input
+		for _, entry := range os.Environ() {
+			key, _, _ := strings.Cut(entry, "=")
+			switch strings.ToUpper(key) {
+			case "SYSTEMROOT", "WINDIR", "PATH", "PATHEXT", "TEMP", "TMP", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "USERPROFILE":
+				command.Env = append(command.Env, entry)
+			}
+		}
+		if err := command.Run(); err != nil {
+			t.Fatalf("isolated browser inbox verification failed: %v", err)
+		}
 	}
 	noticeURL := dataServer.URL + "/data/inbox/notifications/lifecycle_transition/" + workflow.Definition.ID + "/" + workflowRecord.ID + "/" + flow.History[0].ID
 	reader.request("PUT", noticeURL, nil, nil, 204, nil)
