@@ -121,6 +121,17 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	foreignTenant := f.p.TenantID + "-foreign"
+	if _, err := f.engine.DB().ExecContext(ctx, `INSERT INTO af_data_record_follows
+ (tenant_id,schema_id,entity_id,subject_id) VALUES (?,?,?,?)`, foreignTenant, id, c.NewID(), f.p.Subject); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := f.engine.DB().Exec("DELETE FROM af_data_record_follows WHERE tenant_id=? AND schema_id=?", foreignTenant, id); err != nil {
+			t.Error(err)
+		}
+	}()
+	invokeRoute("managed-storage-delete-check", false, true, 204)
 	invokeRoute("managed-storage-delete-check", false, false, 204)
 	f.call("POST", "/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: mutationValues("blocked")}, "", 409)
 	invoke(true, false, 204)
