@@ -249,9 +249,13 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	config := f.core.cfg
 	authorizer := config.Authorizer
 	checkedSecond := false
+	revoked := false
 	config.Authorizer = authorizerFunc(func(ctx context.Context, p c.Principal, req c.AuthorizationRequest) (c.Decision, error) {
 		if p.Subject == second && req.Operation == "instance.read" {
 			checkedSecond = true
+		}
+		if p.Subject == first && req.Operation == "instance.read" && revoked {
+			return c.Decision{Allow: false}, nil
 		}
 		if checkedSecond && p.Subject == first && req.Operation == "instance.read" {
 			return c.Decision{}, context.DeadlineExceeded
@@ -276,9 +280,13 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	retry := "/instances/" + row.ID + "/lifecycle/runs/" + run + "/retry-notification"
 	f.call("POST", retry, nil, "", 503)
 	countNotices(0)
-	f.handler = NewHandler(f.core.cfg)
+	revoked = true
 	f.call("POST", retry, nil, "", 204)
-	countNotices(2)
+	countNotices(1)
+	var recipient string
+	if err := f.engine.DB().QueryRow("SELECT subject_id FROM af_data_record_notices WHERE tenant_id=? AND id=?", f.p.TenantID, run).Scan(&recipient); err != nil || recipient != second {
+		t.Fatalf("retry delivered to unexpected recipient: %q, %v", recipient, err)
+	}
 }
 
 func TestMySQLRecordLifecycleAuthorizationAndCleanup(t *testing.T) {
