@@ -56,9 +56,6 @@ export function VisualQueryPage({ api, categoryId, schemas, categories = [], ini
     }
   }
   return <div className="query-page">
-    <div className="query-page-heading"><div><div className="query-eyebrow">DATA EXPLORER</div><h1>探索业务数据</h1><p className="muted">从生效模型出发，构建查询并管理真实业务实例。</p></div>
-      <span className="badge query-live-badge"><span />{selected?.definition.schema?.storageBinding ? '映射数据源' : 'MySQL 数据服务'}</span>
-    </div>
     {!availableSchemas.length ? <div className="card empty-state query-first-empty"><Database size={38} /><h2>{categoryId ? '当前分类暂无生效模型' : '请先选择当前分类'}</h2><p className="muted">{categoryId ? '在当前分类发布 Schema 后，可在这里选择字段、筛选数据和新建实例。' : '从顶部选择业务分类，再探索该分类中的数据。'}</p><button type="button" className="button primary" onClick={onModel}>前往模型管理<ArrowRight size={16} /></button></div>
       : <>
         <div className="card query-source"><div className="query-source-icon"><Layers size={22} /></div><div className="field query-schema-select"><label htmlFor="query-schema">查询模型</label>
@@ -70,7 +67,7 @@ export function VisualQueryPage({ api, categoryId, schemas, categories = [], ini
               const category = categories.find((entry) => entry.id === item.definition.categoryId);
               return <option key={item.definition.id} value={item.definition.id}>{category ? `${category.name} / ` : ''}{item.definition.name}</option>;
             })}
-          </select></div><div className="query-source-description"><span className="badge">当前生效</span><p className="muted">{selected?.definition.description || '单模型查询 · 字段与条件使用稳定标识绑定'}</p></div>
+          </select></div><div className="query-source-description"><span className="badge">当前生效</span><span className="badge query-live-badge"><span />{selected?.definition.schema?.storageBinding ? '映射数据源' : 'MySQL 数据服务'}</span><p className="muted">{selected?.definition.description || '单模型查询 · 字段与条件使用稳定标识绑定'}</p></div>
           <button type="button" className="button subtle" onClick={onModel}>查看模型<ChevronRight size={16} /></button>
         </div>
         {pendingSchema && <div className="notice" role="status"><p>更换查询起点将清空当前关联路径、返回字段、条件和结果。</p><button type="button" className="button" onClick={() => { setSelectedId(pendingSchema); setPendingSchema(undefined); }}>确认更换起点</button><button type="button" className="button subtle" onClick={() => setPendingSchema(undefined)}>保留当前查询</button></div>}

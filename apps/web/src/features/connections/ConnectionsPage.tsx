@@ -98,7 +98,6 @@ export function ConnectionsPage({ api }: { api: ApiClient }) {
   const config = directory ? `- id: mcp-ontology\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: ontology\n    transport: streamable-http\n    url: ${JSON.stringify(directory.resource)}\n    expandTemplates: true\n    headers:\n      Authorization: 'Bearer \${credential:ONTOLOGY_MCP_TOKEN}'` : ''
 
   return <div className="connections-page">
-    <header className="connections-heading"><div><span className="eyebrow">CONNECTED APPLICATIONS</span><h1>外部连接</h1><p className="muted">让 DeepSeek Harness 等应用，在你的权限范围内使用当前租户的本体。</p></div><button type="button" className="button" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw size={15} />刷新连接</button></header>
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
     {loading ? <div className="card empty-state" role="status"><LoaderCircle className="spin" size={26} /><p>正在读取你的连接…</p></div> : !directory ? <div className="card empty-state"><ShieldCheck size={30} /><h2>连接管理暂不可用</h2><p className="muted">刷新后会重新检查当前登录状态和访问权限。</p></div> : <>
@@ -124,7 +123,7 @@ export function ConnectionsPage({ api }: { api: ApiClient }) {
           <pre aria-label="dsh MCP 配置示例">{config}</pre><p className="field-hint">示例仅引用凭据名称，不包含你的密钥。支持浏览器授权的客户端也可从客户端发起 OAuth 连接。</p>
         </section>
       </div>
-      <section className="card connections-list" aria-labelledby="my-connections-title"><div className="connections-section-heading"><div><Unplug size={19} /><h2 id="my-connections-title">我的连接</h2></div><span className="badge">{directory.data.length} 个</span></div>
+      <section className="card connections-list" aria-labelledby="my-connections-title"><div className="connections-section-heading"><div><Unplug size={19} /><h2 id="my-connections-title">我的连接</h2></div><div className="connections-inline"><span className="badge">{directory.data.length} 个</span><button type="button" className="button" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw size={15} />刷新连接</button></div></div>
         {!directory.data.length ? <div className="empty-state"><Link2 size={29} /><h3>尚无外部连接</h3><p className="muted">创建连接后，可以随时在这里撤销访问。</p></div> : <ul>{directory.data.map((connection) => {
           const expired = connection.expiresAt <= Math.floor(Date.now() / 1000)
           const status = connection.revokedAt ? '已撤销' : expired ? '已到期' : '有效'

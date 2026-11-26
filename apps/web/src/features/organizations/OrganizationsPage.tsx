@@ -69,13 +69,13 @@ export function OrganizationsPage({ api, categories, categoryId, onSelectCategor
     }
   }
 
+  const refreshDirectory = <button type="button" className="button" disabled={!!busy} onClick={() => { void run('refresh') }}><RefreshCw size={15} />刷新目录</button>
   return <div className="organizations-page">
-    <header className="organizations-heading"><div><div className="organizations-eyebrow">WORKSPACE ORGANIZATION</div><h1>分类与分组</h1><p className="muted">按业务划分分类，通过分组整理对象、枚举、关系、操作和函数。</p></div><button type="button" className="button" disabled={!!busy} onClick={() => { void run('refresh') }}><RefreshCw size={15} />刷新目录</button></header>
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
-    {unavailable ? <div className="card empty-state"><ShieldCheck size={30} /><h2>目录暂不可用</h2><p className="muted">刷新目录后，将重新确认当前可访问的分类与分组。</p></div> : <div className="organizations-layout">
+    {unavailable ? <div className="card empty-state"><ShieldCheck size={30} /><h2>目录暂不可用</h2><p className="muted">刷新目录后，将重新确认当前可访问的分类与分组。</p>{refreshDirectory}</div> : <div className="organizations-layout">
       <section className="card organizations-categories" aria-labelledby="organizations-categories-title">
-        <div className="organizations-section-heading"><div><Folder size={19} /><h2 id="organizations-categories-title">业务分类</h2></div><span className="badge">{categories.length} 个</span></div>
+        <div className="organizations-section-heading"><div><Folder size={19} /><h2 id="organizations-categories-title">业务分类</h2></div><div className="organizations-category-actions"><span className="badge">{categories.length} 个</span>{refreshDirectory}</div></div>
         <p className="organizations-section-description muted">选择分类后，工作台会同步切换到该分类。</p>
         {categories.length ? <ul className="organizations-category-list">{categories.map((category) => <li key={category.id}><button type="button" aria-pressed={category.id === categoryId} disabled={!!busy} className={category.id === categoryId ? 'is-selected' : ''} onClick={() => onSelectCategory(category.id)}><span className="organizations-category-icon"><Folder size={18} /></span><span className="organizations-category-name">{category.name}</span>{category.id === categoryId ? <span className="organizations-current-label">当前分类</span> : <ChevronRight size={16} />}</button></li>)}</ul> : <div className="organizations-inline-empty"><FolderPlus size={27} /><strong>还没有业务分类</strong><p className="muted">先创建分类，再添加分组与业务定义。</p></div>}
         {current && !renaming && <button type="button" className="button subtle" disabled={!!busy} onClick={() => { setRenaming(current); setName(current.name) }}>重命名当前分类</button>}

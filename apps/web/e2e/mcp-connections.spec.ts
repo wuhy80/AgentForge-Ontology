@@ -15,7 +15,7 @@ test('真实服务：个人连接一次性显示、撤销与浏览器 OAuth PKCE
   await page.getByLabel('用户名', { exact: true }).fill(account.Username)
   await page.getByLabel('密码', { exact: true }).fill(account.Password)
   await page.getByRole('button', { name: '登录', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '外部连接', exact: true })).toBeVisible()
+  await expect(page.getByRole('main', { name: '外部连接', exact: true })).toBeVisible()
   const name = `浏览器连接${Date.now()}`
   await page.getByLabel('连接名称', { exact: true }).fill(name)
   await expect(page.getByRole('checkbox', { name: /发现本体/ })).toBeDisabled()

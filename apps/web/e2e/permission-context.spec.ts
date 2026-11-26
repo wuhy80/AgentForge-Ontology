@@ -50,7 +50,7 @@ for (const width of [1440, 390]) {
     const state = await fixture(page)
     await page.setViewportSize({ width, height: 1000 })
     await page.goto('/#admin')
-    await expect(page.getByRole('heading', { name: '用户与权限', exact: true })).toBeVisible()
+    await expect(page.getByRole('main', { name: '用户与权限', exact: true })).toBeVisible()
     await page.getByRole('tab', { name: '权限策略', exact: true }).click()
     await page.getByRole('button', { name: '添加规则', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '添加权限规则', exact: true })

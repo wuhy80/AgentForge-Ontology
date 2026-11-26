@@ -52,7 +52,7 @@ export function AdminPage({ api, session, categories, definitions, onSessionChan
 
   function refresh() { setRevision((value) => value + 1); setMessage('') }
   if (!session.user.administrator) return <div className="card empty-state"><ShieldCheck size={32} /><h2>此页面仅向租户管理员开放</h2><p className="muted">请联系当前租户管理员管理账户与角色。</p></div>
-  return <div className="admin-page"><header className="admin-page-heading"><div><div className="admin-eyebrow">ACCESS MANAGEMENT</div><h1>用户与权限</h1><p className="muted">管理本租户的用户、用户组、角色与业务访问规则。</p></div><span className="badge"><ShieldCheck size={14} />租户管理员</span></header>
+  return <div className="admin-page">
     <div className="admin-tabs" role="tablist" aria-label="用户与权限模块">{tabs.map(({ id, name, icon: Icon }) => <button key={id} role="tab" type="button" aria-selected={tab === id} aria-controls={`admin-${id}`} id={`admin-tab-${id}`} className={tab === id ? 'is-active' : ''} onClick={() => { setTab(id); setMessage('') }}><Icon size={16} />{name}</button>)}</div>
     {error && <div className="notice notice-error" role="alert">{error}</div>}{message && <div className="notice notice-success" role="status">{message}</div>}
     <div className="admin-toolbar"><span className="muted">{loading ? '正在读取管理数据…' : denied ? '授权已拒绝，管理数据已清除' : !policy ? '管理数据未能完整读取，请重试' : tab === 'users' ? `当前租户 ${users.length} 位用户` : tab === 'groups' ? `${groups.length} 个用户组` : tab === 'roles' ? `${roles.length} 个角色` : tab === 'policy' ? '策略草稿与当前生效规则分别维护' : '最近的账户、用户组与策略操作'}</span><button type="button" className="button subtle" disabled={loading} onClick={refresh}><RefreshCw size={15} />重新读取</button></div>

@@ -117,14 +117,11 @@ export function JobsPage({ api }: { api: ApiClient }) {
     })
   }
 
-  return <section className="connections-page" aria-labelledby="jobs-title">
-    <header className="connections-heading">
-      <h1 id="jobs-title">我的任务</h1>
-      <button type="button" className="button" disabled={busy} onClick={() => void perform((signal) => list(signal))}><RefreshCw size={15} />刷新任务</button>
-    </header>
+  return <section className="connections-page" aria-label="我的任务">
     {error && <p className="notice notice-error" role="alert">{error}</p>}
     {busy && <p className="muted" role="status">正在读取或更新任务…</p>}
-    <section className="card connections-list" aria-label="任务记录">
+    <section className="card connections-list" aria-labelledby="job-records">
+      <div className="connections-section-heading"><h2 id="job-records">任务记录</h2><button type="button" className="button" disabled={busy} onClick={() => void perform((signal) => list(signal))}><RefreshCw size={15} />刷新任务</button></div>
       {!items.length && !busy && !error && <p className="empty-state">提交后台运行后，任务会显示在这里。</p>}
       <ul>{items.map((item) => <li key={item.id}>
         <div className="connections-item-title"><strong>{item.definitionName}</strong><span className="badge">{labels[item.status]}</span></div>

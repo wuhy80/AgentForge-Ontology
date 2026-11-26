@@ -15,10 +15,10 @@ const assertReadOnly = (state: Awaited<ReturnType<typeof ontologyFixture>>) => {
 test('工作空间下方提供本体全景，直达与刷新完整读取五类当前态分页目录', async ({ page }) => {
   const state = await ontologyFixture(page)
   await page.goto('/#ontology')
-  await expect(page.getByRole('heading', { name: '本体全景', exact: true })).toBeVisible()
+  await expect(page.getByRole('main', { name: '本体全景', exact: true })).toBeVisible()
   await expect(directory(page).getByRole('button', { name: '查看对象模型：笔记', exact: true })).toBeVisible()
   const navigation = page.getByRole('navigation', { name: '工作台导航' }).getByRole('group', { name: '工作台', exact: true })
-  expect((await navigation.getByRole('link').allTextContents()).map((value) => value.trim())).toEqual(['工作空间', '本体全景'])
+  expect((await navigation.getByRole('link').allTextContents()).map((value) => value.trim())).toEqual(['工作空间', '本体全景', '分层全景'])
   await expect(navigation.getByRole('link', { name: '本体全景' })).toHaveAttribute('aria-current', 'page')
   for (const name of ['查看关系：笔记标记标签', '查看枚举：笔记状态', '查看动作：生成笔记摘要', '查看函数：规范标题']) await expect(directory(page).getByRole('button', { name, exact: true })).toBeVisible()
   await expect(directory(page).getByText('未发布的秘密模型', { exact: true })).toHaveCount(0)

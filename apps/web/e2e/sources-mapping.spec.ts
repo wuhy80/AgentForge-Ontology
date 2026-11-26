@@ -33,6 +33,7 @@ async function mappingFixture(page: Page) {
     const path = url.pathname
     const method = request.method()
     const reply = (json: unknown, status = 200) => route.fulfill({ status, json })
+    if (path === '/api/metadata/auth/connections') return reply({ data: [], hasMore: false })
     if (path === '/api/metadata/auth/session') return reply({ user: { id: 'administrator', tenantId, username: 'admin', displayName: '管理员', administrator: true, enabled: true, roleIds: [], etag: 'account' }, expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: 'fixture-csrf' })
     if (path === '/api/metadata/capabilities') return reply({ definitions: ['schema'], lifecycle: ['draft', 'active'], schemaModes: ['schema_2_db', 'db_2_schema'], storageLayouts: ['single'] })
     if (path === '/api/data/capabilities') return reply({ backend: 'mysql', maxPageSize: 100, maxSortFields: 1, operations: ['query'] })
@@ -216,7 +217,7 @@ test('数据源独立配置后，模型逐属性跨源映射并从数据库读�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await editor.getByRole('button', { name: '返回模型列表', exact: true }).click()
   await page.getByRole('link', { name: '数据源配置', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '数据源配置', exact: true })).toBeVisible()
+  await expect(page.getByRole('main', { name: '数据源配置', exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   expect(state.unhandled).toEqual([])
   expect(errors).toEqual([])

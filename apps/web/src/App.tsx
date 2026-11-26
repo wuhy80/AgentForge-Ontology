@@ -516,7 +516,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
         <header className="topbar">
           <div className="breadcrumbs">
             Ontology <ChevronRight size={14} />
-            <span>{title}</span>
+            <span id="workspace-view">{title}</span>
             {loading && loaded && <LoaderCircle size={13} className="spin" aria-label="正在刷新" />}
           </div>
           <div className="topbar-right">
@@ -547,7 +547,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
             </button>
           </div>
         </header>
-        <main id="main-content" className="main-content" tabIndex={-1}>
+        <main id="main-content" className="main-content" aria-labelledby="workspace-view" tabIndex={-1}>
           {notice && <div className="notice notice-error" role="alert">{notice}</div>}
           {passwordOpen && <ChangePassword api={session.api} onUpdated={onAccountUpdated} onClose={() => setPasswordOpen(false)} />}
           {help && (
@@ -741,37 +741,6 @@ function Overview({
   ]
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <span className="eyebrow">YOUR ONTOLOGY, CONNECTED</span>
-          <h1>工作空间概览</h1>
-          <p>{categoryName ? `${categoryName} · 从清晰的业务定义，到可以探索的数据。` : '在“分类与分组”创建目录，开始组织业务模型。'}</p>
-        </div>
-        <button type="button" className="button primary" onClick={onModels}>
-          <Layers3 size={16} /> 管理模型 <ArrowRight size={16} />
-        </button>
-      </div>
-      <div className="overview-hero">
-        <div className="overview-hero-copy">
-          <span className="hero-tag">
-            <span className="live-dot" /> 一个工作空间，统一业务语义
-          </span>
-          <h2>
-            把业务知识，
-            <br />
-            变成可用的数据。
-          </h2>
-          <p>
-            定义对象、连接关系、探索数据。
-            <br />
-            为你的业务建立可持续演进的语义基础。
-          </p>
-          <button type="button" className="hero-link" onClick={onModels}>
-            探索模型目录 <ArrowRight size={17} />
-          </button>
-        </div>
-        <OntologyIllustration />
-      </div>
       <div className="stats-grid">
         {stats.map((stat) => (
           <div className="stat-card card" key={stat.name}>

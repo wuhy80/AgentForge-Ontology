@@ -88,7 +88,7 @@ test('真实服务：分类、可重新发现的草稿、发布、精确查询�
   await publishedProperty.getByRole('button', { name: '取消', exact: true }).click()
   await dialog.getByRole('button', { name: '返回模型列表', exact: true }).click()
   await page.getByRole('button', { name: '查询', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '探索业务数据' })).toBeVisible()
+  await expect(page.getByRole('main', { name: '数据探索', exact: true })).toBeVisible()
   await page.getByRole('tab', { name: '可视化查询', exact: true }).click()
 
   for (const [name, amount] of [['输送泵一号', '9007199254740993.0000'], ['输送泵二号', '9007199254740993.0001']]) {

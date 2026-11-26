@@ -240,11 +240,9 @@ describe('模型工作流', () => {
     const api = client()
     const props = { api: api as unknown as ApiClient, categoryId: 'category', categories: [...categories, { id: 'quality', tenantId: 'tenant', name: '质量管理' }], entries: [record('active'), other], onRefresh: vi.fn().mockResolvedValue(undefined), onQuery: vi.fn(), onOrganizations: vi.fn() }
     const view = render(<ModelsPage {...props} route="models" />)
-    expect(screen.getByRole('heading', { name: '对象模型' })).toBeTruthy()
     expect(screen.getByText('1 个已加载定义')).toBeTruthy()
     expect(screen.queryByRole('button', { name: '检验报告' })).toBeNull()
     view.rerender(<ModelsPage {...props} route="models?kind=link" />)
-    expect(screen.getByRole('heading', { name: '关系' })).toBeTruthy()
     expect(screen.getByText('0 个已加载定义')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: '新建定义' }))
     const dialog = await screen.findByRole('region', { name: '模型编辑' })

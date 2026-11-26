@@ -29,7 +29,7 @@ test('登录页默认深空蓝，记住精密白；存储不可用仍可切换',
 test('主题跨标签页同步，刷新及导航保留，切换不提交业务请求', async ({ page, context }) => {
   const first = await ontologyFixture(page)
   await page.goto('/#ontology')
-  await expect(page.getByRole('heading', { name: '本体全景', exact: true })).toBeVisible()
+  await expect(page.getByRole('main', { name: '本体全景', exact: true })).toBeVisible()
   const other = await context.newPage()
   const second = await ontologyFixture(other)
   await other.goto('/#overview')

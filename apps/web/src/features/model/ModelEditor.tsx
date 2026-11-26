@@ -17,7 +17,7 @@ import { CallableImplementationEditor } from './CallableImplementationEditor'
 import { CallableRunner } from './CallableRunner'
 import { ActionRecordReadEditor } from './ActionRecordReadEditor'
 import { CallableTestCasesEditor } from './CallableTestCasesEditor'
-import { activeEntries, cloneDefinition, kindDescriptions, kindLabels, MAX_SCHEMA_INDEXES, MAX_SCHEMA_PROPERTIES, newDefinition, validateDefinition } from './model-helpers'
+import { activeEntries, cloneDefinition, kindLabels, MAX_SCHEMA_INDEXES, MAX_SCHEMA_PROPERTIES, newDefinition, validateDefinition } from './model-helpers'
 
 const LinkVisualEditor = lazy(() => import('./LinkVisualEditor').then((module) => ({ default: module.LinkVisualEditor })))
 
@@ -370,9 +370,8 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   }
 
   return <section className="model-editor-page" aria-label="模型编辑">
-    <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" onClick={requestClose} disabled={!!busy}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑定义' : `新建${kindLabels[definition.kind]}`}</h1><p className="muted">{kindDescriptions[definition.kind]}</p></div></div>
     <div className="model-editor">
-      <div className="model-editor-meta"><span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{suspended ? '已停用' : record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}
+      <div className="model-editor-meta"><button type="button" className="button subtle model-back-button" onClick={requestClose} disabled={!!busy}><ArrowLeft size={16} />返回模型列表</button>{definition.name && <strong className="model-editor-name">{definition.name}</strong>}<span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{suspended ? '已停用' : record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}
         {canDeleteDefinition && deleteETag !== record?.etag && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(false)}>{canDeleteManaged ? '删除模型' : canDeleteEnum ? '删除枚举' : '删除草稿'}</button>}
         {lifecycleAllowed && !confirmLifecycle && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void checkLifecycle()}>{suspended ? '恢复定义' : '停用定义'}</button>}
       </div>

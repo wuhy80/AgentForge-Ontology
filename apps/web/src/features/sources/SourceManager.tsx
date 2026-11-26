@@ -174,8 +174,7 @@ export function SourceManager({ api, source, active, onBack, onDenied }: { api: 
   if (!active) return null
 
   return <div className="sources-page source-manager">
-    <nav className="source-breadcrumb" aria-label="数据库管理导航"><button type="button" className="button subtle source-back" aria-label="返回数据源列表" onClick={() => { abortAll(); cancelQueries(); onBack() }}><ArrowLeft size={15} />返回列表</button><span>/</span><span>数据库管理</span></nav>
-    <div className="sources-heading"><div><h1>数据库管理</h1><p className="muted">{current?.name || '正在读取数据源'} · 浏览数据库结构、预览表数据与执行查询</p></div>{current && <span className="badge">{current.driver === 'mysql' ? 'MySQL' : 'PostgreSQL'}</span>}</div>
+    <nav className="source-breadcrumb" aria-label="数据库管理导航"><button type="button" className="button subtle source-back" aria-label="返回数据源列表" onClick={() => { abortAll(); cancelQueries(); onBack() }}><ArrowLeft size={15} />返回列表</button><span>/</span><span>{current?.name ?? '正在读取数据源'}</span>{current && <span className="badge">{current.driver === 'mysql' ? 'MySQL' : 'PostgreSQL'}</span>}</nav>
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     <section className="card source-database-info" aria-label="数据库基础信息" aria-busy={loading}>
       <div className="sources-panel-heading"><h2><Database size={18} />数据库基础信息</h2><button type="button" className="button subtle" disabled={loading} onClick={() => void reload()}>{loading ? <LoaderCircle size={15} className="spin" /> : <RefreshCw size={15} />}刷新结构</button></div>

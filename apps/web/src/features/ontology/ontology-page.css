@@ -1,13 +1,10 @@
 .ontology-explorer { min-width: 0; }
-.ontology-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin: 0 0 18px; }
-.ontology-page-heading .eyebrow { color: var(--muted); font-size: 11px; letter-spacing: 1.8px; }
-.ontology-page-heading h1 { margin-top: 5px; }
-.ontology-page-heading p { margin-top: 6px; color: var(--muted); font-size: 13px; }
-.ontology-refresh { flex: none; background: var(--surface); }
 .ontology-scope { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; font-size: 12px; color: var(--muted); }
 .ontology-scope > span { display: flex; align-items: center; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
 .ontology-scope strong { font-weight: 500; }
-.ontology-current-badge { font-size: 11px; background: var(--success-soft); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; color: var(--success); }
+.ontology-scope-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.ontology-scope-actions .button { min-height: 30px; padding: 4px 8px; font-size: 12px; }
+.ontology-current-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; background: var(--success-soft); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; color: var(--success); }
 .ontology-current-badge i { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
 .ontology-loading { display: flex; gap: 12px; align-items: center; justify-content: center; min-height: 220px; color: var(--muted); }
 .ontology-explorer > .notice span { display: block; margin-top: 6px; font-size: 12px; }
@@ -70,10 +67,6 @@
   .ontology-kind-summary { padding: 12px 10px; gap: 6px; }
 }
 @media (max-width: 720px) {
-  .ontology-page-heading { gap: 10px; align-items: flex-start; }
-  .ontology-page-heading h1 { font-size: 24px; }
-  .ontology-page-heading p { font-size: 11px; }
-  .ontology-refresh { font-size: 11px; padding: 8px; margin-top: 20px; }
   .ontology-type-summary { gap: 5px; margin-bottom: 12px; }
   .ontology-kind-summary { flex-direction: column; padding: 9px 3px; font-size: 11px; gap: 4px; }
   .ontology-kind-summary strong { margin-left: 0; font-size: 18px; }

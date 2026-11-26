@@ -199,22 +199,7 @@ button:disabled {
   color: var(--ink);
 }
 .text-button,
-.hero-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: transparent;
-  border: 0;
-  padding: 0;
-  font-weight: 500;
-  font-size: 12px;
-  color: var(--primary);
-  text-decoration: none;
-}
 .text-button:hover,
-.hero-link:hover {
-  color: var(--primary);
-}
 .card {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -870,24 +855,6 @@ td .icon-button {
   width: 100%;
   margin: 0 auto;
 }
-.page-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 18px;
-  margin-bottom: 20px;
-}
-.page-heading .eyebrow {
-  margin-bottom: 5px;
-}
-.page-heading p {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 7px;
-}
-.page-heading > .button {
-  margin-top: 10px;
-}
 .workspace-footer {
   display: flex;
   align-items: center;
@@ -949,67 +916,6 @@ td .icon-button {
 }
 .skip-link:focus {
   top: 10px;
-}
-.overview-hero {
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  min-height: 240px;
-  background: var(--surface);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  overflow: hidden;
-  position: relative;
-  margin-bottom: 23px;
-  border-color: var(--line);
-}
-.overview-hero:after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: .6;
-  background-image: radial-gradient(var(--grid) .7px, transparent .7px);
-  background-size: 17px 17px;
-  mask-image: linear-gradient(to right, transparent 25%, #000);
-}
-.overview-hero-copy {
-  padding: 27px 32px;
-  z-index: 1;
-  flex-shrink: 0;
-}
-.hero-tag {
-  font-size: 11px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--muted);
-  letter-spacing: 0.5px;
-  margin-bottom: 14px;
-}
-.hero-tag .live-dot {
-  width: 5px;
-  height: 5px;
-  background: var(--surface-raised);
-}
-.overview-hero h2 {
-  font-size: 27px;
-  line-height: 1.55;
-  letter-spacing: 0.4px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.overview-hero p {
-  font-size: 11px;
-  line-height: 1.9;
-  color: var(--muted);
-  margin-top: 12px;
-}
-.hero-link {
-  font-size: 11px;
-  margin-top: 19px;
-  color: var(--ink);
-  gap: 15px;
 }
 .ontology-illustration {
   position: relative;
@@ -1603,15 +1509,6 @@ textarea.field:disabled {
   color: var(--ink);
 }
 @media (min-width: 1550px) {
-  .overview-hero-copy {
-    padding-left: 40px;
-  }
-  .overview-hero .ontology-illustration {
-    margin-right: 80px;
-  }
-  .overview-hero {
-    min-height: 300px;
-  }
   .overview-columns {
     grid-template-columns: minmax(0, 1fr) 310px;
   }
@@ -1651,9 +1548,6 @@ textarea.field:disabled {
     margin-left: -50px;
     margin-right: 5px;
   }
-  .overview-hero-copy {
-    padding-left: 25px;
-  }
   .overview-columns {
     grid-template-columns: minmax(0, 1fr) 245px;
     gap: 17px;
@@ -1676,17 +1570,6 @@ textarea.field:disabled {
   }
 }
 @media (max-width: 1000px) {
-  .overview-hero .ontology-illustration {
-    margin-left: -140px;
-    transform: scale(0.74);
-    margin-right: -30px;
-  }
-  .overview-hero-copy {
-    max-width: 320px;
-  }
-  .overview-hero-copy p {
-    max-width: 250px;
-  }
   .overview-columns {
     grid-template-columns: 1fr;
   }
@@ -1789,24 +1672,6 @@ textarea.field:disabled {
   }
   .main-content {
     padding: 25px var(--workspace-gutter);
-  }
-  .overview-hero h2 {
-    font-size: 25px;
-  }
-  .overview-hero .ontology-illustration {
-    transform: scale(0.65);
-    margin-left: -195px;
-    margin-right: -55px;
-  }
-  .overview-hero {
-    min-height: 255px;
-  }
-  .overview-hero-copy {
-    padding: 25px;
-    max-width: 300px;
-  }
-  .page-heading h1 {
-    font-size: 24px;
   }
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1937,52 +1802,6 @@ textarea.field:disabled {
   }
   .main-content {
     padding: 22px var(--workspace-gutter);
-  }
-  .page-heading {
-    align-items: flex-start;
-    gap: 10px;
-    margin-bottom: 20px;
-  }
-  .page-heading h1 {
-    font-size: 22px;
-  }
-  .page-heading p {
-    font-size: 11px;
-    line-height: 1.8;
-  }
-  .page-heading .eyebrow {
-    font-size: 11px;
-    letter-spacing: 1px;
-  }
-  .page-heading > .button {
-    font-size: 11px;
-    padding: 8px 10px;
-    gap: 5px;
-  }
-  .page-heading > .button > svg:last-child {
-    display: none;
-  }
-  .overview-hero {
-    min-height: 240px;
-  }
-  .overview-hero .ontology-illustration {
-    display: none;
-  }
-  .overview-hero-copy {
-    max-width: none;
-    padding: 23px;
-  }
-  .overview-hero h2 {
-    font-size: 25px;
-  }
-  .overview-hero p {
-    font-size: 11px;
-  }
-  .hero-tag {
-    font-size: 11px;
-  }
-  .hero-link {
-    margin-top: 15px;
   }
   .stat-card {
     padding: 13px;

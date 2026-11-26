@@ -1,13 +1,10 @@
 .organizations-page { display: grid; gap: 20px; }
-.organizations-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
-.organizations-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .14em; color: var(--muted); margin-bottom: 7px; }
-.organizations-heading h1 { font-size: 29px; letter-spacing: -.04em; margin: 0 0 8px; }
-.organizations-heading p { margin: 0; max-width: 670px; line-height: 1.7; }
-.organizations-heading > .button { flex-shrink: 0; }
 .organizations-layout { display: grid; grid-template-columns: minmax(260px, .85fr) minmax(0, 1.5fr); gap: 22px; align-items: start; }
 .organizations-layout > .card { min-width: 0; overflow: hidden; }
 .organizations-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 23px 24px 0; }
 .organizations-section-heading > div { display: flex; gap: 10px; align-items: center; min-width: 0; color: var(--ink); }
+.organizations-section-heading .organizations-category-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.organizations-category-actions .button { padding: 4px 8px; font-size: 12px; white-space: nowrap; }
 .organizations-section-heading h2 { font-size: 16px; margin: 0; color: var(--ink); overflow-wrap: anywhere; }
 .organizations-section-heading > .badge { flex-shrink: 0; }
 .organizations-section-description { margin: 11px 24px 20px; font-size: 12px; line-height: 1.8; }
@@ -39,5 +36,5 @@
 .organizations-spin { animation: organizations-rotate 1s linear infinite; }
 @keyframes organizations-rotate { to { transform: rotate(360deg); } }
 @media (max-width: 1100px) { .organizations-layout { grid-template-columns: minmax(250px, 1fr) minmax(0, 1.35fr); } .organizations-group-list { grid-template-columns: 1fr; } .organizations-create { align-items: stretch; flex-direction: column; } .organizations-create > .button { align-self: flex-start; } }
-@media (max-width: 760px) { .organizations-heading { align-items: flex-start; } .organizations-heading h1 { font-size: 25px; } .organizations-heading p { font-size: 12px; } .organizations-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; } .organizations-section-heading { padding: 19px 19px 0; } .organizations-section-description { margin-left: 19px; margin-right: 19px; } .organizations-create { padding: 19px; } .organizations-group-list { padding: 0 19px 19px; } .organizations-notice { margin-left: 19px; margin-right: 19px; } }
+@media (max-width: 760px) { .organizations-layout { grid-template-columns: minmax(0, 1fr); gap: 18px; } .organizations-section-heading { padding: 19px 19px 0; } .organizations-section-description { margin-left: 19px; margin-right: 19px; } .organizations-create { padding: 19px; } .organizations-group-list { padding: 0 19px 19px; } .organizations-notice { margin-left: 19px; margin-right: 19px; } }
 @media (prefers-reduced-motion: reduce) { .organizations-spin { animation: none; } }

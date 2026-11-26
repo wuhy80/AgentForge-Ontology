@@ -62,7 +62,7 @@ async function fixture(page: Page, shared = false) {
 test('数据库概览与双栏目录、分页搜索和字段详情，刷新与键盘 Tabs 在宽窄屏可用', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', (error) => errors.push(error.message))
   const state = await fixture(page)
-  await expect(page.getByRole('heading', { name: '数据库管理', level: 1 })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '数据库管理导航', exact: true })).toBeVisible()
   const overview = page.getByRole('region', { name: '数据库基础信息', exact: true })
   await expect(overview).toContainText('26.7.0')
   await expect(overview).toContainText('utf8mb4')
@@ -164,7 +164,7 @@ test('预览与 SQL 独立执行并保留精度，配置过期需刷新，撤权
   expect(state.queries.at(-1)?.etag).toBe('"source-updated"')
   state.queryMode = 'forbidden'
   await page.getByRole('button', { name: '执行 SQL', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '数据源配置', exact: true })).toBeVisible()
+  await expect(page.getByRole('main', { name: '数据源配置', exact: true })).toBeVisible()
   await expect(page.getByRole('alert')).toContainText('数据库管理权限已撤销')
   await expect(page.getByText('9007199254740993.0001', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('region', { name: '数据库表目录', exact: true })).toHaveCount(0)

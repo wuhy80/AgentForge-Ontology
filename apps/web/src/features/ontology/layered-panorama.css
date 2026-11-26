@@ -1,4 +1,3 @@
-.ontology-panorama-page .ontology-page-heading { padding-block: 4px; margin-bottom: 6px; }
 .ontology-panorama-page .ontology-scope { margin-bottom: 12px; }
 .panorama-layout {
   --drawer-width: clamp(245px, 24%, 340px);

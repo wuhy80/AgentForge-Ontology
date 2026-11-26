@@ -1,7 +1,4 @@
 .sources-page { min-width: 0; }
-.sources-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
-.sources-heading h1 { margin: 0 0 8px; font-size: 25px; }
-.sources-heading p { margin: 0; font-size: 13px; }
 .sources-actions, .sources-editor-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .sources-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
 .sources-directory, .sources-editor { min-width: 0; padding: 20px; }
@@ -13,7 +10,7 @@
 .sources-list-empty { text-align: center; padding: 32px 16px; color: var(--muted); }
 .sources-row-actions { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
 .sources-row-actions .button { font-size: 12px; padding: 6px 8px; }
-.sources-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.sources-panel-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .sources-panel-heading h2 { margin: 0; }
 .sources-fields { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .sources-fields label { display: grid; gap: 7px; font-size: 12px; color: var(--muted); min-width: 0; }
@@ -34,7 +31,7 @@
 .sources-tables h3 { font-size: 13px; overflow-wrap: anywhere; }
 .sources-table-buttons { display: flex; flex-wrap: wrap; gap: 7px; }
 .sources-table-buttons button { max-width: 100%; overflow-wrap: anywhere; }
-.source-breadcrumb { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
+.source-breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
 .source-breadcrumb .source-back { padding: 5px 0; }
 .source-database-info, .source-table-catalog, .source-management-content { min-width: 0; padding: 22px; }
 .source-manager h2 { margin: 0 0 16px; font-size: 16px; display: flex; align-items: center; gap: 8px; overflow-wrap: anywhere; }
@@ -120,7 +117,7 @@
 .source-sql-results { margin-top: 16px; min-width: 0; }
 .source-result-cell { min-width: 80px; max-width: 340px; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 1100px) { .source-management-layout { grid-template-columns: minmax(0, 1fr); } .source-table-list { max-height: 340px; } }
-@media (max-width: 600px) { .sources-heading { align-items: flex-start; flex-direction: column; } .sources-fields { grid-template-columns: 1fr; } .sources-directory, .sources-editor { padding: 15px; } }
+@media (max-width: 600px) { .sources-fields { grid-template-columns: 1fr; } .sources-directory, .sources-editor { padding: 15px; } }
 @media (max-width: 600px) {
   .source-database-info, .source-table-catalog, .source-management-content { padding: 15px; }
   .source-info-grid { grid-template-columns: minmax(0, 1fr); gap: 22px; }

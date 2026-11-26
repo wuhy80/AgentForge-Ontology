@@ -148,12 +148,11 @@ export function SourcesPage({ api, administrator, active = true }: { api: ApiCli
   }
   if (administrator && managing) return <SourceManager key={managing.id} api={api} source={managing} active={active} onBack={() => { setManaging(undefined); setRevision((value) => value + 1) }} onDenied={report} />
   return <div className="sources-page">
-    <div className="sources-heading"><div><h1>数据源配置</h1><p className="muted">管理数据库连接，供对象模型选择主表及属性来源。</p></div>{administrator && <div className="sources-actions"><button type="button" className="button subtle" disabled={!!busy} aria-label="刷新数据源" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} /></button><button type="button" className="button primary" disabled={!!busy} onClick={() => edit('new')}><Plus size={16} />添加数据源</button></div>}</div>
     {!administrator ? <div className="card empty-state"><Database size={30} /><h2>数据源由租户管理员配置</h2><p className="muted">模型编辑可选择已获授权的数据源与表列。</p></div> : <>
       {error && <div className="notice notice-error" role="alert">{error}</div>}
       {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
       <div className="sources-layout">
-        <section className="card sources-directory" aria-label="已配置的数据源"><h2>已配置的数据源 <span className="muted">{sources.length}</span></h2>
+        <section className="card sources-directory" aria-label="已配置的数据源"><div className="sources-panel-heading"><h2>已配置的数据源 <span className="muted">{sources.length}</span></h2><div className="sources-actions"><button type="button" className="button subtle" disabled={!!busy} aria-label="刷新数据源" onClick={() => setRevision((value) => value + 1)}><RefreshCw size={16} /></button><button type="button" className="button primary" disabled={!!busy} onClick={() => edit('new')}><Plus size={16} />添加数据源</button></div></div>
           <div className="table-wrap"><table className="sources-list"><thead><tr><th>数据源名称</th><th>类型</th><th>主机 / 端口</th><th>数据库</th><th>版本 / 兼容状态</th><th>状态</th><th>操作</th></tr></thead><tbody>
             {!sources.length ? <tr><td colSpan={7} className="sources-list-empty">{busy === 'load' ? '正在读取…' : '尚未配置数据源，点击“添加数据源”开始。'}</td></tr> : sources.map((source) => <tr key={source.id} className={editing !== 'new' && editing?.id === source.id ? 'is-active' : ''}>
               <td><strong>{source.name}</strong></td><td>{driverNames[source.driver]}</td><td>{source.host || '—'}:{source.port || (source.driver === 'mysql' ? 3306 : 5432)}</td><td>{source.database}</td>

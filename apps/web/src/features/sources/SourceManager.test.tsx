@@ -71,7 +71,7 @@ describe('数据源表格与数据库管理', () => {
     fireEvent.click(within(row).getByRole('button', { name: '管理' }))
     await ready()
     expect(screen.queryByLabelText('数据库密码')).toBeNull()
-    expect(screen.getByRole('heading', { name: '数据库管理', level: 1 })).toBeTruthy()
+    expect(within(screen.getByRole('navigation', { name: '数据库管理导航' })).getByText('业务库')).toBeTruthy()
     expect(mocks.getDataSource).toHaveBeenCalledWith('source', expect.any(AbortSignal))
     expect(mocks.getSourceOverview).toHaveBeenCalledWith('source', expect.any(AbortSignal))
     expect(mocks.inspectSourceTable).toHaveBeenCalledWith('source', 'orders', 'business', expect.any(AbortSignal))
