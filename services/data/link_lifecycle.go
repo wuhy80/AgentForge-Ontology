@@ -84,7 +84,7 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			}
 			if deletionCheck && schema {
 				for _, table := range []string{
-					"af_data_property_files", "af_data_record_comments", "af_data_record_follows",
+					"af_data_property_files", "af_data_record_comments", "af_data_comment_reply_reads", "af_data_record_follows",
 					"af_data_record_notices", "af_data_record_approvals", "af_data_record_lifecycles",
 					"af_data_record_lifecycle_runs",
 				} {

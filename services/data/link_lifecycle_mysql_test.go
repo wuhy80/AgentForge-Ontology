@@ -106,6 +106,7 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 	}{
 		{"af_data_property_files", "INSERT INTO af_data_property_files (tenant_id,schema_id,entity_id,field_id,content) VALUES (?,?,?,?,?)", []any{f.p.TenantID, id, c.NewID(), c.NewID(), []byte("attachment")}},
 		{"af_data_record_comments", "INSERT INTO af_data_record_comments (tenant_id,schema_id,entity_id,id,author,parent_id,body,created_at,etag) VALUES (?,?,?,?,?,'','comment',NOW(6),?)", []any{f.p.TenantID, id, c.NewID(), c.NewID(), f.p.Subject, c.NewID()}},
+		{"af_data_comment_reply_reads", "INSERT INTO af_data_comment_reply_reads (tenant_id,schema_id,entity_id,reply_id,subject_id) VALUES (?,?,?,?,?)", []any{f.p.TenantID, id, c.NewID(), c.NewID(), f.p.Subject}},
 		{"af_data_record_lifecycle_runs", "INSERT INTO af_data_record_lifecycle_runs (tenant_id,schema_id,entity_id,id,transition_id,from_stage_id,to_stage_id,actor,note,created_at) VALUES (?,?,?,?,?,?,?,?,'',NOW(6))", []any{f.p.TenantID, id, c.NewID(), c.NewID(), c.NewID(), c.NewID(), c.NewID(), f.p.Subject}},
 	} {
 		if _, err := f.engine.DB().ExecContext(ctx, seed.query, seed.args...); err != nil {
