@@ -127,6 +127,10 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) notifyLifecycleFollowers(ctx context.Context, tx *sql.Tx, actor c.Principal, d c.Definition, record, run string) error {
 	const limit = 200
+	// Bound the batch independently of the parent transaction so a slow
+	// authorization service leaves time to record the failed delivery.
+	deliveryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	rows, err := tx.QueryContext(ctx, "SELECT subject_id FROM af_data_record_follows WHERE "+lifecycleStageScope+" AND subject_id<>? ORDER BY subject_id LIMIT ?", actor.TenantID, d.ID, record, actor.Subject, limit+1)
 	if err != nil {
 		return err
@@ -153,7 +157,7 @@ func (h *handler) notifyLifecycleFollowers(ctx context.Context, tx *sql.Tx, acto
 	deliveries := make([]delivery, 0, len(recipients))
 	for _, subject := range recipients {
 		recipient := c.Principal{TenantID: actor.TenantID, Subject: subject, ExpiresAt: time.Now().Add(time.Minute).Unix()}
-		read, err := h.authorize(ctx, recipient, "instance.read", d.ID)
+		read, err := h.authorize(deliveryCtx, recipient, "instance.read", d.ID)
 		if err == nil {
 			_, err = selectInstanceFields(ctx, tx, d, nil, actor.TenantID, record, read.RowFilter, false)
 		}
@@ -174,7 +178,7 @@ func (h *handler) notifyLifecycleFollowers(ctx context.Context, tx *sql.Tx, acto
 	// Recheck after all inserts so an authorization change while processing
 	// another recipient rolls back the entire delivery attempt.
 	for _, notice := range deliveries {
-		if err := h.recheck(ctx, notice.recipient, "instance.read", d.ID, notice.read); err != nil {
+		if err := h.recheck(deliveryCtx, notice.recipient, "instance.read", d.ID, notice.read); err != nil {
 			return err
 		}
 	}

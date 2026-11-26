@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
@@ -250,6 +251,7 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	authorizer := config.Authorizer
 	checkedSecond := false
 	revoked := false
+	waitForDeliveryDeadline := true
 	config.Authorizer = authorizerFunc(func(ctx context.Context, p c.Principal, req c.AuthorizationRequest) (c.Decision, error) {
 		if p.Subject == second && req.Operation == "instance.read" {
 			checkedSecond = true
@@ -258,6 +260,14 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 			return c.Decision{Allow: false}, nil
 		}
 		if checkedSecond && p.Subject == first && req.Operation == "instance.read" {
+			if waitForDeliveryDeadline {
+				select {
+				case <-ctx.Done():
+					return c.Decision{}, ctx.Err()
+				case <-time.After(5 * time.Second):
+					t.Error("notification authorization exceeded its delivery deadline")
+				}
+			}
 			return c.Decision{}, context.DeadlineExceeded
 		}
 		return authorizer.Authorize(ctx, p, req)
@@ -277,6 +287,7 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 		}
 	}
 	countNotices(0)
+	waitForDeliveryDeadline = false
 	retry := "/instances/" + row.ID + "/lifecycle/runs/" + run + "/retry-notification"
 	f.call("POST", retry, nil, "", 503)
 	countNotices(0)
