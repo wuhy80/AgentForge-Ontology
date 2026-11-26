@@ -30,6 +30,18 @@ type observedJobStore struct {
 	ready chan struct{}
 }
 
+type jobAdmissionFixtureStore struct {
+	*SQLStore
+	beforeAdmit func()
+}
+
+func (s jobAdmissionFixtureStore) admitJob(ctx context.Context, record Record) (bool, error) {
+	if record.RequestKey == "late-definition-job" {
+		s.beforeAdmit()
+	}
+	return s.SQLStore.admitJob(ctx, record)
+}
+
 func (s observedJobStore) hasReadyJob(ctx context.Context) (bool, error) {
 	ready, err := s.jobStore.hasReadyJob(ctx)
 	if ready && err == nil {
@@ -83,7 +95,12 @@ func TestMySQLJobLifecycle(t *testing.T) {
 	// lease expiry before the replacement worker begins.
 	stopped, cancel := context.WithCancel(ctx)
 	cancel()
-	cfg := Config{WorkerContext: stopped, Store: store, Metadata: f.meta, Authorizer: auth, SessionChecker: auth, Runner: f.runner, MaxConcurrent: 2}
+	admission := jobAdmissionFixtureStore{SQLStore: store, beforeAdmit: func() {
+		f.meta.mu.Lock()
+		defer f.meta.mu.Unlock()
+		delete(f.meta.definitions, tenant+":"+f.fn.ID)
+	}}
+	cfg := Config{WorkerContext: stopped, Store: admission, Metadata: f.meta, Authorizer: auth, SessionChecker: auth, Runner: f.runner, MaxConcurrent: 2}
 	app := NewHandler(cfg)
 	call := func(method, path, key, body, requestTenant string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://workbench.test"+path, strings.NewReader(body))
@@ -98,6 +115,24 @@ func TestMySQLJobLifecycle(t *testing.T) {
 	}
 	const collection = "/execution/invocations"
 	body := strings.Replace(validBody, `{"definitionId"`, `{"async":true,"definitionId"`, 1)
+	t.Run("LateDefinitionAdmission", func(t *testing.T) {
+		defer f.meta.set(f.fn)
+		submitted := invocation(t, call("POST", collection, "late-definition-job", body, tenant), 202)
+		running, err := store.leaseJob(ctx)
+		if err != nil || running.Invocation.ID != submitted.ID {
+			t.Fatalf("lease late-admitted job: %v", err)
+		}
+		worker := handler{cfg: cfg, jobs: store}
+		worker.runJob(ctx, running)
+		saved, err := store.FindID(ctx, tenant, "user", submitted.ID)
+		if err != nil || saved.Invocation.Status != "failed" || saved.Invocation.Error == nil ||
+			saved.Invocation.Error.Code != "authorization_or_definition_changed" || f.runner.calls.Load() != 0 {
+			t.Fatalf("late job did not fail before starting the runner: status=%s err=%v", saved.Invocation.Status, err)
+		}
+		if pending, err := store.hasUnfinishedDefinitionInvocation(ctx, tenant, f.fn.ID); err != nil || pending {
+			t.Fatalf("terminal job still counted as unfinished: pending=%v err=%v", pending, err)
+		}
+	})
 	job := invocation(t, call("POST", collection, "same-job", body, tenant), 202)
 	path := collection + "/" + job.ID
 	if job.Status != "queued" || invocation(t, call("POST", collection, "same-job", body, tenant), 202).ID != job.ID {
