@@ -120,9 +120,9 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, panorama,
     setFocusId(undefined)
   }
 
-  return <div className="ontology-explorer" aria-label="本体全景">
+  return <div className={panorama ? 'ontology-explorer ontology-panorama-page' : 'ontology-explorer'} aria-label={panorama ? '分层全景' : '本体全景'}>
     <header className="ontology-page-heading">
-      <div><span className="eyebrow">ONTOLOGY EXPLORER</span><h1>{panorama ? '分层全景' : '本体全景'}</h1><p>以对象为中心，发现业务关系与定义之间的联系。</p></div>
+      <div>{!panorama && <span className="eyebrow">ONTOLOGY EXPLORER</span>}<h1>{panorama ? '分层全景' : '本体全景'}</h1><p>{panorama ? '按层查看对象模型、业务关系与执行关联。' : '以对象为中心，发现业务关系与定义之间的联系。'}</p></div>
       <button type="button" className="button ontology-refresh" disabled={loading || !categoryId} onClick={() => setRevision((value) => value + 1)}><RefreshCw size={15} className={loading ? 'spin' : ''} />刷新本体</button>
     </header>
     <div className="ontology-scope"><span><Layers3 size={15} />{category?.name ?? '尚未选择分类'}<ChevronRight size={13} /><strong>{local.length} 项已加载定义</strong></span><span className="ontology-current-badge"><i />当前生效 · 只读浏览</span></div>

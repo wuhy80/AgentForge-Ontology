@@ -17,7 +17,7 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
   const { records, categories, categoryId, mode, selectedId, focusId, rootIds } = input
   const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode, selectedId, focusId, rootIds, panorama }),
     [records, categories, categoryId, mode, selectedId, focusId, rootIds, panorama])
-  const defaultCamera = panorama ? { ...initialCamera, yaw: -.38, pitch: .33, zoom: .84 } : initialCamera
+  const defaultCamera = panorama ? { ...initialCamera, yaw: -.46, pitch: .29, zoom: .82 } : initialCamera
   const [camera, setCamera] = useState(defaultCamera)
   const drag = useRef<{ id: number; x: number; y: number; pan: boolean } | null>(null)
   const surface = useRef<HTMLDivElement>(null)
@@ -46,9 +46,9 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
   function project(x: number, y: number, z: number) {
     const horizontal = x * cosYaw + z * sinYaw
     const rotatedDepth = z * cosYaw - x * sinYaw
-    const vertical = y * cosPitch - rotatedDepth * sinPitch
-    const depth = y * sinPitch + rotatedDepth * cosPitch
-    const scale = 1250 / (1250 - depth * .65)
+    const vertical = y * cosPitch + rotatedDepth * sinPitch * (panorama ? 1 : -1)
+    const depth = y * sinPitch * (panorama ? -1 : 1) + rotatedDepth * cosPitch
+    const scale = 1250 / (1250 - depth * .55)
     return { x: 500 + camera.x + horizontal * scale * camera.zoom, y: 300 + camera.y + vertical * scale * camera.zoom, depth, scale }
   }
 
@@ -119,6 +119,8 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
     point: project((node.position.x - middleX) * 660 / unit, (node.position.y - middleY) * 660 / unit,
       depthByKind[node.record.definition.kind] * 84 + Math.sin(node.position.y / 170) * 62),
   }))).sort((a, b) => a.point.depth - b.point.depth)
+  const slabCorners = [[-380, -340], [380, -340], [380, 340], [-380, 340]]
+  const coordinates = (points: { x: number; y: number }[]) => points.map(point => `${point.x},${point.y}`).join(' ')
   const points = new Map(nodes.map(node => [node.id, node.point]))
   const edges = model.edges.flatMap(edge => {
     const from = points.get(edge.source)
@@ -191,11 +193,18 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
       <svg viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
         <defs><marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 Z" fill="var(--edge)" /></marker></defs>
         {!layers && <path d={grid} className="ontology-space-grid" />}
+        {panorama && planes.length > 1 && slabCorners.map(([x, z]) => {
+          const top = project(x, planes[0].y, z)
+          const bottom = project(x, planes[planes.length - 1].y + 11, z)
+          return <line key={`${x}:${z}`} className="panorama-pillar" x1={top.x} x2={bottom.x} y1={top.y} y2={bottom.y} />
+        })}
         {planes.map(plane => {
           const corners = flat ? [{ x: 0, y: plane.top }, { x: 1000, y: plane.top }, { x: 1000, y: plane.bottom }, { x: 0, y: plane.bottom }]
-            : [project(-380, plane.y, -340), project(380, plane.y, -340), project(380, plane.y, 340), project(-380, plane.y, 340)]
-          return <g key={plane.id}>
-            <polygon className="ontology-layer-plane" data-panorama-layer={panorama ? plane.id : undefined} points={corners.map(point => `${point.x},${point.y}`).join(' ')} />
+            : slabCorners.map(([x, z]) => project(x, plane.y, z))
+          return <g key={plane.id} data-slab={panorama ? plane.id : undefined}>
+            {panorama && [[2, 3], camera.yaw < 0 ? [1, 2] : [3, 0]].map(([a, b]) => <polygon key={a} className="panorama-slab-wall"
+              points={coordinates([corners[a], corners[b], ...[b, a].map(index => project(slabCorners[index][0], plane.y + 10, slabCorners[index][1]))])} />)}
+            <polygon className="ontology-layer-plane" data-panorama-layer={panorama ? plane.id : undefined} points={coordinates(corners)} />
             {plane.zones.map(zone => {
               const left = zone.left + 5, right = zone.left + zone.width - 5
               const pad = [project(left, plane.y, -298), project(right, plane.y, -298), project(right, plane.y, 298), project(left, plane.y, 298)]
@@ -208,17 +217,17 @@ export function OntologyGraph3D({ flat = false, panorama = false, groups = [], l
         {edges.map(({ edge, path, active, crossLayer }) => <path key={edge.id} d={path} className="ontology-space-edge" data-active={active} data-cross-layer={crossLayer} strokeDasharray={edge.kind === 'dependency' ? '5 4' : undefined} markerMid={`url(#${markerId})`} />)}
       </svg>
       {planes.map(plane => {
-        const label = flat ? { x: 16, y: plane.top } : panorama ? project(-300, plane.y, 255) : project(-380, plane.y, -340)
-        return <span key={plane.id} className="ontology-layer-caption" style={{ left: `${label.x / 10}%`, top: `${label.y / 6}%` }}>{plane.name} · {plane.members.length}</span>
+        const label = flat ? { x: 16, y: plane.top } : panorama ? project(-385, plane.y, -45) : project(-380, plane.y, -340)
+        return <span key={plane.id} className="ontology-layer-caption" data-slab={panorama ? plane.id : undefined} style={{ left: `${label.x / 10}%`, top: `${label.y / 6}%` }}>{panorama ? <><b>{plane.id === 'pending' ? '待分层' : plane.id}</b><small>{plane.id === 'M0' ? '预留' : `${plane.members.length} 项`}</small></> : `${plane.name} · ${plane.members.length}`}</span>
       })}
       {edges.map(({ edge, x, y, active }) => <button type="button" key={edge.id} className="ontology-space-label" data-active={active}
         style={{ left: `${x / 10}%`, top: `${y / 6}%` }} aria-label={`查看${edge.record.definition.name}，${edge.label}`} onClick={() => onSelect(edge.record.definition.id)}>
         <span>{edge.label}{edge.cardinality && ` · ${edge.cardinality}`}</span>
       </button>)}
       {nodes.map(({ id, record: { definition }, point }) => <button type="button" key={id} className={`ontology-space-node kind-${definition.kind}`}
-        style={{ left: `${point.x / 10}%`, top: `${point.y / 6}%`, transform: `translate(-50%, -50%) scale(${point.scale})` }}
+        style={{ left: `${point.x / 10}%`, top: `${point.y / 6}%`, transform: `translate(-50%, -50%) scale(${panorama ? Math.min(1.17, point.scale) : point.scale})` }}
         data-panorama-kind={panorama ? definition.kind : undefined} data-panorama-node={panorama ? id : undefined} data-layer={layers ? layerOf(id) : undefined} aria-pressed={input.selectedId === id} aria-label={`${kindNames[definition.kind]}：${definition.name}`} title={definition.name} onClick={() => onSelect(id)}>
-        <span>{kindNames[definition.kind]}{definition.categoryId !== input.categoryId && ' · 跨分类'}</span><strong>{definition.name}</strong>
+        <span aria-hidden={panorama || undefined}>{panorama ? (definition.kind === 'function' ? 'ƒ' : definition.kind === 'action' ? 'A' : '') : kindNames[definition.kind]}{!panorama && definition.categoryId !== input.categoryId && ' · 跨分类'}</span><strong>{definition.name}</strong>
       </button>)}
     </div> : <div className="ontology-graph-surface"><div className="ontology-graph-empty">当前范围没有可显示的定义，请调整目录筛选。</div></div>}
     <div className="ontology-graph-footer"><span>{panorama ? '实线 · Link　虚线 · 动作与函数关联' : input.mode === 'relations' ? 'Link 业务关系' : '定义引用 · 虚线'}</span><span>{nodes.length} 个节点 · {edges.length} 条连线</span></div>
