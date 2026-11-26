@@ -233,6 +233,50 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 	}
 }
 
+func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *testing.T) {
+	f := lifecycleFixture(t)
+	row := f.create("LIFECYCLE-RECIPIENT-FAILURE")
+	actor := f.p.Subject
+	first, second := c.NewID(), c.NewID()
+	if first > second {
+		first, second = second, first
+	}
+	for _, subject := range []string{first, second} {
+		f.p.Subject = subject
+		f.call("PUT", "/instances/"+row.ID+"/follow", nil, "", 204)
+	}
+	f.p.Subject = actor
+	config := f.core.cfg
+	authorizer := config.Authorizer
+	config.Authorizer = authorizerFunc(func(ctx context.Context, p c.Principal, req c.AuthorizationRequest) (c.Decision, error) {
+		if p.Subject == second && req.Operation == "instance.read" {
+			return c.Decision{}, context.DeadlineExceeded
+		}
+		return authorizer.Authorize(ctx, p, req)
+	})
+	f.handler = NewHandler(config)
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
+	view := f.lifecycle(row.ID, 200)
+	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || !view.History[0].NotificationRetryAllowed {
+		t.Fatalf("expected committed transition with retry available: %+v", view)
+	}
+	run := view.History[0].ID
+	countNotices := func(want int) {
+		t.Helper()
+		var count int
+		if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_notices WHERE tenant_id=? AND id=?", f.p.TenantID, run).Scan(&count); err != nil || count != want {
+			t.Fatalf("expected %d notices, got %d: %v", want, count, err)
+		}
+	}
+	countNotices(0)
+	retry := "/instances/" + row.ID + "/lifecycle/runs/" + run + "/retry-notification"
+	f.call("POST", retry, nil, "", 503)
+	countNotices(0)
+	f.handler = NewHandler(f.core.cfg)
+	f.call("POST", retry, nil, "", 204)
+	countNotices(2)
+}
+
 func TestMySQLRecordLifecycleAuthorizationAndCleanup(t *testing.T) {
 	f := lifecycleFixture(t)
 	row := f.create("LIFECYCLE-2")
