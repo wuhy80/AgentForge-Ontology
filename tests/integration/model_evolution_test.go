@@ -203,14 +203,17 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	policyURL := metaServer.URL + "/metadata/admin/policy"
 	var policy c.PolicyRecord
 	admin.request("GET", policyURL, nil, nil, 200, &policy)
-	policy.Current.Rules = append(policy.Current.Rules, c.PermissionRule{ID: c.NewID(), RoleID: role.ID, Effect: "allow", Operation: "instance.read", ResourceID: workflow.Definition.ID, ReadFields: []string{"*"}})
+	for _, operation := range []string{"instance.read", "instance.query"} {
+		policy.Current.Rules = append(policy.Current.Rules, c.PermissionRule{ID: c.NewID(), RoleID: role.ID, Effect: "allow", Operation: operation, ResourceID: workflow.Definition.ID, ReadFields: []string{"*"}})
+	}
 	policyHeaders := admin.request("PUT", policyURL, policy.Current, map[string]string{"If-Match": `"` + policy.ETag + `"`}, 200, nil)
 	admin.request("POST", policyURL+"/publish", nil, map[string]string{"If-Match": policyHeaders.Get("ETag")}, 200, nil)
 	admin = login(tenant, "admin")
 	reader := login(tenant, "workflow")
 	workflowURL := dataServer.URL + "/data/schemas/" + workflow.Definition.ID + "/instances"
 	var workflowRecord c.Instance
-	admin.request("POST", workflowURL, c.WriteRequest{IdempotencyKey: c.NewID(), Values: map[string]json.RawMessage{field: raw("test")}}, nil, 201, &workflowRecord)
+	const workflowTitle = "Workflow record for inbox verification"
+	admin.request("POST", workflowURL, c.WriteRequest{IdempotencyKey: c.NewID(), Values: map[string]json.RawMessage{field: raw(workflowTitle)}}, nil, 201, &workflowRecord)
 	lifecycleURL := workflowURL + "/" + workflowRecord.ID + "/lifecycle"
 	admin.request("POST", lifecycleURL+"/transitions", map[string]string{"transitionId": move}, nil, 204, nil)
 	var flow c.RecordLifecycle
@@ -232,6 +235,8 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			"inbox":      dataServer.URL + "/data/inbox/notifications",
 			"cookieName": reader.cookies[0].Name, "cookieValue": reader.cookies[0].Value,
 			"run": flow.History[0].ID, "record": workflowRecord.ID,
+			"metadata": metaServer.URL, "schema": workflow.Definition.ID, "field": field,
+			"title": workflowTitle, "appDist": os.Getenv("ONTOLOGY_TEST_FLOW_APP_DIST"),
 		}); err != nil {
 			t.Fatal("encode isolated browser fixture")
 		}
@@ -243,8 +248,8 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 				command.Env = append(command.Env, entry)
 			}
 		}
-		if err := command.Run(); err != nil {
-			t.Fatalf("isolated browser inbox verification failed: %v", err)
+		if output, err := command.Output(); err != nil {
+			t.Fatalf("isolated browser inbox verification failed: %v (%s)", err, output)
 		}
 	}
 	noticeURL := dataServer.URL + "/data/inbox/notifications/lifecycle_transition/" + workflow.Definition.ID + "/" + workflowRecord.ID + "/" + flow.History[0].ID
