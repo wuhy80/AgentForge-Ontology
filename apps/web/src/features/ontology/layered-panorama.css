@@ -1,8 +1,22 @@
+/* The panorama is a workspace rather than a document with a footer. */
+.workspace-main:has(.panorama-layout) { min-height: 100dvh; }
+.workspace-main:has(.panorama-layout) > .workspace-footer { display: none; }
+.workspace-main:has(.panorama-layout) > .main-content {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 8px;
+}
+.ontology-panorama-page, .ontology-panorama {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
 .ontology-panorama-page .ontology-scope { margin-bottom: 12px; }
 .panorama-layout {
   --drawer-width: clamp(245px, 24%, 340px);
   --drawer-gap: calc(var(--drawer-width) + 22px);
   display: grid;
+  flex: 1 0 auto;
   position: relative;
   isolation: isolate;
   min-width: 0;
@@ -21,7 +35,7 @@
   border-radius: 0;
   background: transparent;
 }
-.panorama-layout .ontology-space { order: 1; height: clamp(580px, 72vh, 800px); overflow: hidden; }
+.panorama-layout .ontology-space { order: 1; flex: 1 0 360px; height: auto; overflow: hidden; }
 .panorama-hud { position: absolute; z-index: 4; top: 12px; left: 12px; right: calc(var(--drawer-gap) + 12px); display: grid; gap: 4px; justify-items: start; pointer-events: none; }
 .panorama-filter-row, .panorama-tools, .panorama-drawer-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .panorama-filter-row, .panorama-tools {
@@ -143,7 +157,7 @@
   .panorama-tools { order: 2; padding: 6px 8px; border-width: 1px 0; border-radius: 0; }
   .panorama-hud { order: -1; }
   .panorama-filter-row { flex-wrap: wrap; }
-  .panorama-layout .ontology-space { height: clamp(275px, 60vw, 355px); }
+  .panorama-layout .ontology-space { flex: none; height: max(275px, calc(100dvh - 370px)); }
   .panorama-layer-button-name { display: none; }
   .panorama-layout .ontology-graph-toolbar, .panorama-layout .ontology-graph-footer { width: auto; max-width: none; position: static; border-radius: 0; border-width: 1px 0 0; }
   .panorama-layout .ontology-graph-toolbar { order: 2; padding: 5px 8px; }
