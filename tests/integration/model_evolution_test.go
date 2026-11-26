@@ -171,6 +171,8 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		if blocker.Code != "definition_in_use" {
 			t.Fatalf("want Link dependency to block Schema disable, got %s", blocker.Code)
 		}
+		var reviewer c.Role
+		admin.request("POST", metaServer.URL+"/metadata/admin/roles", c.RoleInput{Name: "Deletion reviewer"}, nil, 201, &reviewer)
 		for _, current := range []c.CurrentDefinition{link, model, target} {
 			path := definitionURL(current.Definition.ID)
 			match := map[string]string{"If-Match": `"` + current.ETag + `"`}
@@ -178,6 +180,30 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			admin.request("POST", path+"/disable", nil, match, 200, nil)
 			admin.request("GET", path+"/delete-preview", nil, match, 204, nil)
 			outsider.request("DELETE", path, nil, match, 404, nil)
+			admin.request("DELETE", path, nil, map[string]string{"If-Match": `"stale"`}, 412, nil)
+			if current.Definition.Kind == c.KindLink {
+				policyPath := metaServer.URL + "/metadata/admin/policy"
+				var original c.PolicyRecord
+				admin.request("GET", policyPath, nil, nil, 200, &original)
+				draft := original.Current
+				draft.Rules = append(append([]c.PermissionRule(nil), draft.Rules...), c.PermissionRule{
+					ID: c.NewID(), RoleID: reviewer.ID, Effect: "allow", Operation: "definition.read", ResourceID: current.Definition.ID,
+				})
+				headers := admin.request("PUT", policyPath, draft, map[string]string{"If-Match": `"` + original.ETag + `"`}, 200, nil)
+				var blocked c.Error
+				admin.request("DELETE", path, nil, match, 409, &blocked)
+				if blocked.Code != "definition_policy_in_use" {
+					t.Fatalf("policy saved after preview did not block deletion: %s", blocked.Code)
+				}
+				var retained c.CurrentDefinition
+				admin.request("GET", path, nil, nil, 200, &retained)
+				if retained.Status != "disabled" || retained.ETag != current.ETag {
+					t.Fatal("rejected deletion changed the retained Link")
+				}
+				headers = admin.request("PUT", policyPath, original.Current, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
+				admin.request("POST", policyPath+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
+				admin = login(tenant, "admin")
+			}
 			admin.request("DELETE", path, nil, match, 204, nil)
 			admin.request("DELETE", path, nil, match, 204, nil)
 			admin.request("GET", path, nil, nil, 404, nil)
