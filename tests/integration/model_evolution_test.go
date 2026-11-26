@@ -103,15 +103,15 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
 	t.Cleanup(transport.CloseIdleConnections)
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
-	login := func(id string) *publicSecurityHTTP {
+	login := func(id, username string) *publicSecurityHTTP {
 		browser := &publicSecurityHTTP{t: t, client: client}
 		var session c.Session
-		headers := browser.request("POST", metaServer.URL+"/metadata/auth/login", c.LoginRequest{Tenant: id, Username: "admin", Password: password}, nil, 200, &session)
+		headers := browser.request("POST", metaServer.URL+"/metadata/auth/login", c.LoginRequest{Tenant: id, Username: username, Password: password}, nil, 200, &session)
 		response := http.Response{Header: headers}
 		browser.cookies, browser.csrf = response.Cookies(), session.CSRFToken
 		return browser
 	}
-	admin, outsider := login(tenant), login(foreign)
+	admin, outsider := login(tenant, "admin"), login(foreign, "admin")
 	var category, group c.Organization
 	admin.request("POST", metaServer.URL+"/metadata/categories", map[string]string{"name": "模型演进"}, nil, 201, &category)
 	admin.request("POST", metaServer.URL+"/metadata/groups", map[string]string{"name": "隔离验收", "categoryId": category.ID}, nil, 201, &group)
@@ -180,7 +180,12 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	}
 	// Verify the published stage notification declaration survives the
 	// Metadata/Data boundary without appearing in the record workflow response.
-	from, to, move, account, field := c.NewID(), c.NewID(), c.NewID(), c.NewID(), c.NewID()
+	var role c.Role
+	admin.request("POST", metaServer.URL+"/metadata/admin/roles", c.RoleInput{Name: "Workflow recipient"}, nil, 201, &role)
+	var recipient c.User
+	admin.request("POST", metaServer.URL+"/metadata/admin/users", c.UserInput{Username: "workflow", Password: password, DisplayName: "Workflow recipient", Enabled: true, RoleIDs: []string{role.ID}}, nil, 201, &recipient)
+	account := recipient.ID
+	from, to, move, field := c.NewID(), c.NewID(), c.NewID(), c.NewID()
 	workflow := publish(c.Definition{Kind: c.KindSchema, Name: "WorkflowVerification", Schema: &c.Schema{
 		Mode: "schema_2_db", StorageLayout: "single",
 		Properties: []c.Property{{ID: field, Name: "Title", DataType: "string"}},
@@ -191,6 +196,14 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if stages := workflow.Definition.Schema.Lifecycle.Stages; len(stages[1].NotifyAccountIDs) != 1 || stages[1].NotifyAccountIDs[0] != account {
 		t.Fatal("published stage notification configuration was lost")
 	}
+	policyURL := metaServer.URL + "/metadata/admin/policy"
+	var policy c.PolicyRecord
+	admin.request("GET", policyURL, nil, nil, 200, &policy)
+	policy.Current.Rules = append(policy.Current.Rules, c.PermissionRule{ID: c.NewID(), RoleID: role.ID, Effect: "allow", Operation: "instance.read", ResourceID: workflow.Definition.ID, ReadFields: []string{"*"}})
+	policyHeaders := admin.request("PUT", policyURL, policy.Current, map[string]string{"If-Match": `"` + policy.ETag + `"`}, 200, nil)
+	admin.request("POST", policyURL+"/publish", nil, map[string]string{"If-Match": policyHeaders.Get("ETag")}, 200, nil)
+	admin = login(tenant, "admin")
+	reader := login(tenant, "workflow")
 	workflowURL := dataServer.URL + "/data/schemas/" + workflow.Definition.ID + "/instances"
 	var workflowRecord c.Instance
 	admin.request("POST", workflowURL, c.WriteRequest{IdempotencyKey: c.NewID(), Values: map[string]json.RawMessage{field: raw("test")}}, nil, 201, &workflowRecord)
@@ -200,6 +213,11 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	admin.request("GET", lifecycleURL, nil, nil, 200, &flow)
 	if flow.StageID != to || len(flow.History) != 1 || flow.History[0].NotificationFailed || len(flow.Stages[1].NotifyAccountIDs) != 0 {
 		t.Fatalf("unexpected workflow state: %+v", flow)
+	}
+	var notices c.RecordNoticePage
+	reader.request("GET", dataServer.URL+"/data/inbox/notifications", nil, nil, 200, &notices)
+	if len(notices.Data) != 1 || notices.Data[0].ID != flow.History[0].ID || notices.Data[0].Kind != "lifecycle_transition" || notices.Data[0].RecordID != workflowRecord.ID {
+		t.Fatalf("configured account did not receive the committed run notice: %+v", notices)
 	}
 	states := publish(c.Definition{Kind: c.KindEnum, Name: "工单状态", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待办"}, {Code: "legacy", Label: "旧状态"}}}})
 	code, state, note := c.NewID(), c.NewID(), c.NewID()
