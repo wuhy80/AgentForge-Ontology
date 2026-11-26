@@ -182,6 +182,17 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			outsider.request("DELETE", path, nil, match, 404, nil)
 			admin.request("DELETE", path, nil, map[string]string{"If-Match": `"stale"`}, 412, nil)
 			if current.Definition.Kind == c.KindLink {
+				for _, endpoint := range []c.CurrentDefinition{model, target} {
+					endpointPath := definitionURL(endpoint.Definition.ID)
+					endpointMatch := map[string]string{"If-Match": `"` + endpoint.ETag + `"`}
+					for _, attempt := range []struct{ method, suffix string }{{"GET", "/disable-preview"}, {"POST", "/disable"}} {
+						var blocked c.Error
+						admin.request(attempt.method, endpointPath+attempt.suffix, nil, endpointMatch, 409, &blocked)
+						if blocked.Code != "definition_in_use" {
+							t.Fatalf("disabled Link did not block endpoint lifecycle operation: %s", blocked.Code)
+						}
+					}
+				}
 				policyPath := metaServer.URL + "/metadata/admin/policy"
 				var original c.PolicyRecord
 				admin.request("GET", policyPath, nil, nil, 200, &original)
