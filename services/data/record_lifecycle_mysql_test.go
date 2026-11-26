@@ -192,6 +192,24 @@ func TestMySQLRecordLifecycleNotifiesPendingAssignee(t *testing.T) {
 		f.p.TenantID, assignee, run.ID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("expected one notice for pending assignee: count=%d err=%v", count, err)
 	}
+	actor := f.p.Subject
+	f.p.Subject = assignee
+	f.call("PUT", "/instances/"+row.ID+"/follow", nil, "", 204)
+	f.p.Subject = actor
+	completed := c.NewID()
+	if _, err := f.engine.DB().Exec(`INSERT INTO af_data_record_approvals
+ (tenant_id,schema_id,entity_id,id,assignee,submitted_by,submitted_at,decided_at,state,note)
+ VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6),'approved','')`,
+		f.p.TenantID, row.SchemaID, row.ID, c.NewID(), completed, actor); err != nil {
+		t.Fatal(err)
+	}
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleFinishMove, ""), "", 204)
+	next := f.lifecycle(row.ID, 200).History[0]
+	var subject string
+	if err := f.engine.DB().QueryRow("SELECT COUNT(*),MAX(subject_id) FROM af_data_record_notices WHERE tenant_id=? AND id=?",
+		f.p.TenantID, next.ID).Scan(&count, &subject); err != nil || count != 1 || subject != assignee {
+		t.Fatalf("expected deduplicated notice excluding completed assignee: count=%d subject=%q err=%v", count, subject, err)
+	}
 }
 
 func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
