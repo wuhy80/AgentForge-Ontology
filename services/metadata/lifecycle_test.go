@@ -29,6 +29,7 @@ func lifecycleSchema() contracts.Definition {
 
 func TestLifecycleKeepsStableIDsAndNormalizesNames(t *testing.T) {
 	d := lifecycleSchema()
+	d.Schema.Lifecycle.Stages[1].NotifyAccountIDs = []string{strings.ToUpper(lifecycleDone), lifecycleDraft}
 	d.Schema.Lifecycle.Stages[1].Name = " 审核中 "
 	d.Schema.Lifecycle.Transitions[0].Name = "提交 审核"
 	if err := canonicalDefinition(&d, false); err != nil {
@@ -38,6 +39,9 @@ func TestLifecycleKeepsStableIDsAndNormalizesNames(t *testing.T) {
 	if l.Stages[1].Name != "审核中" || l.Transitions[0].Name != "提交 审核" {
 		t.Fatalf("lifecycle not normalized: %+v", l)
 	}
+	if ids := l.Stages[1].NotifyAccountIDs; len(ids) != 2 || ids[0] != lifecycleDraft || ids[1] != lifecycleDone {
+		t.Fatalf("stage recipients were not canonicalized: %v", ids)
+	}
 	if l.Stages[0].ID != lifecycleDraft || l.Transitions[1].ID != lifecycleFinish {
 		t.Fatal("canonicalization rewrote stable IDs")
 	}
@@ -45,6 +49,17 @@ func TestLifecycleKeepsStableIDsAndNormalizesNames(t *testing.T) {
 
 func TestLifecycleRejectsUnsupportedDeclarations(t *testing.T) {
 	cases := map[string]func(*contracts.SchemaLifecycle){
+		"invalid notification account": func(l *contracts.SchemaLifecycle) {
+			l.Stages[0].NotifyAccountIDs = []string{"invalid"}
+		},
+		"duplicate notification account": func(l *contracts.SchemaLifecycle) {
+			l.Stages[0].NotifyAccountIDs = []string{lifecycleDone, strings.ToUpper(lifecycleDone)}
+		},
+		"too many notification accounts": func(l *contracts.SchemaLifecycle) {
+			for range contracts.MaxLifecycleStageRecipients + 1 {
+				l.Stages[0].NotifyAccountIDs = append(l.Stages[0].NotifyAccountIDs, contracts.NewID())
+			}
+		},
 		"no stages": func(l *contracts.SchemaLifecycle) { l.Stages = nil },
 		"too many stages": func(l *contracts.SchemaLifecycle) {
 			for i := 0; i <= contracts.MaxLifecycleStages; i++ {
