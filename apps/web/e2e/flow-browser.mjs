@@ -19,15 +19,17 @@ try {
     httpOnly: true, secure: true, sameSite: 'Strict',
   }])
   const page = await context.newPage()
-  stage = 'read Data inbox'
-  const response = await page.goto(inbox.href)
-  stage = 'Data inbox HTTP ' + response.status()
-  assert.equal(response.status(), 200)
-  const { data } = await response.json()
-  assert.equal(data.length, 1)
-  assert.equal(data[0].id, fixture.run)
-  assert.equal(data[0].recordId, fixture.record)
-  assert.equal(data[0].kind, 'lifecycle_transition')
+  if (!fixture.comment) {
+    stage = 'read Data inbox'
+    const response = await page.goto(inbox.href)
+    stage = 'Data inbox HTTP ' + response.status()
+    assert.equal(response.status(), 200)
+    const { data } = await response.json()
+    assert.equal(data.length, 1)
+    assert.equal(data[0].id, fixture.run)
+    assert.equal(data[0].recordId, fixture.record)
+    assert.equal(data[0].kind, 'lifecycle_transition')
+  }
   stage = 'read OntoApp build'
   if (fixture.appDist) {
     const dist = resolve(fixture.appDist)
@@ -41,7 +43,7 @@ try {
     const app = { format: 'ontoapp/v1', id: 'flow-app', name: 'Flow', description: '', pages: [{
       id: 'flow-page', name: 'Flow', description: '', blocks: [{
         id: 'flow-detail', kind: 'detail', title: 'Flow details', width: 'full', schemaId: fixture.schema,
-        fieldIds: [fixture.field], content: '', pageSize: 10, sortField: '', sortDirection: 'asc', filterField: '', filterValue: '', detailOptions: { sourceBlockId: '', editFieldIds: [], allowDelete: false, relations: [] },
+        fieldIds: [fixture.field], content: '', pageSize: 10, sortField: '', sortDirection: 'asc', filterField: '', filterValue: '', detailOptions: { sourceBlockId: '', editFieldIds: [], allowDelete: false, relations: [], comments: !!fixture.comment },
       }],
     }] }
     await page.route(url => url.origin === inbox.origin && url.pathname.startsWith(base), async route => {
@@ -66,12 +68,19 @@ try {
     await page.goto(new URL(base + '#/pages/flow-page?mode=run', inbox).href)
     stage = 'open inbox'
     await page.getByRole('button', { name: /\u6536\u4ef6\u7bb1/ }).click()
-    const notice = page.getByRole('link', { name: '\u8bb0\u5f55\u5df2\u6d41\u8f6c' })
-    stage = 'open notice'
-    await notice.click()
-    assert.ok(page.url().includes(fixture.record))
-    stage = 'display target record'
-    await page.getByText(fixture.title, { exact: true }).waitFor()
+    const notice = page.getByRole('link', { name: fixture.comment ? '\u67e5\u770b\u8bc4\u8bba\u56de\u590d' : '\u8bb0\u5f55\u5df2\u6d41\u8f6c' })
+    if (fixture.comment === 'revoked') {
+      stage = 'display empty inbox after revocation'
+      await page.getByText('\u6682\u65e0\u901a\u77e5', { exact: true }).waitFor()
+      assert.equal(await notice.count(), 0)
+    } else {
+      stage = 'open notice'
+      // The unified inbox can also include previously read replies to this record.
+      await notice.first().click()
+      assert.ok(page.url().includes(fixture.record))
+      stage = 'display target record'
+      await page.getByText(fixture.title, { exact: true }).waitFor()
+    }
   }
 } catch {
   console.log(stage)

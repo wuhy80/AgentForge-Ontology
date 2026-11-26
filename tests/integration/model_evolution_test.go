@@ -245,17 +245,22 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if len(notices.Data) != 1 || notices.Data[0].ID != flow.History[0].ID || notices.Data[0].Kind != "lifecycle_transition" || notices.Data[0].RecordID != workflowRecord.ID {
 		t.Fatalf("configured account did not receive the committed run notice: %+v", notices)
 	}
-	if os.Getenv("ONTOLOGY_TEST_FLOW_BROWSER") == "1" {
+	verifyBrowser := func(t *testing.T, session *publicSecurityHTTP, comment string) {
+		t.Helper()
+		appDist := os.Getenv("ONTOLOGY_TEST_FLOW_APP_DIST")
+		if os.Getenv("ONTOLOGY_TEST_FLOW_BROWSER") != "1" || (comment != "" && appDist == "") {
+			return
+		}
 		browserCtx, cancelBrowser := context.WithTimeout(ctx, 45*time.Second)
 		defer cancelBrowser()
 		command := exec.CommandContext(browserCtx, "node", filepath.Join("..", "..", "apps", "web", "e2e", "flow-browser.mjs"))
 		var input bytes.Buffer
 		if err := json.NewEncoder(&input).Encode(map[string]string{
 			"inbox":      dataServer.URL + "/data/inbox/notifications",
-			"cookieName": reader.cookies[0].Name, "cookieValue": reader.cookies[0].Value,
+			"cookieName": session.cookies[0].Name, "cookieValue": session.cookies[0].Value,
 			"run": flow.History[0].ID, "record": workflowRecord.ID,
 			"metadata": metaServer.URL, "schema": workflow.Definition.ID, "field": field,
-			"title": workflowTitle, "appDist": os.Getenv("ONTOLOGY_TEST_FLOW_APP_DIST"),
+			"title": workflowTitle, "appDist": appDist, "comment": comment,
 		}); err != nil {
 			t.Fatal("encode isolated browser fixture")
 		}
@@ -271,6 +276,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			t.Fatalf("isolated browser inbox verification failed: %v (%s)", err, output)
 		}
 	}
+	verifyBrowser(t, reader, "")
 	noticeURL := dataServer.URL + "/data/inbox/notifications/lifecycle_transition/" + workflow.Definition.ID + "/" + workflowRecord.ID + "/" + flow.History[0].ID
 	reader.request("PUT", noticeURL, nil, nil, 204, nil)
 	reader.request("PUT", noticeURL, nil, nil, 204, nil)
@@ -313,6 +319,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		if len(inbox.Data) != 1 || inbox.Data[0].ID != reply.ID {
 			t.Fatal("follow-up did not reach the unread inbox before revocation")
 		}
+		verifyBrowser(t, &reader, "allowed")
 		var current c.PolicyRecord
 		admin.request("GET", policyURL, nil, nil, 200, &current)
 		for i, rule := range current.Current.Rules {
@@ -331,6 +338,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			t.Fatal("unread reply remained visible after record read access was revoked")
 		}
 		revoked.request("PUT", recordPath+"/comment-replies/"+reply.ID, nil, nil, 403, nil)
+		verifyBrowser(t, revoked, "revoked")
 	})
 	admin = login(tenant, "admin")
 	states := publish(c.Definition{Kind: c.KindEnum, Name: "工单状态", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待办"}, {Code: "legacy", Label: "旧状态"}}}})
