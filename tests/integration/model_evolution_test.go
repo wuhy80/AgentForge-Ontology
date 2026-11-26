@@ -219,6 +219,13 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if len(notices.Data) != 1 || notices.Data[0].ID != flow.History[0].ID || notices.Data[0].Kind != "lifecycle_transition" || notices.Data[0].RecordID != workflowRecord.ID {
 		t.Fatalf("configured account did not receive the committed run notice: %+v", notices)
 	}
+	noticeURL := dataServer.URL + "/data/inbox/notifications/lifecycle_transition/" + workflow.Definition.ID + "/" + workflowRecord.ID + "/" + flow.History[0].ID
+	reader.request("PUT", noticeURL, nil, nil, 204, nil)
+	reader.request("PUT", noticeURL, nil, nil, 204, nil)
+	reader.request("GET", dataServer.URL+"/data/inbox/notifications", nil, nil, 200, &notices)
+	if len(notices.Data) != 1 || !notices.Data[0].Read || notices.Unread == nil || notices.Unread.Count != 0 {
+		t.Fatalf("marking the stage notice read did not update the inbox: %+v", notices)
+	}
 	states := publish(c.Definition{Kind: c.KindEnum, Name: "工单状态", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待办"}, {Code: "legacy", Label: "旧状态"}}}})
 	code, state, note := c.NewID(), c.NewID(), c.NewID()
 	schema := publish(c.Definition{Kind: c.KindSchema, Name: "工单", Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: code, Name: "代码", DataType: "string", Required: true}, {ID: state, Name: "状态", DataType: "string", Required: true, EnumID: states.Definition.ID}, {ID: note, Name: "备注", DataType: "string", Nullable: true}}}})
