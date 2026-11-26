@@ -239,6 +239,40 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		t.Fatalf("unexpected mapping failure: %+v", mappingFailure)
 	}
 	storageUnavailable.Store(false)
+	sourceID := c.NewID()
+	mappedEndpoint := validSchema()
+	mappedEndpoint.Name = "映射关系验收端点"
+	mappedEndpoint.Schema.Mode = "db_2_schema"
+	mappedEndpoint.Schema.StorageBinding = &c.StorageBinding{DataSourceID: sourceID, Table: "endpoint"}
+	for i := range mappedEndpoint.Schema.Properties {
+		mappedEndpoint.Schema.Properties[i].Mapping = &c.PropertyMapping{DataSourceID: sourceID, Column: "field_" + string(rune('a'+i))}
+	}
+	endpoint := create(mappedEndpoint)
+	publish(endpoint, 200)
+	link := create(c.Definition{Kind: c.KindLink, Name: "映射关系生命周期", Link: &c.Link{
+		SourceSchemaID: endpoint.Definition.ID, TargetSchemaID: endpoint.Definition.ID,
+		ForwardName: "后续", ReverseName: "此前", Cardinality: "N:M", OnDelete: "restrict",
+		StorageBinding: &c.LinkStorageBinding{Mode: "junction", DataSourceID: sourceID, Table: "edges", SourceColumn: "from_id", TargetColumn: "to_id"},
+	}})
+	publish(link, 200)
+	linkPath := "/metadata/definitions/" + link.Definition.ID
+	request("GET", linkPath+"/disable-preview", link.ETag, nil, 200, nil)
+	storageUnavailable.Store(true)
+	request("POST", linkPath+"/disable", link.ETag, nil, 409, nil)
+	storageUnavailable.Store(false)
+	var linkState c.CurrentDefinition
+	request("GET", linkPath, "", nil, 200, &linkState)
+	if linkState.Status != "active" {
+		t.Fatal("failed mapping check changed Link state")
+	}
+	request("POST", linkPath+"/disable", link.ETag, nil, 200, &linkState)
+	if linkState.Status != disabledDefinition || !storagePaused.Load() {
+		t.Fatal("mapped Link disable did not coordinate with Data")
+	}
+	request("POST", linkPath+"/restore", link.ETag, nil, 200, &linkState)
+	if linkState.Status != "active" || storagePaused.Load() {
+		t.Fatal("mapped Link restore did not reopen storage")
+	}
 	schemaPolicy, err := json.Marshal(c.PermissionPolicy{Rules: []c.PermissionRule{{Operation: "instance.read", ResourceID: lifecycleSchema.Definition.ID}}})
 	if err != nil {
 		t.Fatal(err)

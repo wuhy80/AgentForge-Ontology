@@ -60,11 +60,12 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 			if d.Kind == c.KindFunction {
 				callable = d.Function
 			}
-			managedLink := d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil && d.Link.StorageBinding.Mode == "managed"
+			storedLink := d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil &&
+				(d.Link.StorageBinding.Mode == "managed" || d.Link.StorageBinding.Mode == "junction" || d.Link.StorageBinding.Mode == "foreign_key")
 			managedSchema := d.Kind == c.KindSchema && d.Schema != nil && d.Schema.Mode == "schema_2_db" && d.Schema.StorageLayout == "single" && d.Schema.StorageBinding == nil
-			managedStorage := managedLink || managedSchema
-			if !managedStorage && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
-				return problem(422, "unsupported_lifecycle", "当前支持 Enum、托管单表 Schema、平台托管关系及无副作用的 Action 和 Function")
+			storedDefinition := storedLink || managedSchema
+			if !storedDefinition && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
+				return problem(422, "unsupported_lifecycle", "当前支持 Enum、托管单表 Schema、已配置存储的关系及无副作用的 Action 和 Function")
 			}
 			if row.draft.Valid {
 				return problem(409, "lifecycle_draft_exists", "请先处理已保存的草稿")
@@ -89,7 +90,7 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 					if err := h.checkEnumDisable(ctx, tx, p.TenantID, id); err != nil {
 						return err
 					}
-				} else if !managedStorage {
+				} else if !storedDefinition {
 					var referenced bool
 					err = tx.QueryRowContext(ctx, `SELECT
  EXISTS (SELECT 1 FROM af_meta_dependencies WHERE tenant_id=? AND target_id=?) OR
@@ -114,7 +115,7 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 					}
 				}
 			}
-			if managedStorage {
+			if storedDefinition {
 				if err := h.checkManagedLinkLifecycle(ctx, tx, d, row.currentDigest, restore, preview); err != nil {
 					return err
 				}
