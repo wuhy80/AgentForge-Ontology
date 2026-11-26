@@ -433,6 +433,7 @@ func withoutDisplayMetadata(d contracts.Definition) contracts.Definition {
 		}
 	}
 	if copied.Schema != nil {
+		copied.Schema.Tags, copied.Schema.PanoramaLayer = nil, ""
 		clearProperties(copied.Schema.Properties)
 		for i := range copied.Schema.Indexes {
 			copied.Schema.Indexes[i].Name = ""

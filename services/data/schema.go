@@ -230,6 +230,24 @@ func storageSignature(d c.Definition) string {
 	return digest(s)
 }
 
+// Existing gates include the presentation fields in their signature. Compare
+// against the stored classification so older gates and in-flight receipts
+// remain valid, without masking a change to any storage field.
+func samePlatformStorage(stored, nextSignature, raw, oldDigest string, next c.Definition) bool {
+	if stored == nextSignature {
+		return true
+	}
+	var old c.Definition
+	if json.Unmarshal([]byte(raw), &old) != nil || old.Schema == nil || digest(old) != oldDigest ||
+		old.ID != next.ID || old.TenantID != next.TenantID {
+		return false
+	}
+	schema := *next.Schema
+	schema.Tags, schema.PanoramaLayer = old.Schema.Tags, old.Schema.PanoramaLayer
+	next.Schema = &schema
+	return stored == storageSignature(next)
+}
+
 func typedValue(p c.Property, raw json.RawMessage) (any, error) {
 	if string(raw) == "null" {
 		if !p.Nullable {

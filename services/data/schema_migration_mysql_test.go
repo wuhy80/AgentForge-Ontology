@@ -310,3 +310,25 @@ func TestMySQLPlatformSchemaMigrationRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestMySQLPlatformClassificationPreviewAndPublish(t *testing.T) {
+	f := newPlatformMigrationFixture(t)
+	old := f.d
+	for _, layer := range []string{"L1", "L2"} {
+		next := old
+		schema := *old.Schema
+		schema.Tags, schema.PanoramaLayer = []string{layer, "shared"}, layer
+		next.Schema = &schema
+		req := c.PrepareRequest{OperationID: c.NewID(), Definition: next, Digest: digest(next), PreviousDigest: digest(old)}
+		for _, phase := range []string{"preview", "prepare"} {
+			response := f.call("POST", "/internal/publications/"+phase, req, "")
+			f.expect(response, 200)
+			var result c.PrepareResult
+			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || len(result.Statements) != 0 {
+				t.Fatalf("unexpected classification plan: %+v (%v)", result, err)
+			}
+		}
+		f.activate(req)
+		old = next
+	}
+}

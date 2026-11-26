@@ -168,7 +168,7 @@ func (h *handler) preparePlatform(ctx context.Context, req c.PrepareRequest) (c.
 		if oldDigest != req.PreviousDigest {
 			return problem(409, "publication_conflict", "当前映射摘要已改变")
 		}
-		if oldSignature != signature {
+		if !samePlatformStorage(oldSignature, signature, raw, oldDigest, req.Definition) {
 			var old c.Definition
 			if json.Unmarshal([]byte(raw), &old) != nil || digest(old) != oldDigest {
 				return problem(500, "mapping_corrupt", "无法核对原定义")

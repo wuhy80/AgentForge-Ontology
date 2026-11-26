@@ -68,7 +68,7 @@ func (h *handler) preview(w http.ResponseWriter, r *http.Request) {
 			writeError(w, problem(409, "publication_busy", "映射正在生效，请恢复后再预览"))
 			return
 		}
-		if signature != storageSignature(req.Definition) {
+		if !samePlatformStorage(signature, storageSignature(req.Definition), raw, previous, req.Definition) {
 			var old c.Definition
 			if json.Unmarshal([]byte(raw), &old) != nil || digest(old) != previous {
 				writeError(w, problem(500, "mapping_corrupt", "无法核对原定义"))

@@ -281,3 +281,23 @@ func TestPropertyNameCannotShadowAnotherStableID(t *testing.T) {
 		}
 	}
 }
+
+func TestPlatformClassificationPreservesStoredSignatureCompatibility(t *testing.T) {
+	old, next := testDefinition(), testDefinition()
+	old.Schema.Tags, old.Schema.PanoramaLayer = []string{"original"}, "L1"
+	next.Schema.Tags, next.Schema.PanoramaLayer = []string{"reclassified"}, "L3"
+	raw, err := json.Marshal(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compatible := func() bool {
+		return samePlatformStorage(storageSignature(old), storageSignature(next), string(raw), digest(old), next)
+	}
+	if !compatible() {
+		t.Fatal("classification required migration")
+	}
+	next.Schema.Properties[0].Required = !next.Schema.Properties[0].Required
+	if compatible() {
+		t.Fatal("storage change hidden by classification")
+	}
+}
