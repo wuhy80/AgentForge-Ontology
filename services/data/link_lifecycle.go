@@ -82,6 +82,18 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			if hasData {
 				return problem(409, "definition_data_in_use", "定义仍有实例")
 			}
+			if deletionCheck && schema {
+				var retained bool
+				err := tx.QueryRowContext(ctx, `SELECT
+ EXISTS(SELECT 1 FROM af_data_property_files WHERE tenant_id=? AND schema_id=?) OR
+ EXISTS(SELECT 1 FROM af_data_record_comments WHERE tenant_id=? AND schema_id=?)`, tenant, id, tenant, id).Scan(&retained)
+				if err != nil {
+					return err
+				}
+				if retained {
+					return problem(409, "definition_data_in_use", "定义仍有附件或评论")
+				}
+			}
 			impact, err := savedQueryImpact(ctx, tx, tenant, id)
 			if err != nil {
 				return err

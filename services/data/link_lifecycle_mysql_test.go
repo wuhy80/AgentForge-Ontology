@@ -100,6 +100,26 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		t.Fatal("lifecycle preview must not be cached")
 	}
 	invoke(false, false, 204)
+	for _, seed := range []struct {
+		table, query string
+		args         []any
+	}{
+		{"af_data_property_files", "INSERT INTO af_data_property_files (tenant_id,schema_id,entity_id,field_id,content) VALUES (?,?,?,?,?)", []any{f.p.TenantID, id, c.NewID(), c.NewID(), []byte("attachment")}},
+		{"af_data_record_comments", "INSERT INTO af_data_record_comments (tenant_id,schema_id,entity_id,id,author,parent_id,body,created_at,etag) VALUES (?,?,?,?,?,'','comment',NOW(6),?)", []any{f.p.TenantID, id, c.NewID(), c.NewID(), f.p.Subject, c.NewID()}},
+	} {
+		if _, err := f.engine.DB().ExecContext(ctx, seed.query, seed.args...); err != nil {
+			t.Fatal(err)
+		}
+		for _, preview := range []bool{true, false} {
+			w := invokeRoute("managed-storage-delete-check", false, preview, 409)
+			if !bytes.Contains(w.Body.Bytes(), []byte("definition_data_in_use")) {
+				t.Errorf("%s did not block deletion: %s", seed.table, w.Body)
+			}
+		}
+		if _, err := f.engine.DB().ExecContext(ctx, "DELETE FROM "+seed.table+" WHERE tenant_id=? AND schema_id=?", f.p.TenantID, id); err != nil {
+			t.Fatal(err)
+		}
+	}
 	invokeRoute("managed-storage-delete-check", false, false, 204)
 	f.call("POST", "/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: mutationValues("blocked")}, "", 409)
 	invoke(true, false, 204)
