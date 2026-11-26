@@ -4,6 +4,7 @@ import { ApiError, type ApiClient } from '../../lib/api'
 import type { Definition, DefinitionRecord, Index, Invocation, Kind, Link, MetadataCapabilities, Organization, Preview, Publication, SourceDiagnostic } from '../../lib/types'
 import { PropertyEditor } from './PropertyEditor'
 import { SchemaStorageEditor } from './SchemaStorageEditor'
+import { SchemaClassificationEditor } from './SchemaClassificationEditor'
 import { SchemaPropertiesEditor } from './SchemaPropertiesEditor'
 import { SchemaLifecycleEditor } from './SchemaLifecycleEditor'
 import { ModelDataPreview } from './ModelDataPreview'
@@ -409,6 +410,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
         </div>
         {groupError && <div className="notice notice-error">{groupError}</div>}
         {!record && (!category || !groupsLoading && !groupError && !groups.length) && <div className="notice"><p>{category ? '当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。' : '请先在顶部选择当前分类，或前往「分类与分组」创建分类和分组。'}</p><button type="button" className="button subtle" onClick={onOrganizations}>前往分类与分组<ArrowRight size={15} /></button></div>}
+        {definition.schema && <SchemaClassificationEditor schema={definition.schema} entries={currentEntries ?? entries} categoryId={categoryId} disabled={disabled} onChange={(schema) => update({ schema })} />}
         {definition.schema && <SchemaStorageEditor section="storage" api={api} schema={definition.schema} locked={locked} active={active} onSources={onSources} onChange={(schema) => update({ schema })} />}
         </section>
         {definition.schema && <>

@@ -34,6 +34,8 @@ type Definition struct {
 }
 
 type Schema struct {
+	Tags           []string         `json:"tags,omitempty"`
+	PanoramaLayer  string           `json:"panoramaLayer,omitempty"`
 	Mode           string           `json:"mode"`
 	StorageLayout  string           `json:"storageLayout"`
 	StorageBinding *StorageBinding  `json:"storageBinding,omitempty"`

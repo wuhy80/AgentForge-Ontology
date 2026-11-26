@@ -41,7 +41,7 @@ import { JobsPage } from './features/execution/JobsPage'
 const QueryPage = lazy(() => import('./features/query/QueryPage').then((module) => ({ default: module.QueryPage })))
 const OntologyPage = lazy(() => import('./features/ontology/OntologyPage').then((module) => ({ default: module.OntologyPage })))
 
-type View = 'overview' | 'ontology' | 'organizations' | 'sources' | 'models' | 'query' | 'admin' | 'connections' | 'oauth' | 'jobs'
+type View = 'overview' | 'ontology' | 'panorama' | 'organizations' | 'sources' | 'models' | 'query' | 'admin' | 'connections' | 'oauth' | 'jobs'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
 type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
@@ -50,6 +50,7 @@ const navGroups: { name: string; items: NavItem[] }[] = [
   { name: '工作台', items: [
     { route: 'overview', view: 'overview', name: '工作空间', icon: LayoutDashboard },
     { route: 'ontology', view: 'ontology', name: '本体全景', icon: Layers3 },
+    { route: 'panorama', view: 'panorama', name: '分层全景', icon: Layers3 },
   ] },
   { name: '本体建模', items: [
     { route: modelListRoute('schema'), view: 'models', kind: 'schema', name: kindLabels.schema, icon: Box },
@@ -70,7 +71,7 @@ const navGroups: { name: string; items: NavItem[] }[] = [
 
 function currentView(route = window.location.hash.slice(1)): View {
   const hash = route.split(/[/?]/)[0]
-  return hash === 'ontology' || hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' || hash === 'connections' || hash === 'oauth' || hash === 'jobs' ? hash : 'overview'
+  return hash === 'panorama' || hash === 'ontology' || hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' || hash === 'connections' || hash === 'oauth' || hash === 'jobs' ? hash : 'overview'
 }
 
 function Brand({ light = false }: { light?: boolean }) {
@@ -605,8 +606,8 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                   <OrganizationsPage api={session.api} categories={categories} categoryId={categoryId} onSelectCategory={selectCategory} onRefresh={refresh} />
                 </DialogScope>
               </section>
-              {view === 'ontology' && <Suspense fallback={<p className="muted">正在加载本体全景…</p>}><OntologyPage
-                api={session.api} categoryId={categoryId} categories={categories} layoutScope={`${session.identity.tenantId}:${session.account.user.id}`}
+              {(view === 'ontology' || view === 'panorama') && <Suspense fallback={<p className="muted">正在加载本体全景…</p>}><OntologyPage
+                panorama={view === 'panorama'} api={session.api} categoryId={categoryId} categories={categories} layoutScope={`${session.identity.tenantId}:${session.account.user.id}`}
                 onOpenDefinition={(id, targetCategory) => { selectCategory(targetCategory); navigate(`models/${encodeURIComponent(id)}`) }}
                 onQuery={(id, targetCategory) => { selectCategory(targetCategory); query(id) }}
               /></Suspense>}

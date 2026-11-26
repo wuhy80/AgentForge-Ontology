@@ -106,10 +106,18 @@ func TestMySQLActionTargetsLifecycleAndIsolation(t *testing.T) {
 		t.Helper()
 		d := validSchema()
 		d.ID, d.TenantID, d.CategoryID, d.GroupID, d.Name = "", "", categoryID, groupID, name
+		d.Schema.Tags = []string{"生产", "设备"}
+		d.Schema.PanoramaLayer = "L1"
 		var out contracts.CurrentDefinition
 		decode(request("POST", "/metadata/definitions", tenantID, "", d), 201, &out)
 		if active {
 			publish(tenantID, out)
+			var published contracts.CurrentDefinition
+			decode(request("GET", "/metadata/definitions/"+out.Definition.ID, tenantID, "", nil), 200, &published)
+			schema := published.Definition.Schema
+			if schema == nil || schema.PanoramaLayer != "L1" || len(schema.Tags) != 2 || schema.Tags[0] != "生产" || schema.Tags[1] != "设备" {
+				t.Fatalf("Schema panorama metadata missing after publication: %+v", schema)
+			}
 		}
 		return out
 	}

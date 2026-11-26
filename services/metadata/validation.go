@@ -77,6 +77,22 @@ func canonicalDefinition(d *contracts.Definition, assignIDs bool) error {
 				return problem(422, "invalid_file_property", "文件属性须为平台托管模型的可空 longtext 属性")
 			}
 		}
+		if s.PanoramaLayer != "" && s.PanoramaLayer != "L1" && s.PanoramaLayer != "L2" && s.PanoramaLayer != "L3" {
+			return problem(400, "invalid_panorama_layer", "Schema 层位必须为 L1、L2 或 L3")
+		}
+		if len(s.Tags) > 20 {
+			return problem(400, "invalid_schema_tags", "一个 Schema 最多选择 20 个标签")
+		}
+		tags := make(map[string]bool, len(s.Tags))
+		for i, tag := range s.Tags {
+			name := norm.NFC.String(strings.TrimSpace(tag))
+			key := cases.Fold().String(name)
+			if name == "" || len([]rune(name)) > 32 || tags[key] {
+				return problem(400, "invalid_schema_tags", "标签须为 1 到 32 个字符且不能重复")
+			}
+			s.Tags[i] = name
+			tags[key] = true
+		}
 		if err := canonicalLifecycle(s); err != nil {
 			return err
 		}

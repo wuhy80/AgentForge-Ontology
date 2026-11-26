@@ -57,6 +57,8 @@ export interface Index {
   fieldIds: string[]
 }
 export interface Schema {
+  tags?: string[]
+  panoramaLayer?: 'L1' | 'L2' | 'L3'
   mode: string
   storageLayout: string
   properties: Property[]

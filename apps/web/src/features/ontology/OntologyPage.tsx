@@ -6,6 +6,7 @@ import { Dialog } from '../../components/Dialog'
 import { OntologyGraph } from './OntologyGraph'
 import { OntologyGraph3D } from './OntologyGraph3D'
 import { OntologyLayerDialog, readOntologyLayers } from './OntologyLayers'
+import { LayeredPanorama } from './LayeredPanorama'
 import { OntologyInspector } from './OntologyInspector'
 import { loadOntologyCatalog, type OntologyCatalog } from './ontology-catalog'
 import './ontology-page.css'
@@ -19,6 +20,7 @@ const kinds: { kind: Kind; name: string; icon: typeof Box }[] = [
 ]
 type Props = {
   api: ApiClient; categoryId: string; categories: Organization[]; layoutScope: string
+  panorama?: boolean
   onOpenDefinition: (id: string, categoryId: string) => void
   onQuery: (schemaId: string, categoryId: string) => void
 }
@@ -37,10 +39,10 @@ function useNarrow() {
 
 export function OntologyPage(props: Props) {
   // A different category or client owns different requests, selections and data.
-  return <OntologyWorkspace key={`${props.layoutScope}:${props.categoryId}`} {...props} />
+  return <OntologyWorkspace key={`${props.layoutScope}:${props.categoryId}:${props.panorama ?? false}`} {...props} />
 }
 
-function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDefinition, onQuery }: Props) {
+function OntologyWorkspace({ api, categoryId, categories, layoutScope, panorama, onOpenDefinition, onQuery }: Props) {
   const [catalog, setCatalog] = useState<OntologyCatalog>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -120,7 +122,7 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
 
   return <div className="ontology-explorer" aria-label="本体全景">
     <header className="ontology-page-heading">
-      <div><span className="eyebrow">ONTOLOGY EXPLORER</span><h1>本体全景</h1><p>以对象为中心，发现业务关系与定义之间的联系。</p></div>
+      <div><span className="eyebrow">ONTOLOGY EXPLORER</span><h1>{panorama ? '分层全景' : '本体全景'}</h1><p>以对象为中心，发现业务关系与定义之间的联系。</p></div>
       <button type="button" className="button ontology-refresh" disabled={loading || !categoryId} onClick={() => setRevision((value) => value + 1)}><RefreshCw size={15} className={loading ? 'spin' : ''} />刷新本体</button>
     </header>
     <div className="ontology-scope"><span><Layers3 size={15} />{category?.name ?? '尚未选择分类'}<ChevronRight size={13} /><strong>{local.length} 项已加载定义</strong></span><span className="ontology-current-badge"><i />当前生效 · 只读浏览</span></div>
@@ -133,7 +135,8 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, onOpenDef
         {catalog.unavailableReferences && <p>部分引用当前不可查看，仅显示已授权且已加载的定义。</p>}
         {catalog.referenceTruncated && <p>引用补齐已达到本次读取上限，当前视图不代表完整依赖范围。</p>}
       </div>}
-      {!local.length ? <div className="empty-state ontology-empty"><Network size={35} /><h2>当前分类还没有已生效定义</h2><p className="muted">在本体建模中维护并生效定义后，可在这里查看它们的联系。</p></div> : <>
+      {panorama ? <LayeredPanorama records={records} categories={categories} groups={catalog.groups} categoryId={categoryId}
+        layoutKey={layoutScope} onSelect={select} selectedId={selectedId} inspector={inspector} /> : !local.length ? <div className="empty-state ontology-empty"><Network size={35} /><h2>当前分类还没有已生效定义</h2><p className="muted">在本体建模中维护并生效定义后，可在这里查看它们的联系。</p></div> : <>
         <div className="ontology-type-summary" aria-label="本体定义数量">{kinds.map((item) => <button type="button" key={item.kind} className={`ontology-kind-summary ontology-kind-${item.kind} ${kind === item.kind ? 'is-selected' : ''}`} aria-pressed={kind === item.kind}
           onClick={() => changeFilter(() => { setKind(kind === item.kind ? '' : item.kind); if (!['schema', 'link'].includes(item.kind)) setMode('dependencies') })}><item.icon size={17} /><span>{item.name}</span><strong>{local.filter((record) => record.definition.kind === item.kind).length}</strong></button>)}</div>
         <div className="ontology-mobile-tabs" role="group" aria-label="浏览区域"><button type="button" aria-pressed={mobilePane === 'directory'} onClick={() => setMobilePane('directory')}><List size={15} />目录</button><button type="button" aria-pressed={mobilePane === 'canvas'} onClick={() => setMobilePane('canvas')}><Network size={15} />画布</button></div>

@@ -1,23 +1,37 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { RotateCcw, RotateCw, ZoomIn, ZoomOut } from 'lucide-react'
 import { buildOntologyGraph } from './ontology-graph'
 import type { OntologyGraphProps } from './OntologyGraph'
+import type { Organization } from '../../lib/types'
 import type { OntologyLayers } from './OntologyLayers'
 import './ontology-graph-3d.css'
 
-const initialCamera = { yaw: -.25, pitch: .38, zoom: 1 }
+const initialCamera = { yaw: -.25, pitch: .38, zoom: 1, x: 0, y: 0 }
 const depthByKind = { schema: 0, link: 1, enum: -1, action: 1, function: 2 }
 const kindNames = { schema: '对象模型', link: '关系', enum: '枚举', action: '动作', function: '函数' }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
-export function OntologyGraph3D({ flat = false, layers, layerFocus, onLayerFocus, onSelect, ...input }: OntologyGraphProps & {
-  flat?: boolean; layers?: OntologyLayers; layerFocus?: string; onLayerFocus?: (id?: string) => void
+export function OntologyGraph3D({ flat = false, panorama = false, groups = [], layers, layerFocus, onLayerFocus, onSelect, ...input }: OntologyGraphProps & {
+  flat?: boolean; panorama?: boolean; groups?: Organization[]; layers?: OntologyLayers; layerFocus?: string; onLayerFocus?: (id?: string) => void
 }) {
   const { records, categories, categoryId, mode, selectedId, focusId, rootIds } = input
-  const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode, selectedId, focusId, rootIds }),
-    [records, categories, categoryId, mode, selectedId, focusId, rootIds])
-  const [camera, setCamera] = useState(initialCamera)
-  const drag = useRef<{ id: number; x: number; y: number } | null>(null)
+  const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode, selectedId, focusId, rootIds, panorama }),
+    [records, categories, categoryId, mode, selectedId, focusId, rootIds, panorama])
+  const defaultCamera = panorama ? { ...initialCamera, yaw: -.38, pitch: .33, zoom: .84 } : initialCamera
+  const [camera, setCamera] = useState(defaultCamera)
+  const drag = useRef<{ id: number; x: number; y: number; pan: boolean } | null>(null)
+  const surface = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const element = surface.current
+    if (!panorama || !element) return
+    function onWheel(event: WheelEvent) {
+      if (!event.ctrlKey && document.activeElement !== element) return
+      event.preventDefault()
+      setCamera(current => ({ ...current, zoom: clamp(current.zoom * (event.deltaY < 0 ? 1.08 : .92), .55, 1.75) }))
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => element.removeEventListener('wheel', onWheel)
+  }, [panorama])
   const markerId = useId()
   const xs = model.nodes.map(node => node.position.x)
   const ys = model.nodes.map(node => node.position.y)
@@ -35,7 +49,7 @@ export function OntologyGraph3D({ flat = false, layers, layerFocus, onLayerFocus
     const vertical = y * cosPitch - rotatedDepth * sinPitch
     const depth = y * sinPitch + rotatedDepth * cosPitch
     const scale = 1250 / (1250 - depth * .65)
-    return { x: 500 + horizontal * scale * camera.zoom, y: 300 + vertical * scale * camera.zoom, depth, scale }
+    return { x: 500 + camera.x + horizontal * scale * camera.zoom, y: 300 + camera.y + vertical * scale * camera.zoom, depth, scale }
   }
 
   function gridLine(x1: number, z1: number, x2: number, z2: number) {
@@ -61,13 +75,26 @@ export function OntologyGraph3D({ flat = false, layers, layerFocus, onLayerFocus
     else buckets.set(id, [node])
   }
   const visibleLayers = layers ? [...layers.layers, { id: unassigned, name: '未分层' }]
-    .filter(layer => buckets.has(layer.id) && (layerFocus === undefined || layerFocus === layer.id)) : []
+    .filter(layer => (buckets.has(layer.id) || panorama && layer.id !== unassigned) && (layerFocus === undefined || layerFocus === layer.id)) : []
   const lanes = visibleLayers.map((layer, index) => {
     const members = buckets.get(layer.id) ?? []
-    const columns = Math.min(4, members.length)
-    const rows = Math.ceil(members.length / columns)
-    const y = visibleLayers.length === 1 ? 0 : -200 + index * 400 / (visibleLayers.length - 1)
-    return { ...layer, members, columns, rows, y }
+    const divisions = new Map<string, typeof members>()
+    if (panorama) for (const node of members) {
+      const group = node.record.definition.groupId
+      const entries = divisions.get(group) ?? []
+      entries.push(node)
+      divisions.set(group, entries)
+    }
+    const zones = [...divisions].sort(([left], [right]) => left.localeCompare(right)).map(([id, entries], offset) => {
+      const width = 708 / divisions.size
+      const left = -354 + offset * width
+      const columns = Math.min(entries.length, Math.max(1, Math.floor(width / 120)))
+      return { id, entries, columns, left, width, rows: Math.ceil(entries.length / columns) }
+    })
+    const columns = Math.max(1, Math.min(4, members.length))
+    const rows = Math.max(1, Math.ceil(members.length / columns))
+    const y = visibleLayers.length === 1 ? 0 : -(panorama ? 165 : 200) + index * (panorama ? 345 : 400) / (visibleLayers.length - 1)
+    return { ...layer, members, columns, rows, y, zones }
   })
   const totalRows = lanes.reduce((sum, lane) => sum + lane.rows, 0)
   let precedingRows = 0
@@ -79,8 +106,10 @@ export function OntologyGraph3D({ flat = false, layers, layerFocus, onLayerFocus
   const nodes = (layers ? planes.flatMap(lane => lane.members.map((node, index) => {
     const column = index % lane.columns
     const row = Math.floor(index / lane.columns)
-    const x = (column - (lane.columns - 1) / 2) * 174
-    const z = (row - (lane.rows - 1) / 2) * Math.min(95, 660 / lane.rows)
+    const zone = lane.zones.find(area => area.entries.includes(node))
+    const zoneIndex = zone?.entries.indexOf(node) ?? 0
+    const x = zone ? zone.left + (zoneIndex % zone.columns + .5) * zone.width / zone.columns : (column - (lane.columns - 1) / 2) * 174
+    const z = zone ? -255 + (Math.floor(zoneIndex / zone.columns) + .5) * 510 / zone.rows : (row - (lane.rows - 1) / 2) * Math.min(95, 660 / lane.rows)
     const point = flat
       ? { x: (column + .5) * 1000 / lane.columns, y: lane.top + (row + .65) * (lane.bottom - lane.top) / lane.rows, depth: 0, scale: 1 }
       : project(x, lane.y, z)
@@ -114,19 +143,21 @@ export function OntologyGraph3D({ flat = false, layers, layerFocus, onLayerFocus
 
   const sceneLabel = flat ? '二维分层画布' : input.mode === 'relations' ? '本体对象关系三维画布' : '本体定义依赖三维画布'
   return <section className="ontology-graph" aria-label={sceneLabel}>
-    {layers && <div className="ontology-graph-toolbar"><label>聚焦层 <select value={layerFocus === undefined ? 'all' : `layer:${layerFocus}`} onChange={event => {
+    {layers && <div className="ontology-graph-toolbar"><label>聚焦层 <select className={panorama ? "field" : undefined} value={layerFocus === undefined ? 'all' : `layer:${layerFocus}`} onChange={event => {
       onLayerFocus?.(event.target.value === 'all' ? undefined : event.target.value.slice(6))
     }}><option value="all">全部层</option>{[...layers.layers, { id: '', name: '未分层' }].map(layer => <option key={layer.id} value={`layer:${layer.id}`}>{layer.name}</option>)}</select></label></div>}
-    {!flat && <div className="ontology-graph-toolbar"><span>拖动画布旋转</span>
+    {!flat && <div className="ontology-graph-toolbar"><span>{panorama ? '拖动旋转 · Shift 拖动平移 · 聚焦后滚轮缩放' : '拖动画布旋转'}</span>
       <div role="group" aria-label="三维画布操作">
         <button type="button" aria-label="向左旋转" onClick={() => orbit(-.28)}><RotateCcw size={15} aria-hidden="true" /></button>
         <button type="button" aria-label="向右旋转" onClick={() => orbit(.28)}><RotateCw size={15} aria-hidden="true" /></button>
         <button type="button" aria-label="放大三维画布" onClick={() => zoom(.15)}><ZoomIn size={15} aria-hidden="true" /></button>
         <button type="button" aria-label="缩小三维画布" onClick={() => zoom(-.15)}><ZoomOut size={15} aria-hidden="true" /></button>
-        <button type="button" onClick={() => setCamera(initialCamera)}>复位</button>
+        <button type="button" onClick={() => setCamera(defaultCamera)}>复位</button>
+        {panorama && <><button type="button" onClick={() => setCamera({ ...defaultCamera, yaw: 0, pitch: .06 })}>正视</button>
+          <button type="button" onClick={() => setCamera({ ...defaultCamera, yaw: 0, pitch: 1.2 })}>俯视</button></>}
       </div>
     </div>}
-    {nodes.length ? <div className={`ontology-graph-surface ontology-space${flat ? ' ontology-space-flat' : ''}`}
+    {(nodes.length > 0 || panorama) ? <div ref={surface} className={`ontology-graph-surface ontology-space${flat ? ' ontology-space-flat' : ''}`}
       style={flat ? { height: Math.max(420, totalRows * 86) } : undefined} aria-label={flat ? '二维泳道' : '三维视角，方向键旋转'} tabIndex={0}
       onKeyDown={event => {
         if (flat || event.target !== event.currentTarget) return
@@ -135,16 +166,26 @@ export function OntologyGraph3D({ flat = false, layers, layerFocus, onLayerFocus
         event.preventDefault()
         orbit(step[0], step[1])
       }}
+      onDoubleClick={event => {
+        const node = (event.target as Element).closest<HTMLButtonElement>('[data-panorama-node]')
+        if (panorama && node?.dataset.panoramaNode) input.onFocus(node.dataset.panoramaNode)
+      }}
       onPointerDown={event => {
         if (flat || event.button !== 0 || !event.isPrimary || (event.target as Element).closest('button')) return
+        if (panorama) event.currentTarget.focus({ preventScroll: true })
         event.currentTarget.setPointerCapture(event.pointerId)
-        drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY }
+        drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, pan: panorama && event.shiftKey }
       }}
       onPointerMove={event => {
         const previous = drag.current
         if (!previous || previous.id !== event.pointerId) return
-        orbit((event.clientX - previous.x) * .008, (event.clientY - previous.y) * .008)
-        drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY }
+        const dx = event.clientX - previous.x, dy = event.clientY - previous.y
+        if (previous.pan) {
+          const { clientWidth, clientHeight } = event.currentTarget
+          setCamera(current => ({ ...current, x: current.x + dx * 1000 / clientWidth, y: current.y + dy * 600 / clientHeight }))
+        }
+        else orbit(dx * .008, dy * .008)
+        drag.current = { ...previous, x: event.clientX, y: event.clientY }
       }}
       onLostPointerCapture={() => { drag.current = null }}>
       <svg viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
@@ -153,12 +194,21 @@ export function OntologyGraph3D({ flat = false, layers, layerFocus, onLayerFocus
         {planes.map(plane => {
           const corners = flat ? [{ x: 0, y: plane.top }, { x: 1000, y: plane.top }, { x: 1000, y: plane.bottom }, { x: 0, y: plane.bottom }]
             : [project(-380, plane.y, -340), project(380, plane.y, -340), project(380, plane.y, 340), project(-380, plane.y, 340)]
-          return <polygon key={plane.id} className="ontology-layer-plane" points={corners.map(point => `${point.x},${point.y}`).join(' ')} />
+          return <g key={plane.id}>
+            <polygon className="ontology-layer-plane" data-panorama-layer={panorama ? plane.id : undefined} points={corners.map(point => `${point.x},${point.y}`).join(' ')} />
+            {plane.zones.map(zone => {
+              const left = zone.left + 5, right = zone.left + zone.width - 5
+              const pad = [project(left, plane.y, -298), project(right, plane.y, -298), project(right, plane.y, 298), project(left, plane.y, 298)]
+              const label = project((left + right) / 2, plane.y, 310)
+              return <g key={zone.id}><polygon className="panorama-zone" points={pad.map(point => `${point.x},${point.y}`).join(' ')} />
+                <text className="panorama-zone-name" x={label.x} y={label.y} textAnchor="middle">{groups.find(group => group.id === zone.id)?.name}</text></g>
+            })}
+          </g>
         })}
         {edges.map(({ edge, path, active, crossLayer }) => <path key={edge.id} d={path} className="ontology-space-edge" data-active={active} data-cross-layer={crossLayer} strokeDasharray={edge.kind === 'dependency' ? '5 4' : undefined} markerMid={`url(#${markerId})`} />)}
       </svg>
       {planes.map(plane => {
-        const label = flat ? { x: 16, y: plane.top } : project(-380, plane.y, -340)
+        const label = flat ? { x: 16, y: plane.top } : panorama ? project(-300, plane.y, 255) : project(-380, plane.y, -340)
         return <span key={plane.id} className="ontology-layer-caption" style={{ left: `${label.x / 10}%`, top: `${label.y / 6}%` }}>{plane.name} · {plane.members.length}</span>
       })}
       {edges.map(({ edge, x, y, active }) => <button type="button" key={edge.id} className="ontology-space-label" data-active={active}
@@ -167,11 +217,11 @@ export function OntologyGraph3D({ flat = false, layers, layerFocus, onLayerFocus
       </button>)}
       {nodes.map(({ id, record: { definition }, point }) => <button type="button" key={id} className={`ontology-space-node kind-${definition.kind}`}
         style={{ left: `${point.x / 10}%`, top: `${point.y / 6}%`, transform: `translate(-50%, -50%) scale(${point.scale})` }}
-        data-layer={layers ? layerOf(id) : undefined} aria-pressed={input.selectedId === id} aria-label={`${kindNames[definition.kind]}：${definition.name}`} title={definition.name} onClick={() => onSelect(id)}>
+        data-panorama-kind={panorama ? definition.kind : undefined} data-panorama-node={panorama ? id : undefined} data-layer={layers ? layerOf(id) : undefined} aria-pressed={input.selectedId === id} aria-label={`${kindNames[definition.kind]}：${definition.name}`} title={definition.name} onClick={() => onSelect(id)}>
         <span>{kindNames[definition.kind]}{definition.categoryId !== input.categoryId && ' · 跨分类'}</span><strong>{definition.name}</strong>
       </button>)}
     </div> : <div className="ontology-graph-surface"><div className="ontology-graph-empty">当前范围没有可显示的定义，请调整目录筛选。</div></div>}
-    <div className="ontology-graph-footer"><span>{input.mode === 'relations' ? 'Link 业务关系' : '定义引用 · 虚线'}</span><span>{nodes.length} 个节点 · {edges.length} 条连线</span></div>
+    <div className="ontology-graph-footer"><span>{panorama ? '实线 · Link　虚线 · 动作与函数关联' : input.mode === 'relations' ? 'Link 业务关系' : '定义引用 · 虚线'}</span><span>{nodes.length} 个节点 · {edges.length} 条连线</span></div>
     {model.unavailableRelations && <p className="ontology-graph-hint" role="status">部分关系端点当前不可查看，相关连线未绘制。</p>}
     {(model.omittedNodes > 0 || model.omittedEdges > 0) && <p className="ontology-graph-budget" role="status">已达到画布显示上限（120 个节点、240 条连线），可通过搜索、筛选或聚焦缩小范围。</p>}
   </section>

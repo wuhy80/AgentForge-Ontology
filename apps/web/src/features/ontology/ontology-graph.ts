@@ -1,4 +1,5 @@
 import type { DefinitionRecord, Kind, Organization, Property } from '../../lib/types'
+import { collectCallableTargets } from './panorama-references'
 import { arrangeRelationNodes, buildRelationGraph, MAX_RELATION_LINKS, MAX_RELATION_NODES, type GraphPoint } from '../model/relation-graph'
 
 export type OntologyGraphMode = 'relations' | 'dependencies'
@@ -65,6 +66,7 @@ export interface OntologyGraphInput {
   selectedId?: string
   focusId?: string
   rootIds?: string[]
+  panorama?: boolean
 }
 const expectedKinds: Record<DefinitionReferenceKind, Kind> = { enum: 'enum', target: 'schema', function: 'function', source: 'schema', destination: 'schema' }
 const emptyGraph = (): OntologyGraphModel => ({ nodes: [], edges: [], omittedNodes: 0, omittedEdges: 0, unavailableRelations: false })
@@ -113,10 +115,14 @@ export function buildOntologyGraph(input: OntologyGraphInput): OntologyGraphMode
     }
   }
 
-  const included = new Set(roots.map(record => record.definition.id))
+  const panoramaNode = (record: DefinitionRecord) => ['schema', 'action', 'function'].includes(record.definition.kind)
+  const referencesOf = input.panorama ? collectCallableTargets : collectDefinitionReferences
+  const included = new Set(roots.filter(record => !input.panorama || panoramaNode(record)).map(record => record.definition.id))
+  const originalReference = (record: DefinitionRecord) => !input.panorama || panoramaNode(record)
+  const hasRequestedScope = input.panorama && !!input.rootIds
   const rootIds = new Set(included)
   for (const record of current.values()) {
-    if (collectDefinitionReferences(record).some(reference => rootIds.has(reference.targetId)
+    if (originalReference(record) && (!hasRequestedScope || rootIds.has(record.definition.id)) && referencesOf(record).some(reference => rootIds.has(reference.targetId)
       && current.get(reference.targetId)?.definition.kind === expectedKinds[reference.kind])) included.add(record.definition.id)
   }
   // The supplied catalog has already bounded external reads. Traverse only
@@ -124,9 +130,9 @@ export function buildOntologyGraph(input: OntologyGraphInput): OntologyGraphMode
   const queue = [...included]
   for (let index = 0; index < queue.length; index++) {
     const record = current.get(queue[index])!
-    for (const reference of collectDefinitionReferences(record)) {
+    for (const reference of referencesOf(record)) {
       const target = current.get(reference.targetId)
-      if (!target || target.definition.kind !== expectedKinds[reference.kind] || included.has(reference.targetId)) continue
+      if (!target || target.definition.kind !== expectedKinds[reference.kind] || included.has(reference.targetId) || (hasRequestedScope && !rootIds.has(reference.targetId))) continue
       included.add(reference.targetId); queue.push(reference.targetId)
     }
   }
@@ -134,14 +140,20 @@ export function buildOntologyGraph(input: OntologyGraphInput): OntologyGraphMode
   const unique = new Set<string>()
   for (const id of included) {
     const record = current.get(id)!
-    for (const reference of collectDefinitionReferences(record)) {
+    for (const reference of referencesOf(record)) {
       const target = current.get(reference.targetId)
       if (!included.has(reference.targetId) || target?.definition.kind !== expectedKinds[reference.kind]) continue
-      const edgeId = JSON.stringify([id, reference.kind, reference.scope ?? '', reference.propertyId ?? '', reference.targetId])
+      const edgeId = JSON.stringify([id, reference.kind, reference.scope ?? '', reference.propertyId ?? '', reference.targetId, input.panorama ? reference.label : ''])
       if (unique.has(edgeId)) continue
       unique.add(edgeId)
       edges.push({ id: `dependency:${edgeId}`, source: id, target: reference.targetId, record, label: reference.label, offset: 0, kind: 'dependency' })
     }
+  }
+  if (input.panorama) for (const record of current.values()) {
+    const link = record.definition.link
+    if (!link || !included.has(link.sourceSchemaId) || !included.has(link.targetSchemaId)) continue
+    edges.push({ id: record.definition.id, source: link.sourceSchemaId, target: link.targetSchemaId, record,
+      label: link.forwardName || record.definition.name, reverseLabel: link.reverseName, kind: 'relation', offset: 0 })
   }
   const visibleScope = new Set(included)
   if (focusId && included.has(focusId)) {

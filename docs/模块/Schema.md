@@ -677,3 +677,9 @@ Schema 定义正文可声明 `lifecycle`：`initialStageId`、按显示顺序排
 | [QUDT Schema 3.5.2](https://qudt.org/doc/2026/09/DOC_SCHEMA-QUDT.html) | 区分 QuantityKind、Unit、QuantityValue、维度向量及转换属性；包含 conversionMultiplier/Offset、对数单位等模型 | 分开表示物理量类型、单位和数值；换算规则由受控字典维护 |
 
 上述是标准事实；本文的 JSON、接口参数、字段名、分层和首期取舍属于本项目建议，并非这些标准的原生格式。采用语义标识不要求实现完整 RDF/OWL 系统。
+
+### Schema 标签与全景层位
+
+Schema 正文可选 `tags` 和 `panoramaLayer`。标签随定义草稿保存和发布，每个 Schema 最多 20 个，每个名称去除首尾空白并按 NFC 规范化后为 1～32 字符，同一 Schema 按 Unicode 大小写折叠去重。编辑器从当前分类可见且已生效的 Schema 汇总可复用标签，也支持直接新增。标签以名称存储。层位接受 L1、L2、L3，旧定义缺省时在全景中标为待分层。两项均为定义元数据，沿用定义授权与并发校验。
+
+「分层全景」跟随工作台当前分类，使用已生效的 Schema、Link、Action、Function 与现有授权目录。顶部 L4 展示 Action 和 Function，底部 M0 为空。层内按定义分组划分区域。Link 画为实线，作用对象、记录读取、写声明、绑定函数及源码 SDK 写调用画为虚线。源码关联首批识别 Python、JavaScript、Go 中直接调用 `ctx.data` 或 `ctx.Data` 且首参为 UUID 字面量的写调用，边的两端必须已在授权目录中。动态值、常量传递和非 SDK 调用需要后续分析。这些边只用于浏览。
