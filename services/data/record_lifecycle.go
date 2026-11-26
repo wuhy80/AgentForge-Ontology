@@ -116,13 +116,18 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
-func (h *handler) notifyLifecycleFollowers(ctx context.Context, tx *sql.Tx, actor c.Principal, d c.Definition, record, run string) error {
+func (h *handler) notifyLifecycleRecipients(ctx context.Context, tx *sql.Tx, actor c.Principal, d c.Definition, record, run string) error {
 	const limit = 200
 	// Bound the batch independently of the parent transaction so a slow
 	// authorization service leaves time to record the failed delivery.
 	deliveryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	rows, err := tx.QueryContext(ctx, "SELECT subject_id FROM af_data_record_follows WHERE "+lifecycleStageScope+" AND subject_id<>? ORDER BY subject_id LIMIT ?", actor.TenantID, d.ID, record, actor.Subject, limit+1)
+	rows, err := tx.QueryContext(ctx, `SELECT subject_id FROM (
+ SELECT subject_id FROM af_data_record_follows WHERE `+lifecycleStageScope+`
+ UNION DISTINCT
+ SELECT assignee FROM af_data_record_approvals WHERE `+lifecycleStageScope+` AND state='pending'
+ ) recipients WHERE subject_id<>? ORDER BY subject_id LIMIT ?`,
+		actor.TenantID, d.ID, record, actor.TenantID, d.ID, record, actor.Subject, limit+1)
 	if err != nil {
 		return err
 	}
@@ -181,7 +186,7 @@ func (h *handler) attemptLifecycleNotice(ctx context.Context, tx *sql.Tx, p c.Pr
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT lifecycle_notice"); err != nil {
 		return nil, err
 	}
-	deliveryErr := h.notifyLifecycleFollowers(ctx, tx, p, d, recordID, runID)
+	deliveryErr := h.notifyLifecycleRecipients(ctx, tx, p, d, recordID, runID)
 	code := ""
 	if deliveryErr != nil {
 		if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT lifecycle_notice"); err != nil {

@@ -175,6 +175,25 @@ func TestMySQLRecordLifecycleTransitions(t *testing.T) {
 	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleFinishMove, ""), "", 409)
 }
 
+func TestMySQLRecordLifecycleNotifiesPendingAssignee(t *testing.T) {
+	f := lifecycleFixture(t)
+	row := f.create("LIFECYCLE-ASSIGNEE")
+	assignee := c.NewID()
+	if _, err := f.engine.DB().Exec(`INSERT INTO af_data_record_approvals
+ (tenant_id,schema_id,entity_id,id,assignee,submitted_by,submitted_at,state,note)
+ VALUES (?,?,?,?,?,?,UTC_TIMESTAMP(6),'pending','')`,
+		f.p.TenantID, row.SchemaID, row.ID, c.NewID(), assignee, f.p.Subject); err != nil {
+		t.Fatal(err)
+	}
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
+	run := f.lifecycle(row.ID, 200).History[0]
+	var count int
+	if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_notices WHERE tenant_id=? AND subject_id=? AND id=?",
+		f.p.TenantID, assignee, run.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("expected one notice for pending assignee: count=%d err=%v", count, err)
+	}
+}
+
 func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 	f := lifecycleFixture(t)
 	row := f.create("LIFECYCLE-NOTICE-FAILURE")
