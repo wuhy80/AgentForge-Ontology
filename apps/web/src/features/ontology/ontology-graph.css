@@ -1,10 +1,11 @@
-.ontology-graph { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--canvas); }
+.ontology-graph { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--canvas); }
 .ontology-graph-toolbar { min-height: 43px; display: flex; align-items: center; justify-content: space-between; gap: 7px; padding: 7px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .ontology-graph-toolbar > span { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 600; color: var(--muted); }
 .ontology-graph-toolbar > div { display: flex; flex-wrap: wrap; gap: 2px; }
 .ontology-graph-toolbar button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
 .ontology-graph-toolbar button:hover, .ontology-graph-toolbar button:focus-visible { border-color: var(--line); background: var(--primary-soft); color: var(--primary); }
-.ontology-graph-surface { position: relative; height: 560px; min-width: 0; width: 100%; }
+.ontology-graph-surface { position: relative; min-width: 0; width: 100%; }
+.ontology-graph > :is(.ontology-graph-surface, .ontology-layer-viewport) { flex: 1 0 360px; }
 .ontology-graph .react-flow__node:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; border-radius: 7px; }
 .ontology-graph-node { position: relative; width: 205px; box-sizing: border-box; padding: 14px 15px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: 0 3px 12px var(--shadow); color: var(--ink); border-color: var(--line); }
 .ontology-graph-node-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
@@ -38,8 +39,10 @@
 .ontology-graph-budget { background: var(--warning-soft); color: var(--warning); }
 .ontology-graph-focus { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; background: var(--surface-raised); color: var(--primary); font-size: 11px; }
 .ontology-graph-focus button { flex: none; border: 0; border-radius: 4px; padding: 5px 7px; color: var(--primary); background: var(--surface); cursor: pointer; font: inherit; }
+@media (max-width: 850px) {
+  .ontology-graph > :is(.ontology-graph-surface, .ontology-layer-viewport) { flex-basis: max(360px, 50dvh); }
+}
 @media (max-width: 600px) {
-  .ontology-graph-surface { height: 420px; }
   .ontology-graph-toolbar { padding: 7px 8px; flex-wrap: wrap; }
   .ontology-graph-footer { flex-wrap: wrap; }
   .ontology-graph-focus { align-items: flex-start; }

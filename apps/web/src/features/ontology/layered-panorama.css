@@ -1,12 +1,5 @@
-/* The panorama is a workspace rather than a document with a footer. */
-.workspace-main:has(.panorama-layout) { min-height: 100dvh; }
 .workspace-main:has(.panorama-layout) > .workspace-footer { display: none; }
-.workspace-main:has(.panorama-layout) > .main-content {
-  display: flex;
-  flex-direction: column;
-  padding-bottom: 8px;
-}
-.ontology-panorama-page, .ontology-panorama {
+.ontology-panorama {
   display: flex;
   flex: 1 0 auto;
   flex-direction: column;
@@ -29,12 +22,10 @@
 }
 .panorama-layout[data-drawer='closed'] { --drawer-gap: 0px; }
 .panorama-layout > .ontology-graph {
-  display: flex;
-  flex-direction: column;
+  flex: 1 0 auto;
   border: 0;
   border-radius: 0;
 }
-.panorama-layout .ontology-layer-viewport { height: clamp(360px, calc(100dvh - 300px), 720px); }
 .panorama-hud { display: grid; gap: 4px; justify-items: start; padding: 10px 12px; }
 .panorama-filter-row, .panorama-tools, .panorama-drawer-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .panorama-filter-row {
@@ -137,7 +128,6 @@
 @media (max-width: 850px) {
   .panorama-layout, .panorama-layout[data-drawer='closed'] { padding-right: 0; }
   .panorama-hud { padding: 7px 8px; }
-  .panorama-layout .ontology-layer-viewport { height: max(275px, calc(100dvh - 440px)); }
   .panorama-layer-button-name { display: none; }
   .panorama-layout > aside { position: relative; inset: auto; width: 100%; max-height: 46vh; border-width: 1px 0 0; border-radius: 0; }
   .panorama-layout [data-panorama-kind] > strong { max-width: 72px; }

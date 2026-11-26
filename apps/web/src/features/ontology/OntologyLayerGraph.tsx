@@ -77,7 +77,7 @@ export function OntologyLayerGraph({
     })))
     return [{ ...layer, top, height, zones, nodes }]
   })
-  const height = Math.max(420, nextTop)
+  const height = nextTop
   const nodes = lanes.flatMap(lane => lane.nodes)
   const placed = new Map(nodes.map(node => [node.id, node]))
   const inGroup = (id: string) => !!focusedGroup && placed.get(id)?.record.definition.groupId === focusedGroup
@@ -124,7 +124,7 @@ export function OntologyLayerGraph({
       </div>
     </div>
     <div ref={viewport} className="ontology-layer-viewport" aria-label="二维泳道" tabIndex={0}>
-      {lanes.length > 0 ? <div ref={stage} className="ontology-lanes" style={{ width: `${zoom * 100}%`, minWidth: minWidth * zoom, height: height * zoom }}>
+      {lanes.length > 0 ? <div ref={stage} className="ontology-lanes" style={{ width: `${zoom * 100}%`, minWidth: minWidth * zoom, height: height * zoom, minHeight: `${zoom * 100}%` }}>
         <svg viewBox={`0 0 ${graphWidth} ${height}`} preserveAspectRatio="none" aria-hidden="true">
           <defs><marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 Z" fill="var(--edge)" /></marker></defs>
           {lanes.map(lane => <g key={lane.id}>

@@ -181,6 +181,33 @@ test('分层全景的二维泳道在桌面和 390px 双主题保留筛选、聚�
   assertReadOnly(state)
 })
 
+for (const width of [1440, 390]) test(`两类全景在 ${width}px 随窗口增高扩大画布`, async ({ page }) => {
+  const state = await ontologyFixture(page)
+  for (const route of ['ontology', 'panorama']) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/#${route}`)
+    if (route === 'ontology' && width === 390) {
+      await page.getByRole('group', { name: '浏览区域', exact: true }).getByRole('button', { name: '画布', exact: true }).click()
+    }
+    const graph = route === 'ontology' ? relationGraph(page) : page.getByRole('region', { name: '分层全景二维画布', exact: true })
+    const surface = graph.locator(route === 'ontology' ? '.ontology-graph-surface' : '.ontology-layer-viewport')
+    await expect(surface).toBeVisible()
+    for (const theme of ['深空蓝', '精密白']) {
+      await page.getByRole('group', { name: '界面主题', exact: true }).getByRole('button', { name: theme, exact: true }).click()
+      await page.setViewportSize({ width, height: 900 })
+      const initial = await surface.evaluate(element => element.clientHeight)
+      await page.setViewportSize({ width, height: 1240 })
+      await expect.poll(() => surface.evaluate(element => element.clientHeight)).toBeGreaterThan(initial + (width === 1440 ? 320 : 150))
+      if (route === 'panorama') {
+        expect(await surface.evaluate(element => element.querySelector('.ontology-lanes')!.clientHeight)).toBeGreaterThanOrEqual(await surface.evaluate(element => element.clientHeight))
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      if (width === 1440) expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(1241)
+    }
+  }
+  assertReadOnly(state)
+})
+
 test('改名保留稳定选择和个人位置，同名新定义不接管旧选择或布局身份', async ({ page }) => {
   const state = await ontologyFixture(page)
   await page.goto('/#ontology')
