@@ -30,10 +30,12 @@ func RunLifecycleNoticeWorker(ctx context.Context, cfg Config) {
 	}
 }
 
+const lifecycleAutoRetryEligible = "notification_failed=TRUE AND notification_retry_at<=UTC_TIMESTAMP(6) AND created_at>=UTC_TIMESTAMP(6)-INTERVAL 24 HOUR"
+
 func (h *handler) retryLifecycleBatch(ctx context.Context) error {
 	db := h.cfg.Engine.DB()
 	rows, err := db.QueryContext(ctx, `SELECT tenant_id,schema_id,entity_id,id,actor
- FROM af_data_record_lifecycle_runs WHERE notification_failed=TRUE AND notification_retry_at<=UTC_TIMESTAMP(6)
+ FROM af_data_record_lifecycle_runs WHERE `+lifecycleAutoRetryEligible+`
  ORDER BY notification_retry_at,tenant_id,schema_id,entity_id,id LIMIT 16`)
 	if err != nil {
 		return err
@@ -54,7 +56,7 @@ func (h *handler) retryLifecycleBatch(ctx context.Context) error {
 	for _, item := range batch {
 		result, err := db.ExecContext(ctx, `UPDATE af_data_record_lifecycle_runs
  SET notification_retry_at=UTC_TIMESTAMP(6)+INTERVAL 5 MINUTE WHERE `+lifecycleStageScope+`
- AND id=? AND notification_failed=TRUE AND notification_retry_at<=UTC_TIMESTAMP(6)`, item.tenant, item.schema, item.record, item.run)
+ AND id=? AND `+lifecycleAutoRetryEligible, item.tenant, item.schema, item.record, item.run)
 		if err != nil {
 			return err
 		}

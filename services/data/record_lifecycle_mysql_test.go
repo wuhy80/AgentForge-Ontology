@@ -330,6 +330,22 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	f.call("POST", retry, nil, "", 503)
 	countNotices(0)
 	revoked = true
+	worker := &handler{cfg: config, client: f.core.client}
+	setRunTime := func(hoursAgo int) {
+		t.Helper()
+		if _, err := f.engine.DB().Exec("UPDATE af_data_record_lifecycle_runs SET created_at=UTC_TIMESTAMP(6)-INTERVAL ? HOUR WHERE tenant_id=? AND id=?", hoursAgo, f.p.TenantID, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setRunTime(25)
+	if err := worker.retryLifecycleBatch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	countNotices(0)
+	if !f.lifecycle(row.ID, 200).History[0].NotificationRetryAllowed {
+		t.Fatal("expired automatic retry should preserve manual retry")
+	}
+	setRunTime(0)
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	for range 2 {
