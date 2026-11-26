@@ -56,4 +56,5 @@ PRIMARY KEY(tenant_id,schema_id,entity_id,id),
 KEY run_order(tenant_id,schema_id,entity_id,created_at,id)) ENGINE=InnoDB`},
 	{ID: "023_data_lifecycle_notice_failure", SQL: `ALTER TABLE af_data_record_lifecycle_runs ADD COLUMN notification_failed BOOLEAN NOT NULL DEFAULT FALSE`},
 	{ID: "024_data_lifecycle_notice_failure_code", SQL: `ALTER TABLE af_data_record_lifecycle_runs ADD COLUMN notification_failure_code VARCHAR(32) NOT NULL DEFAULT ''`},
+	{ID: "025_data_lifecycle_notice_retry", SQL: `ALTER TABLE af_data_record_lifecycle_runs ADD COLUMN notification_retry_at DATETIME(6) NOT NULL DEFAULT '2000-01-01 00:00:00', ADD INDEX notice_retry (notification_failed,notification_retry_at)`},
 }, SavedQueryMigrations...)

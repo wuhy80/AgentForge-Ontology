@@ -78,5 +78,15 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	workerCtx, stopWorker := context.WithCancel(ctx)
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		data.RunLifecycleNoticeWorker(workerCtx, config)
+	}()
+	defer func() {
+		stopWorker()
+		<-workerDone
+	}()
 	return platform.Serve(ctx, addr, protected)
 }

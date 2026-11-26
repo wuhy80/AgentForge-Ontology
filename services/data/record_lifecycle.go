@@ -217,8 +217,18 @@ func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, problem(404, "not_found", "流转记录不可访问"))
 		return
 	}
+	err = h.retryLifecycleDelivery(ctx, p, schemaID, recordID, runID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *handler) retryLifecycleDelivery(ctx context.Context, p c.Principal, schemaID, recordID, runID string) error {
 	var deliveryErr error
-	err = h.withLifecycleTarget(ctx, p, schemaID, recordID, true, func(tx *sql.Tx, _ c.Decision, d c.Definition, _ *c.SchemaLifecycle) error {
+	err := h.withLifecycleTarget(ctx, p, schemaID, recordID, true, func(tx *sql.Tx, _ c.Decision, d c.Definition, _ *c.SchemaLifecycle) error {
 		var failed bool
 		err := tx.QueryRowContext(ctx, "SELECT notification_failed FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" AND id=? AND actor=? FOR UPDATE",
 			p.TenantID, schemaID, recordID, runID, p.Subject).Scan(&failed)
@@ -232,15 +242,9 @@ func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
-		writeError(w, err)
-		return
+		return err
 	}
-	if deliveryErr != nil {
-		writeError(w, deliveryErr)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNoContent)
+	return deliveryErr
 }
 
 // withLifecycleTarget applies the same record visibility rules as comments and

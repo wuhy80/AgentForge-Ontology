@@ -329,8 +329,16 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	f.call("POST", retry, nil, "", 503)
 	countNotices(0)
 	revoked = true
-	f.call("POST", retry, nil, "", 204)
+	worker := &handler{cfg: config, client: f.core.client}
+	for range 2 {
+		if err := worker.retryLifecycleBatch(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
 	countNotices(1)
+	if f.lifecycle(row.ID, 200).History[0].NotificationFailed {
+		t.Fatal("worker did not clear the delivery failure")
+	}
 	var recipient string
 	if err := f.engine.DB().QueryRow("SELECT subject_id FROM af_data_record_notices WHERE tenant_id=? AND id=?", f.p.TenantID, run).Scan(&recipient); err != nil || recipient != second {
 		t.Fatalf("retry delivered to unexpected recipient: %q, %v", recipient, err)
