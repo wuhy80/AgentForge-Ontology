@@ -1,16 +1,16 @@
 import { test, expect } from '@playwright/test'
 import { ontologyFixture } from './fixtures/ontology'
 
-for (const kind of ['schema', 'link', 'enum', 'managed-schema', 'managed-link']) for (const width of [1440, 390]) test(`草稿删除在 ${kind} ${width}px 下需要预览与确认`, async ({ page }) => {
+for (const kind of ['schema', 'link', 'enum', 'managed-schema', 'managed-link', 'action', 'function']) for (const width of [1440, 390]) test(`定义删除在 ${kind} ${width}px 下需要预览与确认`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
   const fixture = await ontologyFixture(page)
   if (kind === 'link') {
     const definition = { ...fixture.current.find(item => item.definition.id === 'note-tags')!.definition, id: 'draft-only' }
     await page.route('**/api/metadata/definitions/draft-only/draft', route => route.fulfill({ json: { definition, status: 'draft', etag: 'draft-only' } }))
   }
-  const publishedId = { enum: 'status', 'managed-schema': 'tags', 'managed-link': 'note-tags' }[kind]
+  const publishedId = { enum: 'status', 'managed-schema': 'tags', 'managed-link': 'note-tags', action: 'summarize', function: 'normalize' }[kind]
   const id = publishedId ?? 'draft-only'
-  const entryName = { enum: '删除枚举', 'managed-schema': '删除模型', 'managed-link': '删除关系' }[kind] ?? '删除草稿'
+  const entryName = { enum: '删除枚举', 'managed-schema': '删除模型', 'managed-link': '删除关系', action: '删除动作', function: '删除函数' }[kind] ?? '删除草稿'
   const current = fixture.current.find(item => item.definition.id === publishedId)
   if (current) {
     current.status = 'disabled'
@@ -18,7 +18,7 @@ for (const kind of ['schema', 'link', 'enum', 'managed-schema', 'managed-link'])
   }
   const etag = current?.etag ?? 'draft-only'
   let deleted = false
-  await page.route('**/api/metadata/capabilities', route => route.fulfill({ json: { unpublishedDraftDelete: true, disabledEnumDelete: true, disabledManagedStorageDelete: true } }))
+  await page.route('**/api/metadata/capabilities', route => route.fulfill({ json: { unpublishedDraftDelete: true, disabledEnumDelete: true, disabledManagedStorageDelete: true, disabledCallableDelete: true } }))
   await page.route(`**/api/metadata/definitions/${id}/delete-preview`, async route => {
     expect(route.request().method()).toBe('GET')
     expect(route.request().headers()['if-match']).toBe(`"${etag}"`)

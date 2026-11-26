@@ -389,6 +389,7 @@ export interface MetadataCapabilities {
   callableLifecycle?: 'pure-only'
   unpublishedDraftDelete?: boolean
   disabledEnumDelete?: boolean
+  disabledCallableDelete?: boolean
   disabledManagedStorageDelete?: boolean
   callableLifecyclePreview?: boolean
   enumLifecycle?: boolean
