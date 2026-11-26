@@ -146,14 +146,16 @@ func (h *handler) notifyLifecycleFollowers(ctx context.Context, tx *sql.Tx, acto
 	if len(recipients) > limit {
 		return problem(422, "lifecycle_notice_budget", "通知接收人数超出检查预算")
 	}
+	type delivery struct {
+		recipient c.Principal
+		read      c.Decision
+	}
+	deliveries := make([]delivery, 0, len(recipients))
 	for _, subject := range recipients {
 		recipient := c.Principal{TenantID: actor.TenantID, Subject: subject, ExpiresAt: time.Now().Add(time.Minute).Unix()}
 		read, err := h.authorize(ctx, recipient, "instance.read", d.ID)
 		if err == nil {
 			_, err = selectInstanceFields(ctx, tx, d, nil, actor.TenantID, record, read.RowFilter, false)
-		}
-		if err == nil {
-			err = h.recheck(ctx, recipient, "instance.read", d.ID, read)
 		}
 		if err != nil {
 			var failure *apiError
@@ -165,6 +167,14 @@ func (h *handler) notifyLifecycleFollowers(ctx context.Context, tx *sql.Tx, acto
 		if _, err := tx.ExecContext(ctx, `INSERT INTO af_data_record_notices
  (tenant_id,subject_id,id,schema_id,entity_id,created_at,kind) VALUES (?,?,?,?,?,UTC_TIMESTAMP(6),?)`,
 			actor.TenantID, subject, run, d.ID, record, lifecycleNoticeKind); err != nil {
+			return err
+		}
+		deliveries = append(deliveries, delivery{recipient: recipient, read: read})
+	}
+	// Recheck after all inserts so an authorization change while processing
+	// another recipient rolls back the entire delivery attempt.
+	for _, notice := range deliveries {
+		if err := h.recheck(ctx, notice.recipient, "instance.read", d.ID, notice.read); err != nil {
 			return err
 		}
 	}

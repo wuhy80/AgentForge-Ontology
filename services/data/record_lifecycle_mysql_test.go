@@ -248,8 +248,12 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	f.p.Subject = actor
 	config := f.core.cfg
 	authorizer := config.Authorizer
+	checkedSecond := false
 	config.Authorizer = authorizerFunc(func(ctx context.Context, p c.Principal, req c.AuthorizationRequest) (c.Decision, error) {
 		if p.Subject == second && req.Operation == "instance.read" {
+			checkedSecond = true
+		}
+		if checkedSecond && p.Subject == first && req.Operation == "instance.read" {
 			return c.Decision{}, context.DeadlineExceeded
 		}
 		return authorizer.Authorize(ctx, p, req)
