@@ -423,9 +423,10 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
     if (!loaded || !route.startsWith('models/') || route.startsWith('models/new')) return
     let id: string
     try { id = decodeURIComponent(route.slice(7).split('?')[0]) } catch { return }
-    const definition = entries.find((entry) => entry.definition.id === id)?.definition
+    const definition = (current.find((entry) => entry.definition.id === id) ??
+      entries.find((entry) => entry.definition.id === id))?.definition
     if (definition && categories.some((category) => category.id === definition.categoryId)) setSelectedCategoryId(definition.categoryId)
-  }, [loaded, route, entries, categories])
+  }, [loaded, route, entries, current, categories])
   const query = (schemaId: string) => {
     setInitialSchemaId(schemaId)
     setSelectionRequest((value) => value + 1)

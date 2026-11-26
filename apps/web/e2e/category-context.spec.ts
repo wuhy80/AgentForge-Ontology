@@ -57,6 +57,22 @@ async function fixture(page: Page, administrator = false) {
       return reply(record, 201)
     }
     const definition = path.match(/^\/api\/metadata\/definitions\/([^/]+)(\/draft)?$/)
+    if (method === 'PUT' && definition?.[2] === '/draft') {
+      const candidate = route.request().postDataJSON() as DefinitionRecord['definition']
+      const record: DefinitionRecord = { definition: { ...candidate, id: definition[1], tenantId }, etag: 'move-draft', status: 'draft' }
+      drafts.push(record)
+      return reply(record)
+    }
+    const publish = path.match(/^\/api\/metadata\/definitions\/([^/]+)\/publish$/)
+    if (method === 'POST' && publish) {
+      const index = drafts.findIndex((item) => item.definition.id === publish[1])
+      const existing = current.findIndex((item) => item.definition.id === publish[1])
+      if (index >= 0 && existing >= 0) {
+        current[existing] = { ...drafts[index], status: 'active' }
+        drafts.splice(index, 1)
+        return reply({ id: 'move-publication', status: 'succeeded' })
+      }
+    }
     if (method === 'GET' && definition) {
       const record = (definition[2] ? drafts : current).find((item) => item.definition.id === definition[1])
       return record ? reply(record) : reply({ error: { code: 'not_found', message: '未找到定义' } }, 404)
@@ -71,6 +87,37 @@ async function fixture(page: Page, administrator = false) {
     return reply({ error: { code: 'unhandled_fixture_request', message: `未定义的浏览器模拟接口：${method} ${path}` } }, 404)
   })
   return { writes, current, groups, queryCount: () => queries }
+}
+
+for (const [width, theme] of [[1440, 'deep'], [1440, 'light'], [390, 'deep'], [390, 'light']] as const) {
+  test(`跨分类移动草稿和发布 ${width}px ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 960 })
+    await fixture(page, true)
+    await page.goto('/#models')
+    if (theme === 'light') await page.getByRole('button', { name: '精密白', exact: true }).click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    await page.getByRole('button', { name: '生产设备', exact: true }).click()
+    const dialog = page.getByRole('region', { name: '模型编辑' })
+    await dialog.getByRole('tab', { name: '基础信息' }).click()
+    await dialog.getByRole('combobox', { name: '分类', exact: true }).selectOption('category-b')
+    const group = dialog.getByRole('combobox', { name: '分组', exact: true })
+    await expect(group).toBeInViewport()
+    await expect(dialog.getByRole('button', { name: '保存草稿' })).toBeDisabled()
+    await group.focus()
+    await expect(group).toBeFocused()
+    await group.selectOption('group-1')
+    await dialog.getByRole('button', { name: '保存草稿' }).click()
+    await expect(dialog.getByRole('button', { name: '发布定义' })).toBeEnabled()
+    await page.reload()
+    await dialog.getByRole('tab', { name: '基础信息' }).click()
+    await expect(dialog.getByRole('combobox', { name: '分类', exact: true })).toHaveValue('category-b')
+    await expect(page.getByLabel('当前分类')).toHaveValue('category-a')
+    await dialog.getByRole('button', { name: '发布定义' }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '生产设备', exact: true })).toHaveCount(0)
+    await page.getByLabel('当前分类').selectOption('category-b')
+    await expect(page.getByRole('button', { name: '生产设备', exact: true })).toBeVisible()
+  })
 }
 
 for (const width of [1440, 390]) {

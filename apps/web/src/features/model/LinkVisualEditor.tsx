@@ -56,13 +56,16 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   const disabled = !!busy || uncertain || suspended
   const managed = record?.definition.link?.storageBinding?.mode === 'managed'
   const lifecycleAllowed = lifecycleAvailable && managed && (record?.status === 'active' || suspended)
-  const category = categories.find((item) => item.id === categoryId)
+  const directoryCategoryId = definition.categoryId
+  const sourceCategory = categories.find((item) => item.id === categoryId)
+  const category = categories.find((item) => item.id === directoryCategoryId && item.tenantId === sourceCategory?.tenantId)
+  const directoryChanged = directoryCategoryId !== categoryId
   const tenantId = definition.tenantId || category?.tenantId || ''
   const schemas = (currentEntries ?? entries).filter((item) => item.status === 'active' && item.definition.tenantId === tenantId && item.definition.schema)
   const directoryCurrent = (currentEntries ?? entries).find((item) => item.status === 'active' && item.definition.tenantId === tenantId && item.definition.id === definition.id && item.definition.link)
   const current = directoryCurrent ?? (!currentEntries && record?.status === 'active' ? record : undefined)
   const storageLocked = locked && !!(record?.status === 'active' ? record.definition.link?.storageBinding : current?.definition.link?.storageBinding ?? (initialRecord?.status === 'active' ? initialRecord.definition.link?.storageBinding : undefined))
-  const bindingReady = !!category && definition.categoryId === categoryId && (!!record || !groupsLoading && groups.some((group) => group.id === definition.groupId))
+  const bindingReady = !!category && !!definition.groupId && ((!!record && !directoryChanged) || !groupsLoading && groups.some((group) => group.id === definition.groupId && group.categoryId === directoryCategoryId))
   const link = definition.link!
   const source = schemas.find((item) => item.definition.id === link.sourceSchemaId)
   const target = schemas.find((item) => item.definition.id === link.targetSchemaId)
@@ -120,15 +123,15 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   }
 
   useEffect(() => {
-    if (!active || !categoryId) return
+    if (!active || !directoryCategoryId) return
     const controller = new AbortController()
     setGroupsLoading(true); setGroupError(''); setGroups([])
-    api.listGroups(categoryId, controller.signal).then((items) => {
-      if (!controller.signal.aborted) setGroups(items.filter((item) => item.categoryId === categoryId && item.tenantId === tenantId))
+    api.listGroups(directoryCategoryId, controller.signal).then((items) => {
+      if (!controller.signal.aborted) setGroups(items.filter((item) => item.categoryId === directoryCategoryId && item.tenantId === tenantId))
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setGroupError(cause instanceof Error ? cause.message : '分组读取失败。') })
       .finally(() => { if (!controller.signal.aborted) setGroupsLoading(false) })
     return () => controller.abort()
-  }, [api, active, categoryId, tenantId])
+  }, [api, active, directoryCategoryId, tenantId])
 
   useEffect(() => {
     if (!active) return
@@ -249,7 +252,7 @@ export function LinkVisualEditor(props: ModelEditorProps) {
         <div className="link-editor-config"><div className="model-editor-tabs link-editor-tabs" role="tablist" aria-label="关系配置">{tabs.map((item, index) => <button type="button" role="tab" key={item.id} id={`${tabId}-${item.id}`} aria-controls={`${tabId}-panel-${item.id}`} aria-selected={tab === item.id} tabIndex={tab === item.id ? 0 : -1} onClick={() => chooseTab(item.id)} onKeyDown={(event) => navigateTabs(event, index)}>{item.name}</button>)}</div>
           <fieldset disabled={disabled} className="model-fieldset">
             <section role="tabpanel" hidden={tab !== 'business'} id={`${tabId}-panel-business`} aria-labelledby={`${tabId}-business`} className="link-config-panel">
-              <div className="form-grid"><label>业务名称<input className="field" value={definition.name} maxLength={128} placeholder="例如：笔记产生引用" onChange={(event) => update({ name: event.target.value })} /></label><label>类型<input className="field" value="关系" readOnly /></label><label>分类<input className="field" readOnly value={category?.name ?? '未选择分类'} /></label><label>分组<select className="field" value={definition.groupId} disabled={groupsLoading || !category} onChange={(event) => update({ groupId: event.target.value })}><option value="">{groupsLoading ? '正在读取分组…' : '选择分组'}</option>{record && definition.groupId && !groups.some((group) => group.id === definition.groupId) && <option value={definition.groupId}>当前分组</option>}{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label><label className="model-span-full">描述<textarea className="field" rows={2} value={definition.description ?? ''} onChange={(event) => update({ description: event.target.value })} /></label></div>
+              <div className="form-grid"><label>业务名称<input className="field" value={definition.name} maxLength={128} placeholder="例如：笔记产生引用" onChange={(event) => update({ name: event.target.value })} /></label><label>类型<input className="field" value="关系" readOnly /></label><label>分类{record ? <select className="field" value={directoryCategoryId} onChange={(event) => update({ categoryId: event.target.value, groupId: '' })}>{categories.filter((item) => item.tenantId === sourceCategory?.tenantId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : <input className="field" readOnly value={category?.name ?? '未选择分类'} />}</label><label>分组<select className="field" value={definition.groupId} disabled={groupsLoading || !category} onChange={(event) => update({ groupId: event.target.value })}><option value="">{groupsLoading ? '正在读取分组…' : '选择分组'}</option>{record && definition.groupId && !groups.some((group) => group.id === definition.groupId) && <option value={definition.groupId}>当前分组</option>}{groups.filter((group) => group.categoryId === directoryCategoryId).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label><label className="model-span-full">描述<textarea className="field" rows={2} value={definition.description ?? ''} onChange={(event) => update({ description: event.target.value })} /></label></div>
               {groupError && <div className="notice notice-error">{groupError}</div>}
               {!record && !groupsLoading && !groups.length && <div className="notice"><p>请先在「分类与分组」建立目录。</p><button type="button" className="button subtle" onClick={onOrganizations}>前往分类与分组</button></div>}
               <div className="model-section-heading"><div><h3>关系两端</h3><p className="muted">选择已生效的对象模型，允许同一对象自关联。</p></div></div>

@@ -132,8 +132,14 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
     Object.values(localEntries).forEach((entry) => merged.set(entry.definition.id, entry))
     return [...merged.values()]
   }, [entries, localEntries])
-  const scopedModels = models.filter((entry) => entry.definition.categoryId === categoryId)
-  const scopedPending = Object.values(pending).filter((item) => item.record.definition.categoryId === categoryId && (layout === 'graph' || item.record.definition.kind === kind))
+  const currentByID = new Map(currentEntries?.map((entry) => [entry.definition.id, entry.definition]))
+  const directoryOf = (entry: DefinitionRecord) => {
+    const current = currentByID.get(entry.definition.id)
+    return entry.status === 'draft' && current && current.categoryId !== entry.definition.categoryId
+      ? current : entry.definition
+  }
+  const scopedModels = models.filter((entry) => directoryOf(entry).categoryId === categoryId)
+  const scopedPending = Object.values(pending).filter((item) => directoryOf(item.record).categoryId === categoryId && (layout === 'graph' || item.record.definition.kind === kind))
   const visible = scopedModels.filter((entry) => {
     const definition = entry.definition
     const term = search.trim().toLocaleLowerCase()
@@ -156,8 +162,8 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
   const knownGroups = new Map(currentGroups?.items.map((group) => [group.id, group]) ?? [])
   const grouped = new Map<string, { id: string; name: string; entries: DefinitionRecord[] }>()
   for (const entry of visible) {
-    const group = knownGroups.get(entry.definition.groupId)
-    const id = entry.definition.groupId
+    const id = directoryOf(entry).groupId
+    const group = knownGroups.get(id)
     if (!grouped.has(id)) grouped.set(id, { id, name: group?.name ?? (!currentGroups || currentGroups.loading ? '正在加载分组' : '其他分组'), entries: [] })
     grouped.get(id)!.entries.push(entry)
   }
@@ -181,7 +187,7 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
     } finally { if (categoryRef.current === categoryId) setRefreshing(false) }
   }
   async function open(entry: DefinitionRecord, navigate = true) {
-    if (entry.definition.categoryId !== categoryId && onNavigate) {
+    if (directoryOf(entry).categoryId !== categoryId && onNavigate) {
       if (editorGuard.current && !editorGuard.current()) return
       closeEditor(false)
       onNavigate(`models/${encodeURIComponent(entry.definition.id)}`)
@@ -202,7 +208,7 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
         latest = await api.getCurrent(id)
       }
       if (requestSequence !== openingSequence.current || categoryRef.current !== categoryId) return
-      if (latest.definition.categoryId !== categoryId) {
+      if (directoryOf(latest).categoryId !== categoryId) {
         if (waiting) clearPending(id)
         setError('定义不属于当前分类，请切换顶部分类后重新打开。')
         return
@@ -266,6 +272,7 @@ export function ModelsPage({ api, categoryId, categories, entries, currentEntrie
     setEditor((value) => value?.token === token ? { ...value, record, authorizationRecord: record } : value)
     setPending((value) => { const next = { ...value }; delete next[record.definition.id]; return next })
     setLocalEntries((value) => ({ ...value, [record.definition.id]: record }))
+    if (record.definition.categoryId !== categoryId) closeEditor()
     try { await onRefresh() } finally { clearLocal(record) }
   }
   function clearLocal(record: DefinitionRecord) {

@@ -121,8 +121,11 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const callable = definition.action ?? definition.function
   const managedSchema = definition.schema?.mode === 'schema_2_db' && definition.schema.storageLayout === 'single' && !definition.schema.storageBinding
   const lifecycleAllowed = lifecycleAvailable && (managedSchema || record?.definition.kind === 'enum' || !!callable && (!callable.sideEffects || callable.sideEffects === 'none')) && (record?.status === 'active' || suspended)
-  const category = categories.find((item) => item.id === categoryId)
-  const bindingReady = !!category && definition.categoryId === categoryId && (!!record || !groupsLoading && groups.some((group) => group.id === definition.groupId))
+  const directoryCategoryId = definition.categoryId
+  const sourceCategory = categories.find((item) => item.id === categoryId)
+  const category = categories.find((item) => item.id === directoryCategoryId && item.tenantId === sourceCategory?.tenantId)
+  const directoryChanged = directoryCategoryId !== categoryId
+  const bindingReady = !!category && !!definition.groupId && ((!!record && !directoryChanged) || !groupsLoading && groups.some((group) => group.id === definition.groupId && group.categoryId === directoryCategoryId))
   const authorizedEntries = entries.filter((entry) => !definition.tenantId || entry.definition.tenantId === definition.tenantId)
   const currentSchemas = activeEntries(authorizedEntries, 'schema')
   const currentEnums = (currentEntries ?? authorizedEntries).filter((entry) => entry.status === 'active' && entry.definition.kind === 'enum' && (!definition.tenantId || entry.definition.tenantId === definition.tenantId))
@@ -232,17 +235,17 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
 
   useEffect(() => {
     if (!active) { setGroupsLoading(false); return }
-    if (!categoryId) { setGroups([]); setGroupsLoading(false); setGroupError(''); return }
+    if (!directoryCategoryId) { setGroups([]); setGroupsLoading(false); setGroupError(''); return }
     const controller = new AbortController()
     setGroups([]); setGroupsLoading(true)
     setGroupError('')
-    api.listGroups(categoryId, controller.signal).then((items) => {
-      if (!controller.signal.aborted) setGroups(items.filter((group) => group.categoryId === categoryId))
+    api.listGroups(directoryCategoryId, controller.signal).then((items) => {
+      if (!controller.signal.aborted) setGroups(items.filter((group) => group.categoryId === directoryCategoryId))
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setGroupError(cause instanceof Error ? cause.message : '分组读取失败')
     }).finally(() => { if (!controller.signal.aborted) setGroupsLoading(false) })
     return () => controller.abort()
-  }, [api, categoryId, active])
+  }, [api, directoryCategoryId, active])
 
   function update(patch: Partial<Definition>) { setDefinition((value) => ({ ...value, ...patch })); setMessage(''); setPreview(undefined) }
   function requestClose() {
@@ -405,13 +408,13 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
         <div className="form-grid model-basics">
           <label>业务名称<input className="field" autoFocus value={definition.name} maxLength={128} onChange={(event) => update({ name: event.target.value })} placeholder="例如：生产设备" /></label>
           <label>类型<select className="field" disabled={!!record} value={definition.kind} onChange={(event) => { setDefinition(newDefinition(event.target.value as Kind, categoryId, definition.groupId)); setTab('basics') }}>{Object.entries(kindLabels).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select></label>
-          <label>分类<input className="field" readOnly value={category?.name ?? '未选择分类'} /></label>
-          <label>分组<select className="field" disabled={groupsLoading || !category} value={definition.groupId} onChange={(event) => update({ groupId: event.target.value })}><option value="">{groupsLoading ? '正在读取分组…' : '选择分组'}</option>{record && definition.groupId && !groups.some((group) => group.id === definition.groupId) && <option value={definition.groupId}>当前分组</option>}{groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+          <label>分类{record ? <select className="field" value={directoryCategoryId} onChange={(event) => update({ categoryId: event.target.value, groupId: '' })}>{categories.filter((item) => item.tenantId === sourceCategory?.tenantId).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : <input className="field" readOnly value={category?.name ?? '未选择分类'} />}</label>
+          <label>分组<select className="field" disabled={groupsLoading || !category} value={definition.groupId} onChange={(event) => update({ groupId: event.target.value })}><option value="">{groupsLoading ? '正在读取分组…' : '选择分组'}</option>{record && definition.groupId && !groups.some((group) => group.id === definition.groupId) && <option value={definition.groupId}>当前分组</option>}{groups.filter((group) => group.categoryId === directoryCategoryId).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
           <label className="model-span-full">描述<textarea className="field" rows={2} value={definition.description ?? ''} onChange={(event) => update({ description: event.target.value })} placeholder="说明这一业务定义的用途与边界" /></label>
         </div>
         {groupError && <div className="notice notice-error">{groupError}</div>}
         {!record && (!category || !groupsLoading && !groupError && !groups.length) && <div className="notice"><p>{category ? '当前分类还没有分组，请前往「分类与分组」创建分组后再新建定义。' : '请先在顶部选择当前分类，或前往「分类与分组」创建分类和分组。'}</p><button type="button" className="button subtle" onClick={onOrganizations}>前往分类与分组<ArrowRight size={15} /></button></div>}
-        {definition.schema && <SchemaClassificationEditor schema={definition.schema} entries={currentEntries ?? entries} categoryId={categoryId} disabled={disabled} onChange={(schema) => update({ schema })} />}
+        {definition.schema && <SchemaClassificationEditor schema={definition.schema} entries={currentEntries ?? entries} categoryId={directoryCategoryId} disabled={disabled} onChange={(schema) => update({ schema })} />}
         {definition.schema && <SchemaStorageEditor section="storage" api={api} schema={definition.schema} locked={locked} active={active} onSources={onSources} onChange={(schema) => update({ schema })} />}
         </section>
         {definition.schema && <>
