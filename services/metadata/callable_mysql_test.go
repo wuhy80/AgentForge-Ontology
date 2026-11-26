@@ -164,6 +164,13 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	request("DELETE", discardPath, discard.ETag, nil, 204, nil)
 	request("GET", discardPath+"/draft", "", nil, 404, nil)
 	request("GET", discardPath+"/delete-preview", discard.ETag, nil, 404, nil)
+	if _, err := engine.DB().Exec("UPDATE af_meta_tenant_guards SET publication_id=? WHERE tenant_id=?", c.NewID(), tenant); err != nil {
+		t.Fatal(err)
+	}
+	request("GET", discardPath+"/delete-preview", discard.ETag, nil, 404, nil)
+	if _, err := engine.DB().Exec("UPDATE af_meta_tenant_guards SET publication_id='' WHERE tenant_id=?", tenant); err != nil {
+		t.Fatal(err)
+	}
 	request("PUT", discardPath+"/draft", discard.ETag, discard.Definition, 404, nil)
 	var deletedEvents int
 	if err := engine.DB().QueryRow("SELECT COUNT(*) FROM af_meta_outbox WHERE tenant_id=? AND event_type='definition.deleted' AND object_id=?", tenant, discard.Definition.ID).Scan(&deletedEvents); err != nil || deletedEvents != 1 {

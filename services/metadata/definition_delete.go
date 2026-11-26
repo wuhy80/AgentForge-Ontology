@@ -32,6 +32,12 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 					return err
 				}
 			}
+			if row.status == "deleted" {
+				if preview {
+					return sql.ErrNoRows
+				}
+				return matchHeader(r, row.draftDigest)
+			}
 			if preview {
 				var publication string
 				err = tx.QueryRowContext(ctx, "SELECT publication_id FROM af_meta_tenant_guards WHERE tenant_id=?", p.TenantID).Scan(&publication)
@@ -41,12 +47,6 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 				if publication != "" {
 					return problem(409, "publication_in_progress", "该租户发布尚未完成，请稍后重试")
 				}
-			}
-			if row.status == "deleted" {
-				if preview {
-					return sql.ErrNoRows
-				}
-				return matchHeader(r, row.draftDigest)
 			}
 			draftOnly := row.status == "draft" && !row.current.Valid && row.draft.Valid
 			disabledEnum := row.status == disabledDefinition && row.d.Kind == c.KindEnum && row.current.Valid && !row.draft.Valid
