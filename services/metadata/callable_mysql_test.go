@@ -196,9 +196,15 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	if reservedName.Code != "name_conflict" {
 		t.Fatalf("deleted draft did not reserve its name: %+v", reservedName)
 	}
+	var audit []byte
 	var deletedEvents int
-	if err := engine.DB().QueryRow("SELECT COUNT(*) FROM af_meta_outbox WHERE tenant_id=? AND event_type='definition.deleted' AND object_id=?", tenant, discard.Definition.ID).Scan(&deletedEvents); err != nil || deletedEvents != 1 {
+	if err := engine.DB().QueryRow("SELECT COUNT(*), MAX(payload) FROM af_meta_outbox WHERE tenant_id=? AND event_type='definition.deleted' AND object_id=?", tenant, discard.Definition.ID).Scan(&deletedEvents, &audit); err != nil || deletedEvents != 1 {
 		t.Fatalf("want one deletion audit event, got %d: %v", deletedEvents, err)
+	}
+	var auditFields map[string]string
+	if err := json.Unmarshal(audit, &auditFields); err != nil || len(auditFields) != 3 ||
+		auditFields["actor"] != "author" || auditFields["kind"] != string(discard.Definition.Kind) || auditFields["digest"] != discard.ETag {
+		t.Fatalf("unexpected deletion audit fields: %+v, error: %v", auditFields, err)
 	}
 	function := create(executableFunction())
 	publish(function, 200)
