@@ -268,6 +268,10 @@ func (h *handler) computeJob(ctx context.Context, record *Record) {
 		retryJob(record, "runtime_unavailable", "运行器尚未就绪")
 		return
 	}
+	if err := h.checkJobAccess(ctx, *record); err != nil {
+		failJobAccess(record, err)
+		return
+	}
 	scriptCtx, stop := context.WithTimeout(ctx, time.Duration(runtime.TimeoutSeconds)*time.Second)
 	result, err := h.cfg.Runner.Run(scriptCtx, runtime, record.Input, image)
 	stop()
