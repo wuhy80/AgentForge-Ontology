@@ -159,7 +159,14 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			ForwardName: "Next", ReverseName: "Previous", Cardinality: "1:N", OnDelete: "restrict",
 			StorageBinding: &c.LinkStorageBinding{Mode: "managed"},
 		}})
-		for _, current := range []c.CurrentDefinition{link, model} {
+		modelPath := definitionURL(model.Definition.ID)
+		modelMatch := map[string]string{"If-Match": `"` + model.ETag + `"`}
+		var blocker c.Error
+		admin.request("POST", modelPath+"/disable", nil, modelMatch, 409, &blocker)
+		if blocker.Code != "definition_in_use" {
+			t.Fatalf("want Link dependency to block Schema disable, got %s", blocker.Code)
+		}
+		for _, current := range []c.CurrentDefinition{link, model, target} {
 			path := definitionURL(current.Definition.ID)
 			match := map[string]string{"If-Match": `"` + current.ETag + `"`}
 			admin.request("DELETE", path, nil, match, 409, nil)
