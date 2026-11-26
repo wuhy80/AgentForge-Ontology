@@ -293,3 +293,7 @@ Data 能力 `recordApprovals: true` 启用托管记录的 `/data/schemas/{schema
 Schema 当前定义声明 `lifecycle` 后，托管记录可读取阶段并提交受权流转。Data 能力 `recordLifecycle: true` 启用 `/data/schemas/{schemaId}/instances/{entityId}/lifecycle`。GET 返回声明的阶段与流转、当前阶段、本账号此刻可提交的流转 ID 及最近 50 条历史。当前阶段尚未落库时按声明的初始阶段返回 `persisted: false`；记录阶段已从当前定义移除时返回 `stageUnknown: true`，并拒绝继续流转。POST 到 `/lifecycle/transitions` 提交 `{transitionId,note}`，要求当前记录的读取与更新授权及行条件，并按读取到的阶段做一次条件更新，说明最多 500 字。成功返回 204；未知流转返回 422；阶段已变化、并发流转或重复提交返回 409。创建记录时写入初始阶段，删除记录时一并清理阶段与历史。
 
 启用前显式应用 `021_data_record_lifecycles` 与 `022_data_record_lifecycle_runs`。隔离 MySQL 验证初始阶段、流转提交与重复提交拒绝、跨阶段流转拒绝、说明预算、移除阶段后的拒绝与未知阶段报告、只读及无更新权账号的可用流转裁剪、旧记录首次流转补建阶段行，以及删除清理。外部映射模型不声明平台生命周期；流程定义的管理操作仍待接入。
+
+### 流程流转通知
+
+成功流转时，同租户的其他记录关注者在同一事务内收到 `lifecycle_transition` 通知。每位关注者以流转执行 ID 为通知 ID。失败或已过期的流转不产生通知，记录撤权时历史及计数重新过滤。通知条目不包含阶段名称或流转意见，详情由记录权限控制。复用已有通知表，无新增迁移。

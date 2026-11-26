@@ -212,9 +212,13 @@ func (s *platformMutationStore) Emit(ctx context.Context, event string, instance
 	if event != "instance.updated" {
 		return nil
 	}
-	_, err := s.tx.ExecContext(ctx, `INSERT INTO af_data_record_notices(tenant_id,subject_id,id,schema_id,entity_id,created_at)
-SELECT tenant_id,subject_id,?,schema_id,entity_id,UTC_TIMESTAMP(6) FROM af_data_record_follows
+	return notifyRecordFollowers(ctx, s.tx, s.p, instance.SchemaID, instance.ID, c.NewID(), recordUpdateNoticeKind)
+}
+
+func notifyRecordFollowers(ctx context.Context, tx *sql.Tx, p c.Principal, schemaID, recordID, eventID, kind string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO af_data_record_notices(tenant_id,subject_id,id,schema_id,entity_id,created_at,kind)
+SELECT tenant_id,subject_id,?,schema_id,entity_id,UTC_TIMESTAMP(6),? FROM af_data_record_follows
 WHERE tenant_id=? AND schema_id=? AND entity_id=? AND subject_id<>?`,
-		c.NewID(), s.p.TenantID, instance.SchemaID, instance.ID, s.p.Subject)
+		eventID, kind, p.TenantID, schemaID, recordID, p.Subject)
 	return err
 }

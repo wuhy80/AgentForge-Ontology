@@ -52,7 +52,7 @@ func replyInboxCursor(secret string, p c.Principal, token string, position reply
 		}
 		payload, err := aead.Open(nil, raw[:aead.NonceSize()], raw[aead.NonceSize():], scope)
 		if err != nil || json.Unmarshal(payload, &position) != nil || position.Expires <= time.Now().Unix() ||
-			(position.Kind != "" && position.Kind != commentReplyNoticeKind && position.Kind != recordUpdateNoticeKind && position.Kind != accountMentionNoticeKind && position.Kind != mentionFailureKind) ||
+			(position.Kind != "" && position.Kind != commentReplyNoticeKind && position.Kind != recordUpdateNoticeKind && position.Kind != accountMentionNoticeKind && position.Kind != mentionFailureKind && position.Kind != lifecycleNoticeKind) ||
 			!uuidPattern.MatchString(position.ID) || !uuidPattern.MatchString(position.SchemaID) || !uuidPattern.MatchString(position.RecordID) || position.At.IsZero() {
 			return position, "", bad
 		}

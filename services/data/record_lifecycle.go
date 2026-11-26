@@ -95,9 +95,13 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 		if affected != 1 {
 			return problem(409, "lifecycle_stage_mismatch", "记录阶段已变化，请重新读取后再提交")
 		}
+		runID := c.NewID()
 		_, err = tx.ExecContext(ctx, "INSERT INTO af_data_record_lifecycle_runs (tenant_id,schema_id,entity_id,id,transition_id,from_stage_id,to_stage_id,actor,note,created_at) VALUES (?,?,?,?,?,?,?,?,?,UTC_TIMESTAMP(6))",
-			p.TenantID, schemaID, recordID, c.NewID(), move.ID, move.From, move.To, p.Subject, input.Note)
-		return err
+			p.TenantID, schemaID, recordID, runID, move.ID, move.From, move.To, p.Subject, input.Note)
+		if err != nil {
+			return err
+		}
+		return notifyRecordFollowers(ctx, tx, p, schemaID, recordID, runID, lifecycleNoticeKind)
 	})
 	if err != nil {
 		writeError(w, err)

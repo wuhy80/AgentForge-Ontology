@@ -10,6 +10,7 @@ import (
 )
 
 const commentReplyNoticeKind = "comment_reply"
+const lifecycleNoticeKind = "lifecycle_transition"
 const recordUpdateNoticeKind = "record_updated"
 const accountMentionNoticeKind = "account_mention"
 const mentionFailureKind = "account_mention_failed"
@@ -22,7 +23,7 @@ func (h *handler) recordNotifications(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) markRecordNotification(w http.ResponseWriter, r *http.Request) {
-	if r.PathValue("kind") == recordUpdateNoticeKind || r.PathValue("kind") == accountMentionNoticeKind {
+	if r.PathValue("kind") == recordUpdateNoticeKind || r.PathValue("kind") == accountMentionNoticeKind || r.PathValue("kind") == lifecycleNoticeKind {
 		h.recordNoticeWrite(w, r, true)
 		return
 	}

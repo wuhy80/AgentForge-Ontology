@@ -1,6 +1,8 @@
 package data
 
 import (
+	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -45,6 +47,14 @@ func (f *mutationFixture) lifecycle(record string, status int) c.RecordLifecycle
 func TestMySQLRecordLifecycleTransitions(t *testing.T) {
 	f := lifecycleFixture(t)
 	row := f.create("LIFECYCLE-1")
+	actor := f.p.Subject
+	follower := c.NewID()
+	for _, subject := range []string{actor, follower} {
+		f.p.Subject = subject
+		f.call("PUT", "/instances/"+row.ID+"/follow", nil, "", 204)
+	}
+	f.p.Subject = actor
+
 	var persisted int
 	if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_lifecycles WHERE tenant_id=?", f.p.TenantID).Scan(&persisted); err != nil || persisted != 1 {
 		t.Fatalf("create did not open the initial stage: %d %v", persisted, err)
@@ -74,6 +84,42 @@ func TestMySQLRecordLifecycleTransitions(t *testing.T) {
 		run.From != lifecycleDraftStage || run.To != lifecycleReviewStage || run.At == "" {
 		t.Fatalf("history run does not describe the transition: %+v", run)
 	}
+	inbox := func(method, path string, status int) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "/data/inbox/notifications"+path, nil)
+		w := httptest.NewRecorder()
+		f.handler.ServeHTTP(w, req.WithContext(platform.WithPrincipal(req.Context(), f.p)))
+		if w.Code != status {
+			t.Fatalf("inbox HTTP %d, want %d", w.Code, status)
+		}
+		return w
+	}
+	list := func() c.RecordNoticePage { return mutationDecode[c.RecordNoticePage](t, inbox("GET", "", 200)) }
+	if len(list().Data) != 0 {
+		t.Fatal("actor received their own transition")
+	}
+	f.p.Subject = follower
+	page := list()
+	if len(page.Data) != 1 || page.Data[0].ID != run.ID || page.Data[0].Kind != lifecycleNoticeKind || page.Unread.Count != 1 {
+		t.Fatalf("expected one notification linked to the committed run: %+v", page)
+	}
+	path := "/" + lifecycleNoticeKind + "/" + row.SchemaID + "/" + row.ID + "/" + run.ID
+	inbox("PUT", path, 204)
+	inbox("PUT", path, 204)
+	if list().Unread.Count != 0 {
+		t.Fatal("transition remained unread")
+	}
+	f.mu.Lock()
+	f.policy["instance.read"] = c.Decision{Allow: false}
+	f.mu.Unlock()
+	if len(list().Data) != 0 {
+		t.Fatal("revoked follower can see transition")
+	}
+	f.mu.Lock()
+	delete(f.policy, "instance.read")
+	f.mu.Unlock()
+	f.p.Subject = actor
+
 	if len(view.Available) != 1 || view.Available[0] != lifecycleFinishMove {
 		t.Fatalf("available transitions do not follow the new stage: %+v", view.Available)
 	}
