@@ -162,7 +162,8 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 	f := lifecycleFixture(t)
 	row := f.create("LIFECYCLE-NOTICE-FAILURE")
 	actor := f.p.Subject
-	f.p.Subject = c.NewID()
+	originalFollower := c.NewID()
+	f.p.Subject = originalFollower
 	f.call("PUT", "/instances/"+row.ID+"/follow", nil, "", 204)
 	f.p.Subject = actor
 	trigger := "lifecycle_notice_" + strings.ReplaceAll(c.NewID(), "-", "")
@@ -185,6 +186,11 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 	}
 	f.p.Subject = c.NewID()
 	f.call("POST", retry, nil, "", 404)
+	f.p.Subject = originalFollower
+	f.call("DELETE", "/instances/"+row.ID+"/follow", nil, "", 204)
+	newFollower := c.NewID()
+	f.p.Subject = newFollower
+	f.call("PUT", "/instances/"+row.ID+"/follow", nil, "", 204)
 	f.p.Subject = actor
 	f.mu.Lock()
 	f.policy["instance.patch"] = c.Decision{Allow: false}
@@ -205,8 +211,9 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 		t.Fatalf("retry should only clear the failure: %+v", view)
 	}
 	var count int
-	if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_notices WHERE tenant_id=? AND id=?", f.p.TenantID, runID).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("expected one notification after retry: count=%d err=%v", count, err)
+	var recipient string
+	if err := f.engine.DB().QueryRow("SELECT COUNT(*), MAX(subject_id) FROM af_data_record_notices WHERE tenant_id=? AND id=?", f.p.TenantID, runID).Scan(&count, &recipient); err != nil || count != 1 || recipient != newFollower {
+		t.Fatalf("expected one notification after retry: count=%d recipient=%q err=%v", count, recipient, err)
 	}
 }
 
