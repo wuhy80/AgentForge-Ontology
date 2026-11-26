@@ -31,10 +31,29 @@ type lifecycleFixtureRunner struct {
 	release chan struct{}
 }
 
+type lifecycleFixtureStore struct {
+	*execution.SQLStore
+	beforeClaim, releaseClaim chan struct{}
+}
+
+const lateLifecycleClaimKey = "late-lifecycle-claim"
+
+func (s lifecycleFixtureStore) Claim(ctx context.Context, record execution.Record) (bool, error) {
+	if record.RequestKey == lateLifecycleClaimKey {
+		close(s.beforeClaim)
+		select {
+		case <-s.releaseClaim:
+		case <-ctx.Done():
+			return false, ctx.Err()
+		}
+	}
+	return s.SQLStore.Claim(ctx, record)
+}
+
 func (r lifecycleFixtureRunner) Ready(context.Context) (string, error) { return "fixture-image", nil }
 
 func (r lifecycleFixtureRunner) Run(ctx context.Context, _ *c.ScriptRuntime, _ map[string]json.RawMessage, _ string) (map[string]json.RawMessage, error) {
-	close(r.started)
+	r.started <- struct{}{}
 	select {
 	case <-r.release:
 		return map[string]json.RawMessage{}, nil
@@ -141,10 +160,11 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	t.Cleanup(transport.CloseIdleConnections)
 	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
 	executionURL := ""
-	runner := lifecycleFixtureRunner{started: make(chan struct{}), release: make(chan struct{})}
+	runner := lifecycleFixtureRunner{started: make(chan struct{}, 2), release: make(chan struct{})}
+	claimStore := lifecycleFixtureStore{execStore, make(chan struct{}), make(chan struct{})}
 	if execStore != nil {
 		app := execution.NewHandler(execution.Config{
-			Store: execStore, ServiceToken: serviceToken, Runner: runner, Authorizer: authorizer, SessionChecker: checker,
+			Store: claimStore, ServiceToken: serviceToken, Runner: runner, Authorizer: authorizer, SessionChecker: checker,
 			Metadata: &execution.RemoteMetadata{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()},
 		})
 		server := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, false, checker, app))
@@ -222,58 +242,81 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			headers := admin.request("PUT", policyURL, policy.Current, map[string]string{"If-Match": `"` + policy.ETag + `"`}, 200, nil)
 			admin.request("POST", policyURL+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
 			admin = login(tenant, "admin")
-			item := publish(c.Definition{Kind: c.KindFunction, Name: "Running deletion function", Function: &c.Callable{
-				SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 30, Source: "def main(inputs):\n    return {}\n"},
-			}})
-			path := definitionURL(item.Definition.ID)
-			match := map[string]string{"If-Match": `"` + item.ETag + `"`}
-			callContext, cancelCall := context.WithCancel(ctx)
-			defer cancelCall()
-			req, err := http.NewRequestWithContext(callContext, "POST", executionURL+"/execution/invocations", strings.NewReader(`{"definitionId":"`+item.Definition.ID+`","input":{}}`))
-			if err != nil {
-				t.Fatal(err)
-			}
-			req.Host = "security.test:30011"
-			req.Header.Set("Origin", publicSecurityOrigin)
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-CSRF-Token", admin.csrf)
-			req.Header.Set("Idempotency-Key", c.NewID())
-			for _, cookie := range admin.cookies {
-				req.AddCookie(cookie)
-			}
-			done := make(chan int, 1)
-			go func() {
-				response, err := client.Do(req)
+			for _, late := range []bool{false, true} {
+				name, key, reached := "Running deletion function", c.NewID(), runner.started
+				if late {
+					name, key, reached = "Late deletion function", lateLifecycleClaimKey, claimStore.beforeClaim
+				}
+				item := publish(c.Definition{Kind: c.KindFunction, Name: name, Function: &c.Callable{
+					SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 30, Source: "def main(inputs):\n    return {}\n"},
+				}})
+				path := definitionURL(item.Definition.ID)
+				match := map[string]string{"If-Match": `"` + item.ETag + `"`}
+				callContext, cancelCall := context.WithCancel(ctx)
+				defer cancelCall()
+				req, err := http.NewRequestWithContext(callContext, "POST", executionURL+"/execution/invocations", strings.NewReader(`{"definitionId":"`+item.Definition.ID+`","input":{}}`))
 				if err != nil {
-					done <- 0
-					return
+					t.Fatal(err)
 				}
-				response.Body.Close()
-				done <- response.StatusCode
-			}()
-			select {
-			case <-runner.started:
-			case status := <-done:
-				t.Fatalf("public invocation ended before runner entry: HTTP %d", status)
-			case <-time.After(10 * time.Second):
-				t.Fatal("public invocation did not reach runner")
-			}
-			admin.request("POST", path+"/disable", nil, match, 200, nil)
-			var blocker c.Error
-			admin.request("DELETE", path, nil, match, 409, &blocker)
-			if blocker.Code != "definition_execution_in_use" {
-				t.Fatal("running invocation did not block deletion")
-			}
-			release()
-			select {
-			case status := <-done:
-				if status != 403 && status != 404 && status != 409 {
-					t.Fatalf("disabled definition did not block result delivery: HTTP %d", status)
+				req.Host = "security.test:30011"
+				req.Header.Set("Origin", publicSecurityOrigin)
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-CSRF-Token", admin.csrf)
+				req.Header.Set("Idempotency-Key", key)
+				for _, cookie := range admin.cookies {
+					req.AddCookie(cookie)
 				}
-			case <-time.After(10 * time.Second):
-				t.Fatal("running invocation did not finish")
+				done := make(chan int, 1)
+				go func() {
+					response, err := client.Do(req)
+					if err != nil {
+						done <- 0
+						return
+					}
+					response.Body.Close()
+					done <- response.StatusCode
+				}()
+				select {
+				case <-reached:
+				case status := <-done:
+					t.Fatalf("public invocation ended before runner entry: HTTP %d", status)
+				case <-time.After(10 * time.Second):
+					t.Fatal("public invocation did not reach runner")
+				}
+				admin.request("POST", path+"/disable", nil, match, 200, nil)
+				if late {
+					admin.request("DELETE", path, nil, match, 204, nil)
+					close(claimStore.releaseClaim)
+				} else {
+					var blocker c.Error
+					admin.request("DELETE", path, nil, match, 409, &blocker)
+					if blocker.Code != "definition_execution_in_use" {
+						t.Fatal("running invocation did not block deletion")
+					}
+					release()
+				}
+				select {
+				case status := <-done:
+					if status != 403 && status != 404 && status != 409 {
+						t.Fatalf("disabled definition did not block result delivery: HTTP %d", status)
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatal("running invocation did not finish")
+				}
+				if late {
+					select {
+					case <-runner.started:
+						t.Fatal("late claim launched the deleted definition")
+					default:
+					}
+					record, err := execStore.FindKey(ctx, tenant, session.User.ID, key)
+					if err != nil || record.Invocation.Status != "failed" || record.Invocation.Error == nil || record.Invocation.Error.Code != "authorization_changed" {
+						t.Fatal("late claim did not persist terminal authorization failure")
+					}
+				} else {
+					admin.request("DELETE", path, nil, match, 204, nil)
+				}
 			}
-			admin.request("DELETE", path, nil, match, 204, nil)
 		}()
 		function := publish(c.Definition{Kind: c.KindFunction, Name: "Deletion function", Function: &c.Callable{SideEffects: "none"}})
 		path := definitionURL(function.Definition.ID)
