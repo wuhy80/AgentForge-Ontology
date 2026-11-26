@@ -186,6 +186,18 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 	f.p.Subject = c.NewID()
 	f.call("POST", retry, nil, "", 404)
 	f.p.Subject = actor
+	f.mu.Lock()
+	f.policy["instance.patch"] = c.Decision{Allow: false}
+	f.mu.Unlock()
+	f.call("POST", retry, nil, "", 403)
+	view = f.lifecycle(row.ID, 200)
+	if len(view.History) != 1 || !view.History[0].NotificationFailed {
+		t.Fatalf("denied retry changed the failure state: %+v", view)
+	}
+	f.mu.Lock()
+	delete(f.policy, "instance.patch")
+	f.mu.Unlock()
+	f.p.Subject = actor
 	f.call("POST", retry, nil, "", 204)
 	f.call("POST", retry, nil, "", 204)
 	view = f.lifecycle(row.ID, 200)
