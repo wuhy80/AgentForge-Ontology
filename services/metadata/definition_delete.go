@@ -47,12 +47,22 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 			}
 			draftOnly := row.status == "draft" && !row.current.Valid && row.draft.Valid
 			disabledEnum := row.status == disabledDefinition && row.d.Kind == c.KindEnum && row.current.Valid && !row.draft.Valid
-			if !draftOnly && !disabledEnum {
-				return problem(409, "unsupported_delete_state", "当前只支持删除从未发布的草稿或已停用的 Enum")
+			var managedStorage bool
+			if row.status == disabledDefinition && row.current.Valid && !row.draft.Valid {
+				d, err := parseDefinition(row.current)
+				if err != nil {
+					return err
+				}
+				managedStorage = d.Kind == c.KindSchema && d.Schema != nil && d.Schema.Mode == "schema_2_db" &&
+					d.Schema.StorageLayout == "single" && d.Schema.StorageBinding == nil ||
+					d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil && d.Link.StorageBinding.Mode == "managed"
+			}
+			if !draftOnly && !disabledEnum && !managedStorage {
+				return problem(409, "unsupported_delete_state", "当前只支持删除从未发布的草稿或受支持的已停用定义")
 			}
 			digest := row.draftDigest
 			publicationQuery := "SELECT EXISTS(SELECT 1 FROM af_meta_publications WHERE tenant_id=? AND definition_id=?"
-			if disabledEnum {
+			if !draftOnly {
 				digest = row.currentDigest
 				publicationQuery += " AND status NOT IN ('succeeded','rejected')"
 			}
@@ -81,6 +91,11 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 					}
 				}
 			}
+			if managedStorage {
+				if err := h.checkManagedStorage(ctx, row.d, "managed-storage-delete-check", c.ManagedLinkLifecycle{Digest: digest, Preview: preview}); err != nil {
+					return err
+				}
+			}
 			policies, ok := h.cfg.CallablePolicyReferences.(deletionPolicyReferences)
 			if !ok {
 				return problem(503, "policy_impact_unavailable", "无法复核定义相关策略")
@@ -96,6 +111,9 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 				return nil
 			}
 			if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET status='deleted',current_json=NULL,current_digest='',draft_json=NULL,draft_digest=? WHERE tenant_id=? AND id=?", digest, p.TenantID, id); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "DELETE FROM af_meta_dependencies WHERE tenant_id=? AND source_id=?", p.TenantID, id); err != nil {
 				return err
 			}
 			payload, err := json.Marshal(map[string]string{"actor": p.Subject, "kind": string(row.d.Kind), "digest": digest})

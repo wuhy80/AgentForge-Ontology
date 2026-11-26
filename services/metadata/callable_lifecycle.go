@@ -195,14 +195,26 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 			return err
 		}
 	}
+	if err := h.checkManagedStorage(ctx, d, "managed-storage-lifecycle", c.ManagedLinkLifecycle{Digest: digest, Restore: restore, Preview: preview}); err != nil {
+		return err
+	}
+	if !restore && !preview {
+		// Take the policy lock after draining Data to avoid waiting on a
+		// transaction that still needs a live authorization check.
+		return checkPolicy(true)
+	}
+	return nil
+}
+
+func (h *handler) checkManagedStorage(ctx context.Context, d c.Definition, route string, command c.ManagedLinkLifecycle) error {
 	if h.cfg.DataURL == "" || len(h.cfg.ServiceToken) < 32 {
 		return problem(503, "link_lifecycle_unavailable", "无法复核定义存储")
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	body, _ := json.Marshal(c.ManagedLinkLifecycle{Digest: digest, Restore: restore, Preview: preview})
+	body, _ := json.Marshal(command)
 	req, err := http.NewRequestWithContext(callCtx, http.MethodPost,
-		strings.TrimRight(h.cfg.DataURL, "/")+"/internal/definitions/"+url.PathEscape(d.ID)+"/managed-storage-lifecycle", bytes.NewReader(body))
+		strings.TrimRight(h.cfg.DataURL, "/")+"/internal/definitions/"+url.PathEscape(d.ID)+"/"+route, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -225,7 +237,7 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 		if response.StatusCode == 409 && json.NewDecoder(io.LimitReader(response.Body, 1024)).Decode(&conflict) == nil {
 			switch conflict.Code {
 			case "definition_data_in_use":
-				return problem(409, conflict.Code, "定义仍有实例")
+				return problem(409, conflict.Code, "定义仍有业务数据")
 			case "definition_saved_query_in_use":
 				return problem(409, conflict.Code, "仍有保存查询引用此定义")
 			case "mapping_unavailable":
@@ -233,11 +245,6 @@ func (h *handler) checkManagedLinkLifecycle(ctx context.Context, tx *sql.Tx, d c
 			}
 		}
 		return problem(503, "link_lifecycle_unavailable", "无法复核定义存储")
-	}
-	if !restore && !preview {
-		// Take the policy lock after draining Data to avoid waiting on a
-		// transaction that still needs a live authorization check.
-		return checkPolicy(true)
 	}
 	return nil
 }

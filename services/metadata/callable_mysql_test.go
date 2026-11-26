@@ -38,10 +38,19 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 			}
 		}
 	}()
+	var blockDelete atomic.Bool
 	var savedEnumReference, impactOverBudget, loseStorageResponse, storagePaused, storageUnavailable atomic.Bool
 	data := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if impactOverBudget.Load() && (strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") || strings.HasSuffix(r.URL.Path, "/saved-query-impact")) {
 			writeJSON(w, 422, c.Error{Code: "saved_query_impact_budget", Message: "internal details"})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/managed-storage-delete-check") {
+			if blockDelete.Load() {
+				writeJSON(w, 409, c.Error{Code: "definition_data_in_use"})
+			} else {
+				w.WriteHeader(204)
+			}
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/managed-storage-lifecycle") {
@@ -245,6 +254,23 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	if err := engine.DB().QueryRow("SELECT COUNT(*) FROM af_meta_outbox WHERE tenant_id=? AND object_id=? AND event_type IN ('definition.disabled','definition.restored')", tenant, lifecycleSchema.Definition.ID).Scan(&events); err != nil || events != 2 {
 		t.Fatalf("lifecycle retry produced %d events, want 2: %v", events, err)
 	}
+	disposable := validSchema()
+	disposable.Name = "disposable-schema"
+	disposableSchema := create(disposable)
+	publish(disposableSchema, 200)
+	disposablePath := "/metadata/definitions/" + disposableSchema.Definition.ID
+	request("POST", disposablePath+"/disable", disposableSchema.ETag, nil, 200, nil)
+	request("GET", disposablePath+"/delete-preview", disposableSchema.ETag, nil, 204, nil)
+	blockDelete.Store(true)
+	var deletionBlocker c.Error
+	request("DELETE", disposablePath, disposableSchema.ETag, nil, 409, &deletionBlocker)
+	request("GET", disposablePath, "", nil, 200, &schemaState)
+	if deletionBlocker.Code != "definition_data_in_use" || schemaState.Status != disabledDefinition {
+		t.Fatalf("unexpected blocked deletion: %+v, status=%s", deletionBlocker, schemaState.Status)
+	}
+	blockDelete.Store(false)
+	request("DELETE", disposablePath, disposableSchema.ETag, nil, 204, nil)
+	request("GET", disposablePath, "", nil, 404, nil)
 	deletableEnum := create(c.Definition{Kind: c.KindEnum, Name: "待删除枚举", Enum: &c.Enum{Values: []c.EnumValue{{Code: "on", Label: "有效"}}}})
 	publish(deletableEnum, 200)
 	enumDeletePath := "/metadata/definitions/" + deletableEnum.Definition.ID
