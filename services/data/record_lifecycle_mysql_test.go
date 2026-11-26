@@ -204,7 +204,7 @@ func TestMySQLRecordLifecycleAuthorizationAndCleanup(t *testing.T) {
 	path := "/instances/" + row.ID + "/lifecycle/transitions"
 
 	f.mu.Lock()
-	f.policy["instance.update"] = c.Decision{Allow: false}
+	f.policy["instance.patch"] = c.Decision{Allow: false}
 	f.mu.Unlock()
 	view := f.lifecycle(row.ID, 200)
 	if len(view.Available) != 0 {
@@ -212,7 +212,7 @@ func TestMySQLRecordLifecycleAuthorizationAndCleanup(t *testing.T) {
 	}
 	f.call("POST", path, lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 403)
 	f.mu.Lock()
-	delete(f.policy, "instance.update")
+	delete(f.policy, "instance.patch")
 	f.mu.Unlock()
 
 	f.mu.Lock()

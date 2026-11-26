@@ -44,7 +44,7 @@ func (h *handler) recordComments(w http.ResponseWriter, r *http.Request) {
 		ParentID  string `json:"parentId,omitempty"`
 		RequestID string `json:"requestId,omitempty"`
 	}
-	update, updateErr := h.authorize(ctx, p, "instance.update", d.ID)
+	update, updateErr := h.authorize(ctx, p, "instance.patch", d.ID)
 	if mutation {
 		if updateErr != nil {
 			writeError(w, updateErr)
@@ -88,7 +88,7 @@ func (h *handler) recordComments(w http.ResponseWriter, r *http.Request) {
 						return problem(409, "comment_conflict", "评论请求已存在，请重新读取")
 					}
 					result = c.RecordComment{ID: input.RequestID, Author: author, Body: body, ParentID: parent, CreatedAt: at.UTC().Format(time.RFC3339Nano), ETag: etag, Editable: true}
-					if err := h.recheck(ctx, p, "instance.update", d.ID, update); err != nil {
+					if err := h.recheck(ctx, p, "instance.patch", d.ID, update); err != nil {
 						return err
 					}
 					return h.recheck(ctx, p, "instance.read", d.ID, read)
@@ -142,7 +142,7 @@ func (h *handler) recordComments(w http.ResponseWriter, r *http.Request) {
 				}
 				status = http.StatusNoContent
 			}
-			if err := h.recheck(ctx, p, "instance.update", d.ID, update); err != nil {
+			if err := h.recheck(ctx, p, "instance.patch", d.ID, update); err != nil {
 				return err
 			}
 		} else {
@@ -190,7 +190,7 @@ func (h *handler) recordComments(w http.ResponseWriter, r *http.Request) {
 			}
 			if updateErr == nil {
 				_, checkErr := selectInstanceFields(ctx, tx, d, nil, p.TenantID, entity, update.RowFilter, false)
-				page.CanPost = checkErr == nil && h.recheck(ctx, p, "instance.update", d.ID, update) == nil
+				page.CanPost = checkErr == nil && h.recheck(ctx, p, "instance.patch", d.ID, update) == nil
 			}
 			for i := range page.Data {
 				page.Data[i].Editable = page.CanPost && page.Data[i].Editable

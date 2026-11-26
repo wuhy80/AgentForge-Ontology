@@ -188,7 +188,7 @@ func (h *handler) withLifecycleTarget(ctx context.Context, p c.Principal, schema
 			return err
 		}
 		if lock {
-			change, err := h.authorize(ctx, p, "instance.update", d.ID)
+			change, err := h.authorize(ctx, p, "instance.patch", d.ID)
 			if err != nil {
 				return err
 			}
@@ -198,7 +198,7 @@ func (h *handler) withLifecycleTarget(ctx context.Context, p c.Principal, schema
 			if err := apply(tx, change, d, lifecycle); err != nil {
 				return err
 			}
-			if err := h.recheck(ctx, p, "instance.update", d.ID, change); err != nil {
+			if err := h.recheck(ctx, p, "instance.patch", d.ID, change); err != nil {
 				return err
 			}
 		} else if err := apply(tx, read, d, lifecycle); err != nil {
@@ -255,7 +255,7 @@ func readLifecycleHistory(ctx context.Context, tx *sql.Tx, tenant, schema, recor
 // lifecycleAvailability lists the transitions this account may run on the
 // current stage. Row-restricted accounts only see what they could submit.
 func (h *handler) lifecycleAvailability(ctx context.Context, tx *sql.Tx, p c.Principal, d c.Definition, record, stageID string) ([]string, error) {
-	change, err := h.authorize(ctx, p, "instance.update", d.ID)
+	change, err := h.authorize(ctx, p, "instance.patch", d.ID)
 	if err != nil {
 		return nil, nil
 	}

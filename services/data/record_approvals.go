@@ -74,7 +74,7 @@ func (h *handler) recordApprovals(w http.ResponseWriter, r *http.Request) {
 			}
 			return rows.Err()
 		case http.MethodPost:
-			change, err := h.authorize(ctx, p, "instance.update", target.SchemaID)
+			change, err := h.authorize(ctx, p, "instance.patch", target.SchemaID)
 			if err != nil {
 				return err
 			}
@@ -107,7 +107,7 @@ func (h *handler) recordApprovals(w http.ResponseWriter, r *http.Request) {
 			if err := h.recheck(ctx, recipient, "instance.read", target.SchemaID, read); err != nil {
 				return mentionAccessError(err)
 			}
-			return h.recheck(ctx, p, "instance.update", target.SchemaID, change)
+			return h.recheck(ctx, p, "instance.patch", target.SchemaID, change)
 		default:
 			var state string
 			err := tx.QueryRowContext(ctx, "SELECT state FROM af_data_record_approvals WHERE "+commentScope+" AND id=? AND assignee=? FOR UPDATE", append(args, id, p.Subject)...).Scan(&state)
