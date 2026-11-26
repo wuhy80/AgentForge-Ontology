@@ -2,6 +2,7 @@ package data
 
 import (
 	"bytes"
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -54,7 +55,18 @@ func TestMySQLRecordLifecycleTransitions(t *testing.T) {
 		f.p.Subject = subject
 		f.call("PUT", "/instances/"+row.ID+"/follow", nil, "", 204)
 	}
+	revokedFollower := c.NewID()
+	f.p.Subject = revokedFollower
+	f.call("PUT", "/instances/"+row.ID+"/follow", nil, "", 204)
 	f.p.Subject = actor
+	authorizer := f.core.cfg.Authorizer
+	f.core.cfg.Authorizer = authorizerFunc(func(ctx context.Context, p c.Principal, req c.AuthorizationRequest) (c.Decision, error) {
+		if p.Subject == revokedFollower && req.Operation == "instance.read" {
+			return c.Decision{Allow: false}, nil
+		}
+		return authorizer.Authorize(ctx, p, req)
+	})
+	f.handler = NewHandler(f.core.cfg)
 
 	var persisted int
 	if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_lifecycles WHERE tenant_id=?", f.p.TenantID).Scan(&persisted); err != nil || persisted != 1 {
@@ -101,6 +113,10 @@ func TestMySQLRecordLifecycleTransitions(t *testing.T) {
 		t.Fatalf("transition did not commit one run: %+v", view)
 	}
 	run := view.History[0]
+	var revokedNotices int
+	if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_notices WHERE tenant_id=? AND subject_id=? AND id=?", f.p.TenantID, revokedFollower, run.ID).Scan(&revokedNotices); err != nil || revokedNotices != 0 {
+		t.Fatalf("revoked follower received a notice: %d, %v", revokedNotices, err)
+	}
 	if run.TransitionID != lifecycleSubmitMove || run.Name != "提交审核" || run.Note != "review" ||
 		run.From != lifecycleDraftStage || run.To != lifecycleReviewStage || run.At == "" {
 		t.Fatalf("history run does not describe the transition: %+v", run)

@@ -104,7 +104,7 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.ExecContext(ctx, "SAVEPOINT lifecycle_notice"); err != nil {
 			return err
 		}
-		if err := notifyRecordFollowers(ctx, tx, p, schemaID, recordID, runID, lifecycleNoticeKind); err != nil {
+		if err := h.notifyLifecycleFollowers(ctx, tx, p, d, recordID, runID); err != nil {
 			if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT lifecycle_notice"); rollbackErr != nil {
 				return rollbackErr
 			}
@@ -125,6 +125,52 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (h *handler) notifyLifecycleFollowers(ctx context.Context, tx *sql.Tx, actor c.Principal, d c.Definition, record, run string) error {
+	const limit = 200
+	rows, err := tx.QueryContext(ctx, "SELECT subject_id FROM af_data_record_follows WHERE "+lifecycleStageScope+" AND subject_id<>? ORDER BY subject_id LIMIT ?", actor.TenantID, d.ID, record, actor.Subject, limit+1)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var recipients []string
+	for rows.Next() {
+		var subject string
+		if err := rows.Scan(&subject); err != nil {
+			return err
+		}
+		recipients = append(recipients, subject)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(recipients) > limit {
+		return problem(422, "lifecycle_notice_budget", "通知接收人数超出检查预算")
+	}
+	for _, subject := range recipients {
+		recipient := c.Principal{TenantID: actor.TenantID, Subject: subject, ExpiresAt: time.Now().Add(time.Minute).Unix()}
+		read, err := h.authorize(ctx, recipient, "instance.read", d.ID)
+		if err == nil {
+			_, err = selectInstanceFields(ctx, tx, d, nil, actor.TenantID, record, read.RowFilter, false)
+		}
+		if err == nil {
+			err = h.recheck(ctx, recipient, "instance.read", d.ID, read)
+		}
+		if err != nil {
+			var failure *apiError
+			if errors.As(err, &failure) && (failure.status == 401 || failure.status == 403 || failure.status == 404) {
+				continue
+			}
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO af_data_record_notices
+ (tenant_id,subject_id,id,schema_id,entity_id,created_at,kind) VALUES (?,?,?,?,?,UTC_TIMESTAMP(6),?)`,
+			actor.TenantID, subject, run, d.ID, record, lifecycleNoticeKind); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p, err := h.principal(r)
@@ -137,7 +183,7 @@ func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, problem(404, "not_found", "流转记录不可访问"))
 		return
 	}
-	err = h.withLifecycleTarget(ctx, p, schemaID, recordID, true, func(tx *sql.Tx, _ c.Decision, _ c.Definition, _ *c.SchemaLifecycle) error {
+	err = h.withLifecycleTarget(ctx, p, schemaID, recordID, true, func(tx *sql.Tx, _ c.Decision, d c.Definition, _ *c.SchemaLifecycle) error {
 		var failed bool
 		err := tx.QueryRowContext(ctx, "SELECT notification_failed FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" AND id=? AND actor=? FOR UPDATE",
 			p.TenantID, schemaID, recordID, runID, p.Subject).Scan(&failed)
@@ -147,7 +193,7 @@ func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 		if err != nil || !failed {
 			return err
 		}
-		if err := notifyRecordFollowers(ctx, tx, p, schemaID, recordID, runID, lifecycleNoticeKind); err != nil {
+		if err := h.notifyLifecycleFollowers(ctx, tx, p, d, recordID, runID); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=FALSE WHERE "+lifecycleStageScope+" AND id=?",
