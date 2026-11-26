@@ -65,6 +65,15 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 				t.Fatalf("external relation preview modified source: %d %s", preview.Code, preview.Body)
 			}
 			publish(link)
+			assertImpact := func(id string, want bool) {
+				t.Helper()
+				response := f.request("GET", "/internal/definitions/"+id+"/storage-impact", nil, true)
+				var impact c.StorageDefinitionImpact
+				if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &impact) != nil || impact.HasData != want {
+					t.Fatalf("mapped relation impact status=%d hasData=%v want=%v", response.Code, impact.HasData, want)
+				}
+			}
+			assertImpact(link.ID, true)
 			f.authorize = func(request c.AuthorizationRequest) c.Decision {
 				decision := f.decision
 				if request.Kind == c.KindLink || request.Operation == "definition.read" {
@@ -230,6 +239,7 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 				fk.Link.StorageBinding = &c.LinkStorageBinding{Mode: "foreign_key", DataSourceID: f.sources[index].ID, ForeignKeySide: mode, ForeignKeyColumn: "fk"}
 				publish(fk)
 				if mode == "source" {
+					assertImpact(fk.ID, true)
 					query.From.SchemaID = target.ID
 					query.Select = []string{target.Schema.Properties[0].ID}
 					query.Via = &c.LinkTraversal{LinkID: fk.ID, Direction: "out", InstanceID: "1"}
@@ -247,7 +257,9 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 					}
 				}
 				if mode == "target" {
+					assertImpact(fk.ID, false)
 					f.exec(index, "UPDATE "+f.qualified(index, targetName)+" SET fk=? WHERE tenant=? AND id=?", 1, f.tenant, 10)
+					assertImpact(fk.ID, true)
 					query.From.SchemaID = target.ID
 					query.Select = []string{target.Schema.Properties[0].ID}
 					query.Via = &c.LinkTraversal{LinkID: fk.ID, Direction: "out", InstanceID: "1"}
