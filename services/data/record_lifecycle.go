@@ -101,7 +101,17 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return notifyRecordFollowers(ctx, tx, p, schemaID, recordID, runID, lifecycleNoticeKind)
+		if _, err := tx.ExecContext(ctx, "SAVEPOINT lifecycle_notice"); err != nil {
+			return err
+		}
+		if err := notifyRecordFollowers(ctx, tx, p, schemaID, recordID, runID, lifecycleNoticeKind); err != nil {
+			if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT lifecycle_notice"); rollbackErr != nil {
+				return rollbackErr
+			}
+			_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=TRUE WHERE "+lifecycleStageScope+" AND id=?", p.TenantID, schemaID, recordID, runID)
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		writeError(w, err)
@@ -175,7 +185,7 @@ func readLifecycleStage(ctx context.Context, tx *sql.Tx, tenant, schema, record 
 }
 
 func readLifecycleHistory(ctx context.Context, tx *sql.Tx, tenant, schema, record string, l *c.SchemaLifecycle, view *c.RecordLifecycle) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id,transition_id,from_stage_id,to_stage_id,note,created_at FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" ORDER BY created_at DESC,id DESC LIMIT ?",
+	rows, err := tx.QueryContext(ctx, "SELECT id,transition_id,from_stage_id,to_stage_id,note,created_at,notification_failed FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" ORDER BY created_at DESC,id DESC LIMIT ?",
 		tenant, schema, record, c.MaxLifecycleHistory+1)
 	if err != nil {
 		return err
@@ -184,7 +194,7 @@ func readLifecycleHistory(ctx context.Context, tx *sql.Tx, tenant, schema, recor
 	for rows.Next() {
 		var run c.LifecycleRun
 		var at time.Time
-		if err := rows.Scan(&run.ID, &run.TransitionID, &run.From, &run.To, &run.Note, &at); err != nil {
+		if err := rows.Scan(&run.ID, &run.TransitionID, &run.From, &run.To, &run.Note, &at, &run.NotificationFailed); err != nil {
 			return err
 		}
 		run.At = at.UTC().Format(time.RFC3339Nano)

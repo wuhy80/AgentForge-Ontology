@@ -54,4 +54,5 @@ to_stage_id char(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
 actor varbinary(255) NOT NULL, note varchar(2048) NOT NULL, created_at datetime(6) NOT NULL,
 PRIMARY KEY(tenant_id,schema_id,entity_id,id),
 KEY run_order(tenant_id,schema_id,entity_id,created_at,id)) ENGINE=InnoDB`},
+	{ID: "023_data_lifecycle_notice_failure", SQL: `ALTER TABLE af_data_record_lifecycle_runs ADD COLUMN notification_failed BOOLEAN NOT NULL DEFAULT FALSE`},
 }, SavedQueryMigrations...)

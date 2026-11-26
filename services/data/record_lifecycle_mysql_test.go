@@ -158,6 +158,27 @@ func TestMySQLRecordLifecycleTransitions(t *testing.T) {
 	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleFinishMove, ""), "", 409)
 }
 
+func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
+	f := lifecycleFixture(t)
+	row := f.create("LIFECYCLE-NOTICE-FAILURE")
+	actor := f.p.Subject
+	f.p.Subject = c.NewID()
+	f.call("PUT", "/instances/"+row.ID+"/follow", nil, "", 204)
+	f.p.Subject = actor
+	trigger := "lifecycle_notice_" + strings.ReplaceAll(c.NewID(), "-", "")
+	if _, err := f.engine.DB().Exec("CREATE TRIGGER " + trigger + " BEFORE INSERT ON af_data_record_notices FOR EACH ROW " +
+		"BEGIN IF NEW.entity_id='" + row.ID + "' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='fixture notice failure'; END IF; END"); err != nil {
+		t.Fatal(err)
+	}
+	defer f.engine.DB().Exec("DROP TRIGGER " + trigger)
+
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
+	view := f.lifecycle(row.ID, 200)
+	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || !view.History[0].NotificationFailed {
+		t.Fatalf("expected committed transition and visible notification failure: %+v", view)
+	}
+}
+
 func TestMySQLRecordLifecycleAuthorizationAndCleanup(t *testing.T) {
 	f := lifecycleFixture(t)
 	row := f.create("LIFECYCLE-2")

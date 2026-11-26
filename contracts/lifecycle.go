@@ -52,11 +52,12 @@ type RecordLifecycle struct {
 // LifecycleRun is one committed transition. Name and note are display text; the
 // IDs remain authoritative even after the definition changes.
 type LifecycleRun struct {
-	ID           string `json:"id"`
-	TransitionID string `json:"transitionId"`
-	Name         string `json:"name,omitempty"`
-	From         string `json:"from"`
-	To           string `json:"to"`
-	Note         string `json:"note,omitempty"`
-	At           string `json:"at"`
+	ID                 string `json:"id"`
+	TransitionID       string `json:"transitionId"`
+	Name               string `json:"name,omitempty"`
+	From               string `json:"from"`
+	To                 string `json:"to"`
+	Note               string `json:"note,omitempty"`
+	At                 string `json:"at"`
+	NotificationFailed bool   `json:"notificationFailed,omitempty"`
 }
