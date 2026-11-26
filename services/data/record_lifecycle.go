@@ -101,25 +101,8 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "SAVEPOINT lifecycle_notice"); err != nil {
-			return err
-		}
-		if err := h.notifyLifecycleFollowers(ctx, tx, p, d, recordID, runID); err != nil {
-			if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT lifecycle_notice"); rollbackErr != nil {
-				return rollbackErr
-			}
-			code := "delivery_failed"
-			var failure *apiError
-			if errors.As(err, &failure) {
-				switch failure.code {
-				case "authorization_unavailable", "authorization_changed", "lifecycle_notice_budget":
-					code = failure.code
-				}
-			}
-			_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=TRUE,notification_failure_code=? WHERE "+lifecycleStageScope+" AND id=?", code, p.TenantID, schemaID, recordID, runID)
-			return err
-		}
-		return nil
+		_, err = h.attemptLifecycleNotice(ctx, tx, p, d, recordID, runID)
+		return err
 	})
 	if err != nil {
 		writeError(w, err)
@@ -193,6 +176,30 @@ func (h *handler) notifyLifecycleFollowers(ctx context.Context, tx *sql.Tx, acto
 	return nil
 }
 
+// Return the delivery error separately so the caller can commit its failure status.
+func (h *handler) attemptLifecycleNotice(ctx context.Context, tx *sql.Tx, p c.Principal, d c.Definition, recordID, runID string) (error, error) {
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT lifecycle_notice"); err != nil {
+		return nil, err
+	}
+	deliveryErr := h.notifyLifecycleFollowers(ctx, tx, p, d, recordID, runID)
+	code := ""
+	if deliveryErr != nil {
+		if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT lifecycle_notice"); err != nil {
+			return nil, err
+		}
+		code = "delivery_failed"
+		var failure *apiError
+		if errors.As(deliveryErr, &failure) {
+			switch failure.code {
+			case "authorization_unavailable", "authorization_changed", "lifecycle_notice_budget":
+				code = failure.code
+			}
+		}
+	}
+	_, err := tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=?,notification_failure_code=? WHERE "+lifecycleStageScope+" AND id=?", deliveryErr != nil, code, p.TenantID, d.ID, recordID, runID)
+	return deliveryErr, err
+}
+
 func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p, err := h.principal(r)
@@ -205,6 +212,7 @@ func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, problem(404, "not_found", "流转记录不可访问"))
 		return
 	}
+	var deliveryErr error
 	err = h.withLifecycleTarget(ctx, p, schemaID, recordID, true, func(tx *sql.Tx, _ c.Decision, d c.Definition, _ *c.SchemaLifecycle) error {
 		var failed bool
 		err := tx.QueryRowContext(ctx, "SELECT notification_failed FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" AND id=? AND actor=? FOR UPDATE",
@@ -215,15 +223,15 @@ func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 		if err != nil || !failed {
 			return err
 		}
-		if err := h.notifyLifecycleFollowers(ctx, tx, p, d, recordID, runID); err != nil {
-			return err
-		}
-		_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=FALSE,notification_failure_code='' WHERE "+lifecycleStageScope+" AND id=?",
-			p.TenantID, schemaID, recordID, runID)
+		deliveryErr, err = h.attemptLifecycleNotice(ctx, tx, p, d, recordID, runID)
 		return err
 	})
 	if err != nil {
 		writeError(w, err)
+		return
+	}
+	if deliveryErr != nil {
+		writeError(w, deliveryErr)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
