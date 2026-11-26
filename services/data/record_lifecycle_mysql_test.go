@@ -213,6 +213,27 @@ func TestMySQLRecordLifecycleNotifiesPendingAssignee(t *testing.T) {
 	}
 }
 
+func TestMySQLRecordLifecycleNotifiesConfiguredStageAccount(t *testing.T) {
+	account := c.NewID()
+	f := newMutationFixture(t, func(d *c.Definition) {
+		d.Schema.Lifecycle = lifecycleDeclaration()
+		d.Schema.Lifecycle.Stages[1].NotifyAccountIDs = []string{account}
+	})
+	row := f.create("LIFECYCLE-STAGE-ACCOUNT")
+	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
+	view := f.lifecycle(row.ID, 200)
+	for _, stage := range view.Stages {
+		if len(stage.NotifyAccountIDs) != 0 {
+			t.Fatal("record history exposed configured account IDs")
+		}
+	}
+	var count int
+	if err := f.engine.DB().QueryRow("SELECT COUNT(*) FROM af_data_record_notices WHERE tenant_id=? AND subject_id=? AND id=?",
+		f.p.TenantID, account, view.History[0].ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("expected one notice for configured account: count=%d err=%v", count, err)
+	}
+}
+
 func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 	f := lifecycleFixture(t)
 	row := f.create("LIFECYCLE-NOTICE-FAILURE")

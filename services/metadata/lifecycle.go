@@ -2,6 +2,8 @@ package metadata
 
 import (
 	"regexp"
+	"slices"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/wuhy80/AgentForge-Ontology/contracts"
@@ -33,6 +35,19 @@ func canonicalLifecycle(s *contracts.Schema) error {
 			return problem(400, "invalid_lifecycle", "阶段标识为空、格式不合法或重复")
 		}
 		stageIDs[stage.ID] = true
+		if len(stage.NotifyAccountIDs) > contracts.MaxLifecycleStageRecipients {
+			return problem(400, "invalid_lifecycle", "每个阶段最多配置 20 个通知账号")
+		}
+		seen := map[string]bool{}
+		for j, id := range stage.NotifyAccountIDs {
+			id = strings.ToLower(id)
+			if !lifecycleID.MatchString(id) || seen[id] {
+				return problem(400, "invalid_lifecycle", "阶段通知账号标识无效或重复")
+			}
+			seen[id] = true
+			stage.NotifyAccountIDs[j] = id
+		}
+		slices.Sort(stage.NotifyAccountIDs)
 		name, key, err := lifecycleName(stage.Name)
 		if err != nil {
 			return err

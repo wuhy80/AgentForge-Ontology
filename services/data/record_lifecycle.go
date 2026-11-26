@@ -3,6 +3,7 @@ package data
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -57,7 +58,7 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 			stageID = l.InitialStageID
 		}
 		if !transition {
-			view = c.RecordLifecycle{Stages: l.Stages, Transitions: l.Transitions, StageID: stageID,
+			view = c.RecordLifecycle{Stages: lifecycleDisplayStages(l.Stages), Transitions: l.Transitions, StageID: stageID,
 				UpdatedAt: updatedAt, Persisted: persisted, History: []c.LifecycleRun{}}
 			view.StageUnknown = stageKnown(l, stageID) == false
 			if available, err := h.lifecycleAvailability(ctx, tx, p, d, recordID, stageID); err != nil {
@@ -101,7 +102,7 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		_, err = h.attemptLifecycleNotice(ctx, tx, p, d, recordID, runID)
+		_, err = h.attemptLifecycleNotice(ctx, tx, p, d, recordID, runID, move.To)
 		return err
 	})
 	if err != nil {
@@ -116,18 +117,34 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
-func (h *handler) notifyLifecycleRecipients(ctx context.Context, tx *sql.Tx, actor c.Principal, d c.Definition, record, run string) error {
+func (h *handler) notifyLifecycleRecipients(ctx context.Context, tx *sql.Tx, actor c.Principal, d c.Definition, record, run, stageID string) error {
 	const limit = 200
 	// Bound the batch independently of the parent transaction so a slow
 	// authorization service leaves time to record the failed delivery.
 	deliveryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
+	var accounts []string
+	for _, stage := range d.Schema.Lifecycle.Stages {
+		if stage.ID == stageID {
+			accounts = stage.NotifyAccountIDs
+			break
+		}
+	}
+	if len(accounts) > c.MaxLifecycleStageRecipients {
+		return problem(422, "lifecycle_notice_budget", "阶段通知账号超出检查预算")
+	}
+	accountJSON, err := json.Marshal(append([]string{}, accounts...))
+	if err != nil {
+		return err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT subject_id FROM (
  SELECT subject_id FROM af_data_record_follows WHERE `+lifecycleStageScope+`
  UNION DISTINCT
  SELECT assignee FROM af_data_record_approvals WHERE `+lifecycleStageScope+` AND state='pending'
+ UNION DISTINCT
+ SELECT CAST(account_id AS BINARY) FROM JSON_TABLE(?, '$[*]' COLUMNS(account_id VARCHAR(36) PATH '$')) AS configured
  ) recipients WHERE subject_id<>? ORDER BY subject_id LIMIT ?`,
-		actor.TenantID, d.ID, record, actor.TenantID, d.ID, record, actor.Subject, limit+1)
+		actor.TenantID, d.ID, record, actor.TenantID, d.ID, record, string(accountJSON), actor.Subject, limit+1)
 	if err != nil {
 		return err
 	}
@@ -182,11 +199,11 @@ func (h *handler) notifyLifecycleRecipients(ctx context.Context, tx *sql.Tx, act
 }
 
 // Return the delivery error separately so the caller can commit its failure status.
-func (h *handler) attemptLifecycleNotice(ctx context.Context, tx *sql.Tx, p c.Principal, d c.Definition, recordID, runID string) (error, error) {
+func (h *handler) attemptLifecycleNotice(ctx context.Context, tx *sql.Tx, p c.Principal, d c.Definition, recordID, runID, stageID string) (error, error) {
 	if _, err := tx.ExecContext(ctx, "SAVEPOINT lifecycle_notice"); err != nil {
 		return nil, err
 	}
-	deliveryErr := h.notifyLifecycleRecipients(ctx, tx, p, d, recordID, runID)
+	deliveryErr := h.notifyLifecycleRecipients(ctx, tx, p, d, recordID, runID, stageID)
 	code := ""
 	if deliveryErr != nil {
 		if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT lifecycle_notice"); err != nil {
@@ -230,15 +247,16 @@ func (h *handler) retryLifecycleDelivery(ctx context.Context, p c.Principal, sch
 	var deliveryErr error
 	err := h.withLifecycleTarget(ctx, p, schemaID, recordID, true, func(tx *sql.Tx, _ c.Decision, d c.Definition, _ *c.SchemaLifecycle) error {
 		var failed bool
-		err := tx.QueryRowContext(ctx, "SELECT notification_failed FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" AND id=? AND actor=? FOR UPDATE",
-			p.TenantID, schemaID, recordID, runID, p.Subject).Scan(&failed)
+		var stageID string
+		err := tx.QueryRowContext(ctx, "SELECT notification_failed,to_stage_id FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" AND id=? AND actor=? FOR UPDATE",
+			p.TenantID, schemaID, recordID, runID, p.Subject).Scan(&failed, &stageID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return problem(404, "not_found", "流转记录不可访问")
 		}
 		if err != nil || !failed {
 			return err
 		}
-		deliveryErr, err = h.attemptLifecycleNotice(ctx, tx, p, d, recordID, runID)
+		deliveryErr, err = h.attemptLifecycleNotice(ctx, tx, p, d, recordID, runID, stageID)
 		return err
 	})
 	if err != nil {
@@ -378,4 +396,12 @@ func stageKnown(l *c.SchemaLifecycle, id string) bool {
 		}
 	}
 	return false
+}
+
+func lifecycleDisplayStages(stages []c.LifecycleStage) []c.LifecycleStage {
+	display := make([]c.LifecycleStage, len(stages))
+	for i, stage := range stages {
+		display[i] = c.LifecycleStage{ID: stage.ID, Name: stage.Name}
+	}
+	return display
 }

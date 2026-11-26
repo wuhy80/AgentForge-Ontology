@@ -4,11 +4,12 @@ package contracts
 // and transition IDs are stable; names are display text only. Data keeps the
 // per-record stage and its history so a publication never rewrites history.
 const (
-	MaxLifecycleStages      = 20
-	MaxLifecycleTransitions = 40
-	MaxLifecycleNameRunes   = 64
-	MaxLifecycleNoteRunes   = 500
-	MaxLifecycleHistory     = 50
+	MaxLifecycleStages          = 20
+	MaxLifecycleStageRecipients = 20
+	MaxLifecycleTransitions     = 40
+	MaxLifecycleNameRunes       = 64
+	MaxLifecycleNoteRunes       = 500
+	MaxLifecycleHistory         = 50
 )
 
 // SchemaLifecycle declares the ordered stages of one managed record and the
@@ -23,8 +24,9 @@ type SchemaLifecycle struct {
 // LifecycleStage is one named stage. Order in the definition is the declared
 // display order; it does not constrain transitions.
 type LifecycleStage struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	NotifyAccountIDs []string `json:"notifyAccountIds,omitempty"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
 }
 
 // LifecycleTransition is one directed, named transition between two stages.
