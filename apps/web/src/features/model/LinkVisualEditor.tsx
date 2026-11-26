@@ -35,6 +35,7 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   const [selectedSchema, setSelectedSchema] = useState<string>()
   const [busy, setBusy] = useState<'save' | 'preview' | 'publish' | 'reload' | 'lifecycle' | 'delete' | ''>('')
   const [lifecycleAvailable, setLifecycleAvailable] = useState(false)
+  const [managedDeleteAvailable, setManagedDeleteAvailable] = useState(false)
   const [draftDeleteAvailable, setDraftDeleteAvailable] = useState(false)
   const [deleteETag, setDeleteETag] = useState<string>()
   const [confirmLifecycle, setConfirmLifecycle] = useState(false)
@@ -49,7 +50,8 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   const dirty = JSON.stringify(definition) !== JSON.stringify(record?.definition ?? initialDefinition)
   const suspended = record?.status === 'disabled'
   const locked = !!(record?.hasCurrent || record?.status === 'active' || suspended)
-  const canDeleteDraft = draftDeleteAvailable && !!onDeleted && record?.status === "draft" && !locked
+  const canDeleteManaged = managedDeleteAvailable && suspended && record?.definition.link?.storageBinding?.mode === 'managed'
+  const canDeleteDefinition = !!onDeleted && (canDeleteManaged || (draftDeleteAvailable && record?.status === 'draft' && !locked))
   const uncertain = !!publication && !['succeeded', 'rejected'].includes(publication.status)
   const disabled = !!busy || uncertain || suspended
   const managed = record?.definition.link?.storageBinding?.mode === 'managed'
@@ -69,6 +71,7 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   useEffect(() => { changeRef.current?.(definition, dirty) }, [definition, dirty])
 
   useEffect(() => {
+    setManagedDeleteAvailable(false)
     setDraftDeleteAvailable(false)
     setLifecycleAvailable(false)
     if (!active || typeof api.metadataCapabilities !== 'function') return
@@ -76,13 +79,14 @@ export function LinkVisualEditor(props: ModelEditorProps) {
     api.metadataCapabilities(request.signal).then((value) => {
       if (request.signal.aborted) return
       setDraftDeleteAvailable(value.unpublishedDraftDelete === true)
+      setManagedDeleteAvailable(value.disabledManagedStorageDelete === true)
       setLifecycleAvailable(value.managedLinkLifecycle === true)
     }).catch(() => {})
     return () => request.abort()
   }, [api, active])
 
-  async function deleteDraft(confirm: boolean) {
-    if (!record || !canDeleteDraft || dirty || busy || uncertain || (confirm && deleteETag !== record.etag)) return
+  async function deleteDefinition(confirm: boolean) {
+    if (!record || !canDeleteDefinition || dirty || busy || uncertain || (confirm && deleteETag !== record.etag)) return
     setBusy('delete'); setError(''); setMessage(''); setDeleteETag(undefined)
     try {
       if (confirm) {
@@ -219,14 +223,14 @@ export function LinkVisualEditor(props: ModelEditorProps) {
     {!embedded && <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" disabled={!!busy} onClick={() => leave(onClose)}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑关系' : '新建关系'}</h1><p className="muted">连接业务对象，配置关系语义与真实数据来源。</p></div>{onGraph && <button type="button" className="button" disabled={!!busy} onClick={() => leave(onGraph)}><GitBranch size={15} />打开分类关系图</button>}</div>}
     <div className="model-editor link-editor-body">
       <div className="model-editor-meta"><span className="badge model-kind-link">关系</span><span className="badge">{suspended ? '已停用' : record?.status === 'active' ? '当前生效' : locked ? '待发布变更' : '草稿'}</span><span className="badge">{link.storageBinding ? link.storageBinding.mode === 'managed' ? '平台托管' : '外部只读' : '仅定义'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}
-        {canDeleteDraft && deleteETag !== record?.etag && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDraft(false)}>删除草稿</button>}
+        {canDeleteDefinition && deleteETag !== record?.etag && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(false)}>{canDeleteManaged ? '删除关系' : '删除草稿'}</button>}
         {lifecycleAllowed && !confirmLifecycle && <button type="button" className="button subtle" disabled={dirty || !!busy || uncertain} onClick={() => void changeLifecycle(false)}>{suspended ? '恢复定义' : '停用定义'}</button>}
       </div>
-      {canDeleteDraft && deleteETag === record?.etag && <div className="notice notice-error" role="status">
-        <p>确认删除这份未发布的草稿？删除后无法恢复。</p>
+      {canDeleteDefinition && deleteETag === record?.etag && <div className="notice notice-error" role="status">
+        <p>{canDeleteManaged ? '确认删除此已停用的关系？删除后无法恢复。' : '确认删除这份未发布的草稿？删除后无法恢复。'}</p>
         <div className="model-inline-actions">
           <button type="button" className="button subtle" autoFocus onClick={() => setDeleteETag(undefined)}>取消</button>
-          <button type="button" className="button primary" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDraft(true)}>确认删除</button>
+          <button type="button" className="button primary" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(true)}>确认删除</button>
         </div>
       </div>}
       {confirmLifecycle && <div className="notice"><p>{suspended ? '恢复后，可按权限查询并维护这条关系。' : '停用前会检查关系记录、保存查询和定向策略。'}</p><div className="model-inline-actions"><button type="button" className="button primary" disabled={dirty || !!busy} onClick={() => void changeLifecycle(true)}>{suspended ? '确认恢复' : '确认停用'}</button><button type="button" className="button subtle" disabled={!!busy} onClick={() => setConfirmLifecycle(false)}>取消</button></div></div>}

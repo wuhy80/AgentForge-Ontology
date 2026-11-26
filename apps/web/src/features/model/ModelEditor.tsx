@@ -83,6 +83,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const [lifecyclePreviewAvailable, setLifecyclePreviewAvailable] = useState(false)
   const [lifecycleAvailable, setLifecycleAvailable] = useState(false)
   const [recordReadAvailable, setRecordReadAvailable] = useState(false)
+  const [managedDeleteAvailable, setManagedDeleteAvailable] = useState(false)
   const [draftDeleteAvailable, setDraftDeleteAvailable] = useState(false)
   const [disabledEnumDeleteAvailable, setDisabledEnumDeleteAvailable] = useState(false)
   const [deleteETag, setDeleteETag] = useState<string>()
@@ -109,8 +110,9 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   }, [lifecycleTabHidden, tab])
   const suspended = record?.status === 'disabled'
   const locked = !!(record?.hasCurrent || record?.status === 'active' || suspended)
+  const canDeleteManaged = managedDeleteAvailable && suspended && definition.schema?.mode === 'schema_2_db' && definition.schema.storageLayout === 'single' && !definition.schema.storageBinding
   const canDeleteEnum = disabledEnumDeleteAvailable && suspended && record?.definition.kind === 'enum'
-  const canDeleteDefinition = !!onDeleted && (canDeleteEnum || (draftDeleteAvailable && record?.status === 'draft' && !locked))
+  const canDeleteDefinition = !!onDeleted && (canDeleteManaged || canDeleteEnum || (draftDeleteAvailable && record?.status === 'draft' && !locked))
   const uncertain = !!publication && !['succeeded', 'rejected'].includes(publication.status)
   const disabled = !!busy || uncertain || suspended
   const callable = definition.action ?? definition.function
@@ -142,6 +144,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
 
   useEffect(() => {
     setSchemaMigrations(undefined); setCapabilityError('')
+    setManagedDeleteAvailable(false)
     setDraftDeleteAvailable(false)
     setDisabledEnumDeleteAvailable(false)
     setLifecycleAvailable(false)
@@ -152,6 +155,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
     api.metadataCapabilities(controller.signal).then((capabilities) => {
       if (controller.signal.aborted) return
       setDraftDeleteAvailable(capabilities.unpublishedDraftDelete === true)
+      setManagedDeleteAvailable(capabilities.disabledManagedStorageDelete === true)
       setDisabledEnumDeleteAvailable(capabilities.disabledEnumDelete === true)
       setSchemaMigrations(capabilities.schemaMigrations)
       setLifecycleAvailable(definition.kind === 'enum' ? capabilities.enumLifecycle === true
@@ -366,11 +370,11 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
     <div className="model-editor-page-heading"><div><button type="button" className="button subtle model-back-button" onClick={requestClose} disabled={!!busy}><ArrowLeft size={16} />返回模型列表</button><h1>{record ? definition.name || '编辑定义' : `新建${kindLabels[definition.kind]}`}</h1><p className="muted">{kindDescriptions[definition.kind]}</p></div></div>
     <div className="model-editor">
       <div className="model-editor-meta"><span className={`badge model-kind-${definition.kind}`}>{kindLabels[definition.kind]}</span><span className="badge">{suspended ? '已停用' : record?.status === 'active' ? '当前生效' : '草稿'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}
-        {canDeleteDefinition && deleteETag !== record?.etag && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(false)}>{canDeleteEnum ? '删除枚举' : '删除草稿'}</button>}
+        {canDeleteDefinition && deleteETag !== record?.etag && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(false)}>{canDeleteManaged ? '删除模型' : canDeleteEnum ? '删除枚举' : '删除草稿'}</button>}
         {lifecycleAllowed && !confirmLifecycle && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void checkLifecycle()}>{suspended ? '恢复定义' : '停用定义'}</button>}
       </div>
       {canDeleteDefinition && deleteETag === record?.etag && <div className="notice notice-error" role="status">
-        <p>{canDeleteEnum ? '确认删除此已停用的枚举？删除后无法恢复。' : '确认删除这份未发布的草稿？删除后无法恢复。'}</p>
+        <p>{canDeleteManaged ? '确认删除此已停用的模型？删除后无法恢复。' : canDeleteEnum ? '确认删除此已停用的枚举？删除后无法恢复。' : '确认删除这份未发布的草稿？删除后无法恢复。'}</p>
         <div className="model-inline-actions">
           <button type="button" className="button subtle" autoFocus onClick={() => setDeleteETag(undefined)}>取消</button>
           <button type="button" className="button primary" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(true)}>确认删除</button>
