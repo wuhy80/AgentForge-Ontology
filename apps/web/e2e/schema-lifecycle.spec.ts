@@ -4,7 +4,7 @@ import { ontologyFixture } from './fixtures/ontology'
 for (const width of [1440, 390]) test(`记录流程在 ${width}px 下可配置并随草稿保存`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
   await ontologyFixture(page)
-  let saved: { schema?: { lifecycle?: { initialStageId: string; stages: { id: string; name: string }[]; transitions?: { name: string; from: string; to: string }[] } } } | undefined
+  let saved: { schema?: { lifecycle?: { initialStageId: string; stages: { id: string; name: string; notifyAccountIds?: string[] }[]; transitions?: { name: string; from: string; to: string }[] } } } | undefined
   await page.route('**/api/metadata/definitions/draft-only/draft', async (route) => {
     if (route.request().method() !== 'PUT') return route.fallback()
     saved = route.request().postDataJSON()
@@ -19,6 +19,13 @@ for (const width of [1440, 390]) test(`记录流程在 ${width}px 下可配置�
   await expect(page.getByLabel('阶段1名称')).toHaveValue('草稿')
   await page.getByRole('button', { name: '添加阶段' }).click()
   await page.getByLabel('阶段2名称').fill('审核中')
+  const account = 'f147fbc8-ba4d-455f-a158-b68d533941a3'
+  await page.getByText('阶段2通知账号', { exact: true }).click()
+  await page.getByRole('button', { name: '添加通知账号' }).click()
+  const recipient = page.getByLabel('阶段2通知账号1')
+  await recipient.focus()
+  await expect(recipient).toBeFocused()
+  await recipient.fill(account)
   await page.getByRole('button', { name: '添加流转' }).click()
   await page.getByLabel('流转1名称').fill('提交审核')
 
@@ -32,6 +39,7 @@ for (const width of [1440, 390]) test(`记录流程在 ${width}px 下可配置�
   await page.getByRole('button', { name: '保存草稿' }).click()
   await expect.poll(() => saved?.schema?.lifecycle?.stages?.length).toBe(2)
   const lifecycle = saved!.schema!.lifecycle!
+  expect(lifecycle.stages[1].notifyAccountIds).toEqual([account])
   expect(lifecycle.initialStageId).toBe(lifecycle.stages[0].id)
   expect(lifecycle.transitions).toHaveLength(1)
   expect(lifecycle.transitions![0]).toMatchObject({ name: '提交审核', from: lifecycle.stages[0].id, to: lifecycle.stages[1].id })

@@ -60,7 +60,7 @@ export function SchemaLifecycleEditor({ schema, disabled, onChange }: {
       </div>
     </div>
     <p className="model-lifecycle-note">当前 {stages.length} / {MAX_LIFECYCLE_STAGES} 个阶段，{transitions.length} / {MAX_LIFECYCLE_TRANSITIONS} 条流转。阶段和流转名称最多 {MAX_LIFECYCLE_NAME} 个字符且不能重复。</p>
-    {stages.map((stage, index) => <div className="model-lifecycle-row" key={stage.id}>
+    {stages.map((stage, index) => <div key={stage.id}><div className="model-lifecycle-row">
       <label>阶段名称<input className="field" value={stage.name} maxLength={MAX_LIFECYCLE_NAME} disabled={disabled}
         aria-label={`阶段${index + 1}名称`} onChange={(event) => updateStage(index, { name: event.target.value })} /></label>
       <label className="model-lifecycle-initial"><input type="radio" name={`lifecycle-initial-${schema.mode}`} disabled={disabled}
@@ -70,6 +70,19 @@ export function SchemaLifecycleEditor({ schema, disabled, onChange }: {
         disabled={disabled || stages.length <= 1 || stage.id === lifecycle.initialStageId || referenced.has(stage.id)}
         title={referenced.has(stage.id) ? '该阶段仍有流转引用，请先删除相关流转' : stage.id === lifecycle.initialStageId ? '初始阶段不能删除，请先切换初始阶段' : undefined}
         onClick={() => removeStage(index)}><Trash2 size={16} /></button>
+    </div>
+      <details>
+        <summary>阶段{index + 1}通知账号</summary>
+        {(stage.notifyAccountIds ?? []).map((id, position) => <div className="model-inline-actions" key={position}>
+          <input className="field" aria-label={`阶段${index + 1}通知账号${position + 1}`} value={id} maxLength={36} disabled={disabled}
+            placeholder="账号 UUID"
+            onChange={(event) => updateStage(index, { notifyAccountIds: stage.notifyAccountIds!.map((value, offset) => offset === position ? event.target.value.trim() : value) })} />
+          <button type="button" className="button subtle" disabled={disabled}
+            onClick={() => updateStage(index, { notifyAccountIds: stage.notifyAccountIds!.filter((_, offset) => offset !== position) })}>移除账号</button>
+        </div>)}
+        <button type="button" className="button subtle" disabled={disabled || (stage.notifyAccountIds?.length ?? 0) >= 20}
+          onClick={() => updateStage(index, { notifyAccountIds: [...(stage.notifyAccountIds ?? []), ''] })}>添加通知账号</button>
+      </details>
     </div>)}
     <div className="model-section-heading model-lifecycle-heading">
       <div><h4>阶段流转</h4></div>

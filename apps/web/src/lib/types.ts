@@ -68,6 +68,7 @@ export interface Schema {
 }
 
 export interface LifecycleStage {
+  notifyAccountIds?: string[]
   id: string
   name: string
 }
