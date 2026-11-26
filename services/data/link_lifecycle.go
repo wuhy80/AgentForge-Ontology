@@ -55,29 +55,48 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			return err
 		}
 		link := definition.Kind == c.KindLink && definition.Link != nil && definition.Link.StorageBinding != nil && definition.Link.StorageBinding.Mode == "managed"
+		mappedLink := !deletionCheck && definition.Kind == c.KindLink && definition.Link != nil && definition.Link.StorageBinding != nil &&
+			(definition.Link.StorageBinding.Mode == "junction" || definition.Link.StorageBinding.Mode == "foreign_key")
 		schema := definition.Kind == c.KindSchema && definition.Schema != nil && definition.Schema.Mode == "schema_2_db" &&
 			definition.Schema.StorageLayout == "single" && definition.Schema.StorageBinding == nil
-		if definition.ID != id || definition.TenantID != tenant || (!link && !schema) {
-			return problem(422, "unsupported_lifecycle", "当前只支持平台托管关系和托管单表对象")
-		}
-		table := tableName(id)
-		verify := func() error { return verifyTable(ctx, tx, definition) }
-		if link {
-			table = linkTableName(id)
-			verify = func() error { return verifyLinkTable(ctx, tx, definition) }
+		if definition.ID != id || definition.TenantID != tenant || (!link && !schema && !mappedLink) {
+			return problem(422, "unsupported_lifecycle", "定义存储不支持当前生命周期操作")
 		}
 		var hasData bool
-		if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+quote(table)+" WHERE tenant_id=?)", tenant).Scan(&hasData); err != nil {
-			var mysqlErr *mysql.MySQLError
-			if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1146 || mysqlErr.Number == 1054) {
+		if mappedLink {
+			// Only the Link gate changes. Taking endpoint locks after the Link
+			// gate would reverse the normal relation-operation lock order.
+			plan, err := h.planLink(ctx, definition)
+			if err != nil {
+				return problem(409, "mapping_unavailable", "无法复核映射关系的物理结构")
+			}
+			defer plan.close()
+			if !command.Restore {
+				var impact c.StorageDefinitionImpact
+				if err := plan.mappedStorageImpact(ctx, tenant, &impact); err != nil {
+					return problem(409, "mapping_unavailable", "无法复核映射关系的存量")
+				}
+				hasData = impact.HasData
+			}
+		} else {
+			table := tableName(id)
+			verify := func() error { return verifyTable(ctx, tx, definition) }
+			if link {
+				table = linkTableName(id)
+				verify = func() error { return verifyLinkTable(ctx, tx, definition) }
+			}
+			if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+quote(table)+" WHERE tenant_id=?)", tenant).Scan(&hasData); err != nil {
+				var mysqlErr *mysql.MySQLError
+				if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1146 || mysqlErr.Number == 1054) {
+					return problem(409, "mapping_unavailable", "物理结构无法确认")
+				}
+				return err
+			}
+			if err := verify(); err != nil {
 				return problem(409, "mapping_unavailable", "物理结构无法确认")
 			}
-			return err
 		}
 		next := "ready"
-		if err := verify(); err != nil {
-			return problem(409, "mapping_unavailable", "物理结构无法确认")
-		}
 		if !command.Restore {
 			if hasData {
 				return problem(409, "definition_data_in_use", "定义仍有实例")

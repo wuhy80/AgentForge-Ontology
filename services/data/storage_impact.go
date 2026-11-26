@@ -110,17 +110,21 @@ func (h *handler) mappedLinkStorageImpact(ctx context.Context, tenant string, cu
 			return err
 		}
 		defer opened.close()
-		binding := current.Definition.Link.StorageBinding
-		if binding.Mode == "junction" {
-			return mappedImpactExists(ctx, opened.junction, tenant, "", &out)
-		}
-		holder := opened.sourceTables[0]
-		if binding.ForeignKeySide == "target" {
-			holder = opened.targetTables[0]
-		}
-		return mappedImpactExists(ctx, holder, tenant, binding.ForeignKeyColumn, &out)
+		return opened.mappedStorageImpact(ctx, tenant, &out)
 	})
 	return out, err
+}
+
+func (p *linkPlan) mappedStorageImpact(ctx context.Context, tenant string, out *c.StorageDefinitionImpact) error {
+	binding := p.definition.Link.StorageBinding
+	if binding.Mode == "junction" {
+		return mappedImpactExists(ctx, p.junction, tenant, "", out)
+	}
+	holder := p.sourceTables[0]
+	if binding.ForeignKeySide == "target" {
+		holder = p.targetTables[0]
+	}
+	return mappedImpactExists(ctx, holder, tenant, binding.ForeignKeyColumn, out)
 }
 
 func mappedImpactExists(ctx context.Context, table *mappedTable, tenant, foreignKey string, out *c.StorageDefinitionImpact) error {
