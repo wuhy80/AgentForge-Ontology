@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,6 +121,18 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	var category, group c.Organization
 	admin.request("POST", metaServer.URL+"/metadata/categories", map[string]string{"name": "模型演进"}, nil, 201, &category)
 	admin.request("POST", metaServer.URL+"/metadata/groups", map[string]string{"name": "隔离验收", "categoryId": category.ID}, nil, 201, &group)
+	var emptyCategory, emptyGroup c.Organization
+	categoriesPath, groupsPath := metaServer.URL+"/metadata/categories", metaServer.URL+"/metadata/groups"
+	admin.request("POST", categoriesPath, map[string]string{"name": "Disposable category"}, nil, 201, &emptyCategory)
+	admin.request("POST", groupsPath, map[string]string{"name": "Disposable group", "categoryId": emptyCategory.ID}, nil, 201, &emptyGroup)
+	categoryDelete := categoriesPath + "/" + emptyCategory.ID + "?previousName=Disposable%20category"
+	groupDelete := groupsPath + "/" + emptyGroup.ID + "?previousName=Disposable%20group"
+	admin.request("DELETE", categoryDelete, nil, nil, 409, nil)
+	outsider.request("DELETE", groupDelete, nil, nil, 404, nil)
+	admin.request("DELETE", groupsPath+"/"+emptyGroup.ID+"?previousName=stale", nil, nil, 409, nil)
+	admin.request("DELETE", groupDelete, nil, nil, 204, nil)
+	admin.request("DELETE", groupDelete, nil, nil, 404, nil)
+	admin.request("DELETE", categoryDelete, nil, nil, 204, nil)
 	definitionURL := func(id string) string { return metaServer.URL + "/metadata/definitions/" + id }
 	publish := func(d c.Definition) c.CurrentDefinition {
 		d.CategoryID, d.GroupID = category.ID, group.ID
@@ -159,6 +172,11 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			Properties: []c.Property{{ID: c.NewID(), Name: "Label", DataType: "string"}},
 		}})
 		target := publish(c.Definition{Kind: c.KindSchema, Name: "DeletionTarget", Schema: model.Definition.Schema})
+		var occupied c.Error
+		admin.request("DELETE", groupsPath+"/"+group.ID+"?previousName="+url.QueryEscape(group.Name), nil, nil, 409, &occupied)
+		if occupied.Code != "organization_not_empty" {
+			t.Fatalf("expected retained definition to block group removal, got %s", occupied.Code)
+		}
 		link := publish(c.Definition{Kind: c.KindLink, Name: "DeletionLink", Link: &c.Link{
 			SourceSchemaID: model.Definition.ID, TargetSchemaID: target.Definition.ID,
 			ForwardName: "Next", ReverseName: "Previous", Cardinality: "1:N", OnDelete: "restrict",

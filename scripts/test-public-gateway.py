@@ -195,6 +195,8 @@ func main() {
                 ('POST', '/api/metadata/definitions/model/publish'),
                 ('GET', '/api/metadata/definitions/model/delete-preview'),
                 ('DELETE', '/api/metadata/definitions/model'),
+                ('DELETE', '/api/metadata/categories/category?previousName=Example'),
+                ('DELETE', '/api/metadata/groups/group?previousName=Example'),
             ]:
                 status, response_headers, value = request(method, path,
                     {'If-Match': '"old-etag"', 'Content-Type': 'application/json'}, '{}')
@@ -225,6 +227,8 @@ func main() {
                                  ('POST','/api/metadata/definitions/model/delete-preview'),
                                  ('DELETE','/api/metadata/definitions/model/draft'),
                                  ('DELETE','/api/ontoapp-ontology/metadata/definitions/model'),
+                                 ('DELETE','/api/ontoapp-ontology/metadata/categories/category'),
+                                 ('DELETE','/api/ontoapp-ontology/metadata/groups/group'),
                                  ('GET','/api/ontoapp-ontology/metadata/definitions/model/delete-preview'),
                                  ('GET','/api/ontoapp-ontology/metadata/definitions/model/dependencies'),
                                  ('GET','/api/data/query/bind'),('PUT','/api/data/query/bind'),
