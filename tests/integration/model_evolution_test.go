@@ -60,6 +60,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	})
 	const password = "ModelEvolutionFixture!2026"
 	accounts := identity.NewStore(me.DB(), &platform.OPAAuthorizer{URL: opa}, publicSecurityOrigin)
+	accounts.SharedGroupMentionAccounts = true
 	for _, id := range []string{tenant, foreign} {
 		if err := accounts.Bootstrap(ctx, id, "admin", password); err != nil {
 			t.Fatal("bootstrap isolated model evolution tenant")
@@ -188,6 +189,10 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	admin.request("POST", metaServer.URL+"/metadata/admin/roles", c.RoleInput{Name: "Workflow recipient"}, nil, 201, &role)
 	var recipient c.User
 	admin.request("POST", metaServer.URL+"/metadata/admin/users", c.UserInput{Username: "workflow", Password: password, DisplayName: "Workflow recipient", Enabled: true, RoleIDs: []string{role.ID}}, nil, 201, &recipient)
+	var peer, ungrouped c.User
+	admin.request("POST", metaServer.URL+"/metadata/admin/users", c.UserInput{Username: "workflow-peer", Password: password, DisplayName: "Workflow peer", Enabled: true}, nil, 201, &peer)
+	admin.request("POST", metaServer.URL+"/metadata/admin/users", c.UserInput{Username: "workflow-ungrouped", Password: password, DisplayName: "Workflow ungrouped", Enabled: true}, nil, 201, &ungrouped)
+	admin.request("POST", metaServer.URL+"/metadata/admin/user-groups", c.UserGroupInput{Name: "Workflow team", Enabled: true, UserIDs: []string{recipient.ID, peer.ID}}, nil, 201, nil)
 	account := recipient.ID
 	from, to, move, field := c.NewID(), c.NewID(), c.NewID(), c.NewID()
 	workflow := publish(c.Definition{Kind: c.KindSchema, Name: "WorkflowVerification", Schema: &c.Schema{
@@ -211,6 +216,19 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	admin.request("POST", policyURL+"/publish", nil, map[string]string{"If-Match": policyHeaders.Get("ETag")}, 200, nil)
 	admin = login(tenant, "admin")
 	reader := login(tenant, "workflow")
+	t.Run("SharedMentionDirectory", func(t *testing.T) {
+		reader := *reader
+		reader.t = t
+		var directory struct{ Data []struct{ ID, Label string } }
+		reader.request("GET", metaServer.URL+"/metadata/auth/mention-accounts?prefix=Workflow", nil, nil, 200, &directory)
+		found := map[string]string{}
+		for _, item := range directory.Data {
+			found[item.ID] = item.Label
+		}
+		if len(directory.Data) != 2 || found[recipient.ID] != recipient.DisplayName || found[peer.ID] != peer.DisplayName {
+			t.Fatal("mention directory did not return exactly the enabled same-group accounts")
+		}
+	})
 	workflowURL := dataServer.URL + "/data/schemas/" + workflow.Definition.ID + "/instances"
 	var workflowRecord c.Instance
 	const workflowTitle = "Workflow record for inbox verification"
@@ -290,7 +308,31 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		if len(inbox.Data) != 0 {
 			t.Fatal("read reply remained in the unread inbox")
 		}
+		admin.request("POST", thread, map[string]string{"body": "Follow-up", "requestId": c.NewID(), "parentId": parent.ID}, nil, 201, &reply)
+		reader.request("GET", inboxPath, nil, nil, 200, &inbox)
+		if len(inbox.Data) != 1 || inbox.Data[0].ID != reply.ID {
+			t.Fatal("follow-up did not reach the unread inbox before revocation")
+		}
+		var current c.PolicyRecord
+		admin.request("GET", policyURL, nil, nil, 200, &current)
+		for i, rule := range current.Current.Rules {
+			if rule.RoleID == role.ID && rule.Operation == "instance.read" && rule.ResourceID == workflow.Definition.ID {
+				current.Current.Rules = append(current.Current.Rules[:i], current.Current.Rules[i+1:]...)
+				break
+			}
+		}
+		headers := admin.request("PUT", policyURL, current.Current, map[string]string{"If-Match": "\"" + current.ETag + "\""}, 200, nil)
+		admin.request("POST", policyURL+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
+		revoked := login(tenant, "workflow")
+		revoked.t = t
+		revoked.request("GET", thread, nil, nil, 403, nil)
+		revoked.request("GET", inboxPath, nil, nil, 200, &inbox)
+		if len(inbox.Data) != 0 {
+			t.Fatal("unread reply remained visible after record read access was revoked")
+		}
+		revoked.request("PUT", recordPath+"/comment-replies/"+reply.ID, nil, nil, 403, nil)
 	})
+	admin = login(tenant, "admin")
 	states := publish(c.Definition{Kind: c.KindEnum, Name: "工单状态", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待办"}, {Code: "legacy", Label: "旧状态"}}}})
 	code, state, note := c.NewID(), c.NewID(), c.NewID()
 	schema := publish(c.Definition{Kind: c.KindSchema, Name: "工单", Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: code, Name: "代码", DataType: "string", Required: true}, {ID: state, Name: "状态", DataType: "string", Required: true, EnumID: states.Definition.ID}, {ID: note, Name: "备注", DataType: "string", Nullable: true}}}})
