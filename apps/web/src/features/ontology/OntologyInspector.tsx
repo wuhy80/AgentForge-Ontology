@@ -116,6 +116,16 @@ export function OntologyInspector({ record, records, categories, groups, categor
     {definition.function && callableDetails(definition.function, 'function')}
 
     <section className="ontology-inspector-section"><h3>引用</h3>{outgoing.length ? <ul className="ontology-inspector-references">{outgoing.map((reference, index) => <li key={`${reference.kind}:${reference.targetId}:${reference.scope ?? ''}:${reference.propertyId ?? index}`}><small>{reference.label}</small>{resource(reference.targetId, expectedKind(reference.kind))}</li>)}</ul> : <p className="ontology-inspector-muted">当前定义没有显式引用。</p>}</section>
-    <section className="ontology-inspector-section"><h3>{definition.kind === 'function' ? '绑定动作与其他引用' : '被引用'}</h3>{incoming.length ? <ul className="ontology-inspector-references">{incoming.map(({ source, reference }, index) => <li key={`${source.definition.id}:${reference.kind}:${reference.scope ?? ''}:${reference.propertyId ?? index}`}><small>{kindNames[source.definition.kind]} · {reference.label}</small>{resource(source.definition.id)}</li>)}</ul> : <p className="ontology-inspector-muted">当前已加载范围没有可见引用。</p>}<p className="ontology-inspector-scope">关系与依赖仅统计当前可见、已加载的定义。</p></section>
+    <section className="ontology-inspector-section">
+      <h3>{definition.kind === 'function' ? '绑定动作与其他引用' : '被引用'}</h3>
+      {incoming.length ? <ul className="ontology-inspector-references ontology-inspector-references-incoming">{incoming.map(({ source, reference }, index) => {
+        const { id, kind, name } = source.definition
+        const label = `${kindNames[kind]} · ${reference.label}`
+        return <li key={`${id}:${reference.kind}:${reference.scope ?? ''}:${reference.propertyId ?? index}`} title={`${label} · ${name}`}>
+          <small>{label}</small>{resource(id)}
+        </li>
+      })}</ul> : <p className="ontology-inspector-muted">当前已加载范围没有可见引用。</p>}
+      <p className="ontology-inspector-scope">关系与依赖仅统计当前可见、已加载的定义。</p>
+    </section>
   </article>
 }

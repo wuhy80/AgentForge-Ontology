@@ -40,6 +40,11 @@ describe('本体全景只读详情', () => {
     expect(options.onSelect).toHaveBeenCalledWith('note-tag')
     fireEvent.click(within(resources as HTMLElement).getByRole('button', { name: '查看本体资源：标签' }))
     expect(options.onSelect).toHaveBeenCalledWith('tag')
+    const incoming = screen.getByRole('heading', { name: '被引用' }).closest('section')!
+    const incomingRows = within(incoming).getAllByRole('listitem')
+    expect(incomingRows.map((row) => row.title)).toEqual(['关系 · 来源对象 · 笔记标记标签', '动作 · 作用对象 · 生成笔记摘要'])
+    fireEvent.click(within(incomingRows[1]).getByRole('button', { name: '查看本体资源：生成笔记摘要' }))
+    expect(options.onSelect).toHaveBeenCalledWith('summarize-note')
     fireEvent.click(screen.getAllByRole('button', { name: '查看本体资源：笔记状态' })[0])
     expect(options.onSelect).toHaveBeenCalledWith('status-enum')
     fireEvent.click(screen.getByRole('button', { name: '查看定义' }))

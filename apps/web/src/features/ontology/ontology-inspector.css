@@ -47,6 +47,12 @@
 .ontology-inspector-relation-resources > span { min-width: 0; color: var(--muted); }
 .ontology-inspector-references > li { display: grid; gap: 3px; padding: 5px 0; font-size: 12px; }
 .ontology-inspector-references > li > small { color: var(--muted); font-size: 11px; }
+.ontology-inspector-references-incoming { gap: 4px; }
+.ontology-inspector-references-incoming > li { display: flex; align-items: baseline; min-width: 0; gap: 8px; padding: 3px 0; }
+.ontology-inspector-references-incoming > li > small { max-width: 55%; }
+.ontology-inspector-references-incoming .ontology-inspector-resource { min-width: 0; }
+.ontology-inspector-references-incoming .ontology-inspector-resource > small { max-width: 35%; }
+.ontology-inspector-references-incoming :is(li > small, .ontology-inspector-resource > span, .ontology-inspector-resource > small) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ontology-inspector-table { max-width: 100%; overflow-x: auto; }
 .ontology-inspector-table table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
 .ontology-inspector-table th, .ontology-inspector-table td { padding: 8px 5px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
