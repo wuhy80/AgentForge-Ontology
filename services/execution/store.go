@@ -44,6 +44,18 @@ type Store interface {
 
 type SQLStore struct{ DB *sql.DB }
 
+// hasUnfinishedDefinitionInvocation includes both the requested callable and
+// the implementation captured by a bound Action. Expired attempts still
+// count until their durable state is resolved.
+func (s *SQLStore) hasUnfinishedDefinitionInvocation(ctx context.Context, tenant, id string) (bool, error) {
+	var pending bool
+	err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM af_execution_invocations
+		WHERE tenant_id=? AND status IN ('queued','job_running','running','committing')
+		AND (JSON_UNQUOTE(JSON_EXTRACT(record_json,'$.invocation.definitionId'))=?
+			OR JSON_UNQUOTE(JSON_EXTRACT(record_json,'$.function.id'))=?))`, tenant, id, id).Scan(&pending)
+	return pending, err
+}
+
 // PreparingStore persists a validated write plan before any Data request.
 // A restart resumes this exact plan and never re-executes user code.
 type PreparingStore interface {

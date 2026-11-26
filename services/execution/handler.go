@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -31,6 +32,7 @@ type Config struct {
 	Runner           Runner
 	MaxConcurrent    int
 	DataTransactions DataTransactionClient
+	ServiceToken     string
 }
 
 type handler struct {
@@ -85,7 +87,32 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /execution/invocations", h.wrap(h.listJobs))
 	mux.HandleFunc("GET /execution/invocations/{id}", h.wrap(h.get))
 	mux.HandleFunc("DELETE /execution/invocations/{id}", h.wrap(h.cancelJob))
+	mux.HandleFunc("GET /internal/definitions/{id}/execution-impact", h.definitionExecutionImpact)
 	return mux
+}
+
+func (h *handler) definitionExecutionImpact(w http.ResponseWriter, r *http.Request) {
+	token := h.cfg.ServiceToken
+	if len(token) < 32 || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
+		writeProblem(w, problem(401, "unauthorized", "内部服务凭据无效"))
+		return
+	}
+	tenant, id := r.Header.Get("X-Tenant-ID"), r.PathValue("id")
+	if !validID(tenant) || !validID(id) {
+		writeProblem(w, problem(422, "invalid_definition_impact", "租户或定义标识无效"))
+		return
+	}
+	store, ok := h.cfg.Store.(interface {
+		hasUnfinishedDefinitionInvocation(context.Context, string, string) (bool, error)
+	})
+	if ok {
+		pending, err := store.hasUnfinishedDefinitionInvocation(r.Context(), tenant, id)
+		if err == nil {
+			writeJSON(w, 200, map[string]bool{"pending": pending})
+			return
+		}
+	}
+	writeProblem(w, problem(503, "execution_impact_unavailable", "无法复核未完成执行"))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

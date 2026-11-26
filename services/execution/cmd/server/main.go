@@ -63,7 +63,7 @@ func run() error {
 	if err := store.CheckJobs(start); err != nil {
 		return fmt.Errorf("Execution持久任务存储不可用，请检查显式迁移: %w", err)
 	}
-	app := execution.NewHandler(execution.Config{WorkerContext: ctx, Store: store, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metadataURL, ServiceToken: service}, Runner: &execution.DockerRunner{Isolation: isolation, Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE")}, MaxConcurrent: maxConcurrent, DataTransactions: &execution.RemoteDataTransactions{URL: os.Getenv("ONTOLOGY_DATA_URL"), ServiceToken: service}})
+	app := execution.NewHandler(execution.Config{WorkerContext: ctx, ServiceToken: service, Store: store, Authorizer: &platform.RemoteAuthorizer{URL: metadataURL, ServiceToken: service}, SessionChecker: checker, Metadata: &execution.RemoteMetadata{URL: metadataURL, ServiceToken: service}, Runner: &execution.DockerRunner{Isolation: isolation, Binary: os.Getenv("ONTOLOGY_DOCKER_BINARY"), Image: os.Getenv("ONTOLOGY_PYTHON_IMAGE"), JavaScriptImage: os.Getenv("ONTOLOGY_JAVASCRIPT_IMAGE"), GoImage: os.Getenv("ONTOLOGY_GO_IMAGE")}, MaxConcurrent: maxConcurrent, DataTransactions: &execution.RemoteDataTransactions{URL: os.Getenv("ONTOLOGY_DATA_URL"), ServiceToken: service}})
 	addr := os.Getenv("ONTOLOGY_LISTEN")
 	if addr == "" {
 		addr = "127.0.0.1:18082"

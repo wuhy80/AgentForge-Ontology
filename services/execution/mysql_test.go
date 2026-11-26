@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -63,6 +65,48 @@ func TestMySQLExecutionDurabilityIsolationAndConcurrentClaim(t *testing.T) {
 	if claimed.Load() != 1 {
 		t.Fatalf("claimed=%d", claimed.Load())
 	}
+	t.Run("UnfinishedDefinitionImpact", func(t *testing.T) {
+		action, function := c.NewID(), c.NewID()
+		copy := record
+		copy.RequestKey = "definition-impact"
+		copy.Invocation.ID, copy.Invocation.DefinitionID, copy.Invocation.Kind = c.NewID(), action, c.KindAction
+		copy.Root.ID, copy.Implementation.ID = action, function
+		copy.DeadlineAt = time.Now().UTC().Add(-time.Minute)
+		if ok, err := store.Claim(ctx, copy); err != nil || !ok {
+			t.Fatalf("seed Action invocation: claimed=%v err=%v", ok, err)
+		}
+		check := func(scope, id string, want bool) {
+			t.Helper()
+			got, err := store.hasUnfinishedDefinitionInvocation(ctx, scope, id)
+			if err != nil || got != want {
+				t.Fatalf("unfinished definition impact: got %v, want %v, err=%v", got, want, err)
+			}
+		}
+		for _, state := range []string{"running", "committing", "queued", "job_running", "succeeded"} {
+			if _, err := engine.DB().ExecContext(ctx, "UPDATE af_execution_invocations SET status=? WHERE tenant_id=? AND id=?", state, tenant, copy.Invocation.ID); err != nil {
+				t.Fatal(err)
+			}
+			check(tenant, action, state != "succeeded")
+			check(tenant, function, state != "succeeded")
+			check(tenant+"-foreign", function, false)
+			check(tenant, c.NewID(), false)
+		}
+		token := strings.Repeat("t", 32)
+		handler := NewHandler(Config{Store: store, ServiceToken: token})
+		req := httptest.NewRequest("GET", "/internal/definitions/"+function+"/execution-impact", nil)
+		req.Header.Set("X-Tenant-ID", tenant)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != 401 {
+			t.Fatalf("internal check without token returned %d", w.Code)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		w = httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != 200 || strings.TrimSpace(w.Body.String()) != `{"pending":false}` {
+			t.Fatalf("authorized terminal impact check returned %d", w.Code)
+		}
+	})
 	// A second repository observes the durable operation, without process cache.
 	reopened := &SQLStore{DB: engine.DB()}
 	read, err := reopened.FindKey(ctx, tenant, "caller", "same")
