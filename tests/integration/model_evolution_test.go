@@ -96,7 +96,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		}
 		platform.WriteJSON(w, 200, result)
 	}))
-	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, DataURL: dataServer.URL, ServiceToken: serviceToken, HTTPClient: dataServer.Client()}))
+	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, CallablePolicyReferences: accounts, DataURL: dataServer.URL, ServiceToken: serviceToken, HTTPClient: dataServer.Client()}))
 	roots := x509.NewCertPool()
 	roots.AddCert(metaServer.Certificate())
 	roots.AddCert(dataServer.Certificate())
@@ -146,6 +146,30 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			admin.request("GET", definitionURL(d.Definition.ID), nil, nil, 200, &draft)
 		}
 		return draft
+	}
+	// Verify managed deletion through both services.
+	{
+		model := publish(c.Definition{Kind: c.KindSchema, Name: "DeletionSource", Schema: &c.Schema{
+			Mode: "schema_2_db", StorageLayout: "single",
+			Properties: []c.Property{{ID: c.NewID(), Name: "Label", DataType: "string"}},
+		}})
+		target := publish(c.Definition{Kind: c.KindSchema, Name: "DeletionTarget", Schema: model.Definition.Schema})
+		link := publish(c.Definition{Kind: c.KindLink, Name: "DeletionLink", Link: &c.Link{
+			SourceSchemaID: model.Definition.ID, TargetSchemaID: target.Definition.ID,
+			ForwardName: "Next", ReverseName: "Previous", Cardinality: "1:N", OnDelete: "restrict",
+			StorageBinding: &c.LinkStorageBinding{Mode: "managed"},
+		}})
+		for _, current := range []c.CurrentDefinition{link, model} {
+			path := definitionURL(current.Definition.ID)
+			match := map[string]string{"If-Match": `"` + current.ETag + `"`}
+			admin.request("DELETE", path, nil, match, 409, nil)
+			admin.request("POST", path+"/disable", nil, match, 200, nil)
+			admin.request("GET", path+"/delete-preview", nil, match, 204, nil)
+			outsider.request("DELETE", path, nil, match, 404, nil)
+			admin.request("DELETE", path, nil, match, 204, nil)
+			admin.request("DELETE", path, nil, match, 204, nil)
+			admin.request("GET", path, nil, nil, 404, nil)
+		}
 	}
 	states := publish(c.Definition{Kind: c.KindEnum, Name: "工单状态", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待办"}, {Code: "legacy", Label: "旧状态"}}}})
 	code, state, note := c.NewID(), c.NewID(), c.NewID()
