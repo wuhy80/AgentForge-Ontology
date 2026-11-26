@@ -108,7 +108,15 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 			if _, rollbackErr := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT lifecycle_notice"); rollbackErr != nil {
 				return rollbackErr
 			}
-			_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=TRUE WHERE "+lifecycleStageScope+" AND id=?", p.TenantID, schemaID, recordID, runID)
+			code := "delivery_failed"
+			var failure *apiError
+			if errors.As(err, &failure) {
+				switch failure.code {
+				case "authorization_unavailable", "authorization_changed", "lifecycle_notice_budget":
+					code = failure.code
+				}
+			}
+			_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=TRUE,notification_failure_code=? WHERE "+lifecycleStageScope+" AND id=?", code, p.TenantID, schemaID, recordID, runID)
 			return err
 		}
 		return nil
@@ -210,7 +218,7 @@ func (h *handler) retryLifecycleNotice(w http.ResponseWriter, r *http.Request) {
 		if err := h.notifyLifecycleFollowers(ctx, tx, p, d, recordID, runID); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=FALSE WHERE "+lifecycleStageScope+" AND id=?",
+		_, err = tx.ExecContext(ctx, "UPDATE af_data_record_lifecycle_runs SET notification_failed=FALSE,notification_failure_code='' WHERE "+lifecycleStageScope+" AND id=?",
 			p.TenantID, schemaID, recordID, runID)
 		return err
 	})
@@ -282,7 +290,7 @@ func readLifecycleStage(ctx context.Context, tx *sql.Tx, tenant, schema, record 
 }
 
 func readLifecycleHistory(ctx context.Context, tx *sql.Tx, p c.Principal, schema, record string, l *c.SchemaLifecycle, view *c.RecordLifecycle) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id,transition_id,from_stage_id,to_stage_id,note,created_at,notification_failed,actor FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" ORDER BY created_at DESC,id DESC LIMIT ?",
+	rows, err := tx.QueryContext(ctx, "SELECT id,transition_id,from_stage_id,to_stage_id,note,created_at,notification_failed,notification_failure_code,actor FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" ORDER BY created_at DESC,id DESC LIMIT ?",
 		p.TenantID, schema, record, c.MaxLifecycleHistory+1)
 	if err != nil {
 		return err
@@ -292,7 +300,7 @@ func readLifecycleHistory(ctx context.Context, tx *sql.Tx, p c.Principal, schema
 		var run c.LifecycleRun
 		var at time.Time
 		var actor string
-		if err := rows.Scan(&run.ID, &run.TransitionID, &run.From, &run.To, &run.Note, &at, &run.NotificationFailed, &actor); err != nil {
+		if err := rows.Scan(&run.ID, &run.TransitionID, &run.From, &run.To, &run.Note, &at, &run.NotificationFailed, &run.NotificationFailureCode, &actor); err != nil {
 			return err
 		}
 		run.At = at.UTC().Format(time.RFC3339Nano)

@@ -55,4 +55,5 @@ actor varbinary(255) NOT NULL, note varchar(2048) NOT NULL, created_at datetime(
 PRIMARY KEY(tenant_id,schema_id,entity_id,id),
 KEY run_order(tenant_id,schema_id,entity_id,created_at,id)) ENGINE=InnoDB`},
 	{ID: "023_data_lifecycle_notice_failure", SQL: `ALTER TABLE af_data_record_lifecycle_runs ADD COLUMN notification_failed BOOLEAN NOT NULL DEFAULT FALSE`},
+	{ID: "024_data_lifecycle_notice_failure_code", SQL: `ALTER TABLE af_data_record_lifecycle_runs ADD COLUMN notification_failure_code VARCHAR(32) NOT NULL DEFAULT ''`},
 }, SavedQueryMigrations...)

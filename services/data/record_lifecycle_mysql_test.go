@@ -192,7 +192,7 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 
 	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
 	view := f.lifecycle(row.ID, 200)
-	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || (!view.History[0].NotificationFailed || !view.History[0].NotificationRetryAllowed) {
+	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || (!view.History[0].NotificationFailed || !view.History[0].NotificationRetryAllowed || view.History[0].NotificationFailureCode != "delivery_failed") {
 		t.Fatalf("expected committed transition and visible notification failure: %+v", view)
 	}
 	runID := view.History[0].ID
@@ -224,7 +224,7 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 	f.call("POST", retry, nil, "", 204)
 	f.call("POST", retry, nil, "", 204)
 	view = f.lifecycle(row.ID, 200)
-	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || view.History[0].NotificationFailed {
+	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || view.History[0].NotificationFailed || view.History[0].NotificationFailureCode != "" {
 		t.Fatalf("retry should only clear the failure: %+v", view)
 	}
 	var count int
@@ -275,7 +275,7 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	f.handler = NewHandler(config)
 	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
 	view := f.lifecycle(row.ID, 200)
-	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || !view.History[0].NotificationRetryAllowed {
+	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || !view.History[0].NotificationRetryAllowed || view.History[0].NotificationFailureCode != "authorization_unavailable" {
 		t.Fatalf("expected committed transition with retry available: %+v", view)
 	}
 	run := view.History[0].ID

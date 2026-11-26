@@ -60,5 +60,6 @@ type LifecycleRun struct {
 	Note                     string `json:"note,omitempty"`
 	At                       string `json:"at"`
 	NotificationFailed       bool   `json:"notificationFailed,omitempty"`
+	NotificationFailureCode  string `json:"notificationFailureCode,omitempty"`
 	NotificationRetryAllowed bool   `json:"notificationRetryAllowed,omitempty"`
 }
