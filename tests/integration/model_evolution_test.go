@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,25 @@ type lifecycleFixtureRunner struct {
 type lifecycleFixtureStore struct {
 	*execution.SQLStore
 	beforeClaim, releaseClaim chan struct{}
+}
+
+type lifecycleFixtureMetadata struct {
+	*execution.RemoteMetadata
+	target       atomic.Pointer[string]
+	read, resume chan struct{}
+}
+
+func (m *lifecycleFixtureMetadata) Current(ctx context.Context, tenant, id string) (c.CurrentDefinition, error) {
+	definition, err := m.RemoteMetadata.Current(ctx, tenant, id)
+	if target := m.target.Load(); err == nil && target != nil && *target == id && m.target.CompareAndSwap(target, nil) {
+		close(m.read)
+		select {
+		case <-m.resume:
+		case <-ctx.Done():
+			return c.CurrentDefinition{}, ctx.Err()
+		}
+	}
+	return definition, err
 }
 
 const lateLifecycleClaimKey = "late-lifecycle-claim"
@@ -100,6 +120,9 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			if _, err := execStore.DB.Exec("DELETE FROM af_execution_invocations WHERE tenant_id=?", tenant); err != nil {
 				t.Error("clean isolated execution fixture")
 			}
+			if _, err := execStore.DB.Exec("DELETE FROM af_execution_job_admissions WHERE tenant_id=?", tenant); err != nil {
+				t.Error("clean isolated execution admissions")
+			}
 		}
 		for _, id := range []string{tenant, foreign} {
 			cleanupOntologyTenant(t, me, de, id)
@@ -162,10 +185,16 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	executionURL := ""
 	runner := lifecycleFixtureRunner{started: make(chan struct{}, 2), release: make(chan struct{})}
 	claimStore := lifecycleFixtureStore{execStore, make(chan struct{}), make(chan struct{})}
+	execMetadata := &lifecycleFixtureMetadata{
+		RemoteMetadata: &execution.RemoteMetadata{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()},
+		read:           make(chan struct{}), resume: make(chan struct{}),
+	}
 	if execStore != nil {
+		workerCtx, stopWorker := context.WithCancel(ctx)
+		defer stopWorker()
 		app := execution.NewHandler(execution.Config{
-			Store: claimStore, ServiceToken: serviceToken, Runner: runner, Authorizer: authorizer, SessionChecker: checker,
-			Metadata: &execution.RemoteMetadata{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()},
+			WorkerContext: workerCtx, Store: claimStore, ServiceToken: serviceToken, Runner: runner, Authorizer: authorizer, SessionChecker: checker,
+			Metadata: execMetadata,
 		})
 		server := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, false, checker, app))
 		t.Cleanup(server.Close)
@@ -242,19 +271,29 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			headers := admin.request("PUT", policyURL, policy.Current, map[string]string{"If-Match": `"` + policy.ETag + `"`}, 200, nil)
 			admin.request("POST", policyURL+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
 			admin = login(tenant, "admin")
-			for _, late := range []bool{false, true} {
+			for _, mode := range []string{"running", "late-sync", "late-async"} {
+				late, async := mode != "running", mode == "late-async"
 				name, key, reached := "Running deletion function", c.NewID(), runner.started
-				if late {
+				if async {
+					name, reached = "Late asynchronous deletion function", execMetadata.read
+				} else if late {
 					name, key, reached = "Late deletion function", lateLifecycleClaimKey, claimStore.beforeClaim
 				}
 				item := publish(c.Definition{Kind: c.KindFunction, Name: name, Function: &c.Callable{
 					SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 30, Source: "def main(inputs):\n    return {}\n"},
 				}})
 				path := definitionURL(item.Definition.ID)
+				if async {
+					execMetadata.target.Store(&item.Definition.ID)
+				}
 				match := map[string]string{"If-Match": `"` + item.ETag + `"`}
 				callContext, cancelCall := context.WithCancel(ctx)
 				defer cancelCall()
-				req, err := http.NewRequestWithContext(callContext, "POST", executionURL+"/execution/invocations", strings.NewReader(`{"definitionId":"`+item.Definition.ID+`","input":{}}`))
+				body, err := json.Marshal(c.InvocationRequest{DefinitionID: item.Definition.ID, Async: async, Input: map[string]json.RawMessage{}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req, err := http.NewRequestWithContext(callContext, "POST", executionURL+"/execution/invocations", bytes.NewReader(body))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -286,7 +325,11 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 				admin.request("POST", path+"/disable", nil, match, 200, nil)
 				if late {
 					admin.request("DELETE", path, nil, match, 204, nil)
-					close(claimStore.releaseClaim)
+					if async {
+						close(execMetadata.resume)
+					} else {
+						close(claimStore.releaseClaim)
+					}
 				} else {
 					var blocker c.Error
 					admin.request("DELETE", path, nil, match, 409, &blocker)
@@ -297,20 +340,31 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 				}
 				select {
 				case status := <-done:
-					if status != 403 && status != 404 && status != 409 {
+					if async && status != 202 || !async && status != 403 && status != 404 && status != 409 {
 						t.Fatalf("disabled definition did not block result delivery: HTTP %d", status)
 					}
 				case <-time.After(10 * time.Second):
 					t.Fatal("running invocation did not finish")
 				}
 				if late {
+					record, err := execStore.FindKey(ctx, tenant, session.User.ID, key)
+					if async {
+						deadline := time.Now().Add(8 * time.Second)
+						for err == nil && record.Invocation.Status != "failed" && time.Now().Before(deadline) {
+							time.Sleep(25 * time.Millisecond)
+							record, err = execStore.FindKey(ctx, tenant, session.User.ID, key)
+						}
+					}
 					select {
 					case <-runner.started:
 						t.Fatal("late claim launched the deleted definition")
 					default:
 					}
-					record, err := execStore.FindKey(ctx, tenant, session.User.ID, key)
-					if err != nil || record.Invocation.Status != "failed" || record.Invocation.Error == nil || record.Invocation.Error.Code != "authorization_changed" {
+					code := "authorization_changed"
+					if async {
+						code = "authorization_or_definition_changed"
+					}
+					if err != nil || record.Invocation.Status != "failed" || record.Invocation.Error == nil || record.Invocation.Error.Code != code {
 						t.Fatal("late claim did not persist terminal authorization failure")
 					}
 				} else {
