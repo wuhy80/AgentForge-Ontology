@@ -206,6 +206,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	for _, operation := range []string{"instance.read", "instance.query"} {
 		policy.Current.Rules = append(policy.Current.Rules, c.PermissionRule{ID: c.NewID(), RoleID: role.ID, Effect: "allow", Operation: operation, ResourceID: workflow.Definition.ID, ReadFields: []string{"*"}})
 	}
+	policy.Current.Rules = append(policy.Current.Rules, c.PermissionRule{ID: c.NewID(), RoleID: role.ID, Effect: "allow", Operation: "instance.patch", ResourceID: workflow.Definition.ID, WriteFields: []string{field}})
 	policyHeaders := admin.request("PUT", policyURL, policy.Current, map[string]string{"If-Match": `"` + policy.ETag + `"`}, 200, nil)
 	admin.request("POST", policyURL+"/publish", nil, map[string]string{"If-Match": policyHeaders.Get("ETag")}, 200, nil)
 	admin = login(tenant, "admin")
@@ -259,6 +260,37 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	if len(notices.Data) != 1 || !notices.Data[0].Read || notices.Unread == nil || notices.Unread.Count != 0 {
 		t.Fatalf("marking the stage notice read did not update the inbox: %+v", notices)
 	}
+	t.Run("RecordCommentReplies", func(t *testing.T) {
+		// Keep request failures associated with this subtest.
+		admin, reader, outsider := *admin, *reader, *outsider
+		admin.t, reader.t, outsider.t = t, t, t
+		recordPath := workflowURL + "/" + workflowRecord.ID
+		thread := recordPath + "/comments"
+		input := map[string]string{"body": "Please review", "requestId": c.NewID()}
+		var parent, replay, reply c.RecordComment
+		reader.request("POST", thread, input, nil, 201, &parent)
+		reader.request("POST", thread, input, nil, 200, &replay)
+		if replay.ID != parent.ID || parent.Author != recipient.ID {
+			t.Fatal("comment author or replay identity changed")
+		}
+		admin.request("POST", thread, map[string]string{"body": "Reviewed", "requestId": c.NewID(), "parentId": parent.ID}, nil, 201, &reply)
+		reader.request("PATCH", thread+"/"+parent.ID, map[string]string{"body": "Review requested"}, map[string]string{"If-Match": "\"" + parent.ETag + "\""}, 204, nil)
+		outsider.request("GET", thread, nil, nil, 404, nil)
+		inboxPath := dataServer.URL + "/data/inbox/comment-replies"
+		type inboxItem struct{ ID, RecordID string }
+		var inbox struct{ Data []inboxItem }
+		reader.request("GET", inboxPath, nil, nil, 200, &inbox)
+		if len(inbox.Data) != 1 || inbox.Data[0].ID != reply.ID || inbox.Data[0].RecordID != workflowRecord.ID {
+			t.Fatal("reply did not reach the original author")
+		}
+		mark := recordPath + "/comment-replies/" + reply.ID
+		reader.request("PUT", mark, nil, nil, 204, nil)
+		reader.request("PUT", mark, nil, nil, 204, nil)
+		reader.request("GET", inboxPath, nil, nil, 200, &inbox)
+		if len(inbox.Data) != 0 {
+			t.Fatal("read reply remained in the unread inbox")
+		}
+	})
 	states := publish(c.Definition{Kind: c.KindEnum, Name: "工单状态", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待办"}, {Code: "legacy", Label: "旧状态"}}}})
 	code, state, note := c.NewID(), c.NewID(), c.NewID()
 	schema := publish(c.Definition{Kind: c.KindSchema, Name: "工单", Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: code, Name: "代码", DataType: "string", Required: true}, {ID: state, Name: "状态", DataType: "string", Required: true, EnumID: states.Definition.ID}, {ID: note, Name: "备注", DataType: "string", Nullable: true}}}})
