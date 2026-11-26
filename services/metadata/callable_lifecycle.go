@@ -238,6 +238,8 @@ func (h *handler) checkManagedStorage(ctx context.Context, d c.Definition, route
 			switch conflict.Code {
 			case "definition_data_in_use":
 				return problem(409, conflict.Code, "定义仍有业务数据")
+			case "definition_retained_records":
+				return problem(409, conflict.Code, "定义仍有保留的业务记录")
 			case "definition_saved_query_in_use":
 				return problem(409, conflict.Code, "仍有保存查询引用此定义")
 			case "mapping_unavailable":

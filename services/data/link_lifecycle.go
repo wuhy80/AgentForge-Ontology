@@ -93,7 +93,7 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 						return err
 					}
 					if retained {
-						return problem(409, "definition_data_in_use", "定义仍有保留的业务记录")
+						return problem(409, "definition_retained_records", "定义仍有保留的业务记录")
 					}
 				}
 			}

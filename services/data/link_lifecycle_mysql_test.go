@@ -113,7 +113,7 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		}
 		for _, preview := range []bool{true, false} {
 			w := invokeRoute("managed-storage-delete-check", false, preview, 409)
-			if !bytes.Contains(w.Body.Bytes(), []byte("definition_data_in_use")) {
+			if !bytes.Contains(w.Body.Bytes(), []byte("definition_retained_records")) {
 				t.Errorf("%s did not block deletion: %s", seed.table, w.Body)
 			}
 		}

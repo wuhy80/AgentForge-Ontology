@@ -47,7 +47,7 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		}
 		if strings.HasSuffix(r.URL.Path, "/managed-storage-delete-check") {
 			if blockDelete.Load() {
-				writeJSON(w, 409, c.Error{Code: "definition_data_in_use"})
+				writeJSON(w, 409, c.Error{Code: "definition_retained_records"})
 			} else {
 				w.WriteHeader(204)
 			}
@@ -273,7 +273,7 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	var deletionBlocker c.Error
 	request("DELETE", disposablePath, disposableSchema.ETag, nil, 409, &deletionBlocker)
 	request("GET", disposablePath, "", nil, 200, &schemaState)
-	if deletionBlocker.Code != "definition_data_in_use" || schemaState.Status != disabledDefinition {
+	if deletionBlocker.Code != "definition_retained_records" || schemaState.Status != disabledDefinition {
 		t.Fatalf("unexpected blocked deletion: %+v, status=%s", deletionBlocker, schemaState.Status)
 	}
 	blockDelete.Store(false)
