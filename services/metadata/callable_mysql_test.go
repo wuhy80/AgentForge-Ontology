@@ -302,6 +302,18 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	request("DELETE", enumDeletePath, deletableEnum.ETag, nil, 409, nil)
 	request("POST", enumDeletePath+"/disable", deletableEnum.ETag, nil, 200, nil)
 	request("GET", enumDeletePath+"/delete-preview", deletableEnum.ETag, nil, 204, nil)
+	request("POST", enumDeletePath+"/restore", deletableEnum.ETag, nil, 200, nil)
+	var restoredDeletion c.Error
+	request("DELETE", enumDeletePath, deletableEnum.ETag, nil, 409, &restoredDeletion)
+	if restoredDeletion.Code != "unsupported_delete_state" {
+		t.Fatalf("stale deletion preview bypassed current state check: %+v", restoredDeletion)
+	}
+	var restoredEnum c.CurrentDefinition
+	request("GET", enumDeletePath, "", nil, 200, &restoredEnum)
+	if restoredEnum.Status != "active" || restoredEnum.ETag != deletableEnum.ETag {
+		t.Fatalf("rejected deletion changed restored Enum: %+v", restoredEnum)
+	}
+	request("POST", enumDeletePath+"/disable", deletableEnum.ETag, nil, 200, nil)
 	setEnumPublicationStatus := func(status string) {
 		t.Helper()
 		if _, err := engine.DB().Exec("UPDATE af_meta_publications SET status=? WHERE tenant_id=? AND definition_id=?", status, tenant, deletableEnum.Definition.ID); err != nil {
