@@ -178,6 +178,29 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			admin.request("GET", path, nil, nil, 404, nil)
 		}
 	}
+	// Verify the published stage notification declaration survives the
+	// Metadata/Data boundary without appearing in the record workflow response.
+	from, to, move, account, field := c.NewID(), c.NewID(), c.NewID(), c.NewID(), c.NewID()
+	workflow := publish(c.Definition{Kind: c.KindSchema, Name: "WorkflowVerification", Schema: &c.Schema{
+		Mode: "schema_2_db", StorageLayout: "single",
+		Properties: []c.Property{{ID: field, Name: "Title", DataType: "string"}},
+		Lifecycle: &c.SchemaLifecycle{InitialStageID: from,
+			Stages:      []c.LifecycleStage{{ID: from, Name: "Draft"}, {ID: to, Name: "Review", NotifyAccountIDs: []string{account}}},
+			Transitions: []c.LifecycleTransition{{ID: move, Name: "Submit", From: from, To: to}}},
+	}})
+	if stages := workflow.Definition.Schema.Lifecycle.Stages; len(stages[1].NotifyAccountIDs) != 1 || stages[1].NotifyAccountIDs[0] != account {
+		t.Fatal("published stage notification configuration was lost")
+	}
+	workflowURL := dataServer.URL + "/data/schemas/" + workflow.Definition.ID + "/instances"
+	var workflowRecord c.Instance
+	admin.request("POST", workflowURL, c.WriteRequest{IdempotencyKey: c.NewID(), Values: map[string]json.RawMessage{field: raw("test")}}, nil, 201, &workflowRecord)
+	lifecycleURL := workflowURL + "/" + workflowRecord.ID + "/lifecycle"
+	admin.request("POST", lifecycleURL+"/transitions", map[string]string{"transitionId": move}, nil, 204, nil)
+	var flow c.RecordLifecycle
+	admin.request("GET", lifecycleURL, nil, nil, 200, &flow)
+	if flow.StageID != to || len(flow.History) != 1 || flow.History[0].NotificationFailed || len(flow.Stages[1].NotifyAccountIDs) != 0 {
+		t.Fatalf("unexpected workflow state: %+v", flow)
+	}
 	states := publish(c.Definition{Kind: c.KindEnum, Name: "工单状态", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "待办"}, {Code: "legacy", Label: "旧状态"}}}})
 	code, state, note := c.NewID(), c.NewID(), c.NewID()
 	schema := publish(c.Definition{Kind: c.KindSchema, Name: "工单", Schema: &c.Schema{Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: code, Name: "代码", DataType: "string", Required: true}, {ID: state, Name: "状态", DataType: "string", Required: true, EnumID: states.Definition.ID}, {ID: note, Name: "备注", DataType: "string", Nullable: true}}}})
