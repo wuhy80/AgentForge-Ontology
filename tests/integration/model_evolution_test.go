@@ -20,6 +20,7 @@ import (
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
 	"github.com/wuhy80/AgentForge-Ontology/libs/storage"
 	data "github.com/wuhy80/AgentForge-Ontology/services/data"
+	"github.com/wuhy80/AgentForge-Ontology/services/execution"
 	metadata "github.com/wuhy80/AgentForge-Ontology/services/metadata"
 	"github.com/wuhy80/AgentForge-Ontology/services/metadata/identity"
 )
@@ -42,6 +43,18 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		return engine
 	}
 	me, de := open(mdsn), open(ddsn)
+	var execStore *execution.SQLStore
+	executionURL := ""
+	if dsn := os.Getenv("ONTOLOGY_TEST_EXECUTION_DSN"); dsn != "" {
+		engine := open(dsn)
+		if err := storage.Migrate(ctx, engine.DB(), "execution", execution.Migrations); err != nil {
+			t.Fatal("explicit execution fixture migration")
+		}
+		execStore = &execution.SQLStore{DB: engine.DB()}
+		server := httptest.NewServer(execution.NewHandler(execution.Config{Store: execStore, ServiceToken: serviceToken}))
+		t.Cleanup(server.Close)
+		executionURL = server.URL
+	}
 	if err := storage.Migrate(ctx, me.DB(), "metadata", append(append([]storage.Migration{}, metadata.Migrations...), identity.Migrations...)); err != nil {
 		t.Fatal("explicit metadata fixture migration")
 	}
@@ -50,6 +63,11 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	}
 	tenant, foreign := "model-evolution-"+c.NewID(), "model-evolution-foreign-"+c.NewID()
 	t.Cleanup(func() {
+		if execStore != nil {
+			if _, err := execStore.DB.Exec("DELETE FROM af_execution_invocations WHERE tenant_id=?", tenant); err != nil {
+				t.Error("clean isolated execution fixture")
+			}
+		}
 		for _, id := range []string{tenant, foreign} {
 			cleanupOntologyTenant(t, me, de, id)
 			for _, table := range []string{"af_identity_user_group_members", "af_identity_user_groups", "af_identity_sessions", "af_identity_audit", "af_identity_users", "af_identity_roles", "af_identity_tenants"} {
@@ -102,7 +120,7 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		}
 		platform.WriteJSON(w, 200, result)
 	}))
-	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, CallablePolicyReferences: accounts, DataURL: dataServer.URL, ServiceToken: serviceToken, HTTPClient: dataServer.Client()}))
+	metaMux.Handle("/", metadata.NewHandler(metadata.Config{Engine: me, Authorizer: accounts, SessionChecker: accounts, CallablePolicyReferences: accounts, DataURL: dataServer.URL, ExecutionURL: executionURL, ServiceToken: serviceToken, HTTPClient: dataServer.Client()}))
 	roots := x509.NewCertPool()
 	roots.AddCert(metaServer.Certificate())
 	roots.AddCert(dataServer.Certificate())
@@ -164,6 +182,34 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			admin.request("GET", definitionURL(d.Definition.ID), nil, nil, 200, &draft)
 		}
 		return draft
+	}
+	if execStore != nil {
+		function := publish(c.Definition{Kind: c.KindFunction, Name: "Deletion function", Function: &c.Callable{SideEffects: "none"}})
+		path := definitionURL(function.Definition.ID)
+		match := map[string]string{"If-Match": `"` + function.ETag + `"`}
+		admin.request("POST", path+"/disable", nil, match, 200, nil)
+		admin.request("GET", path+"/delete-preview", nil, match, 204, nil)
+		// Model a durable claim arriving after preview from a caller that
+		// captured the old definition before the lifecycle change.
+		record := execution.Record{
+			TenantID: tenant, SubjectID: "fixture", RequestKey: c.NewID(), RequestHash: strings.Repeat("a", 64),
+			Implementation: function.Definition, DeadlineAt: time.Now().UTC().Add(time.Minute),
+			Invocation: c.Invocation{ID: c.NewID(), DefinitionID: c.NewID(), Kind: c.KindAction, Status: "running"},
+		}
+		if claimed, err := execStore.Claim(ctx, record); err != nil || !claimed {
+			t.Fatal("create isolated in-flight invocation")
+		}
+		var blocker c.Error
+		admin.request("DELETE", path, nil, match, 409, &blocker)
+		if blocker.Code != "definition_execution_in_use" {
+			t.Fatalf("unexpected in-flight deletion blocker: %s", blocker.Code)
+		}
+		record.Invocation.Status = "failed"
+		if finished, err := execStore.Finish(ctx, record); err != nil || !finished {
+			t.Fatal("finalize isolated in-flight invocation")
+		}
+		admin.request("DELETE", path, nil, match, 204, nil)
+		admin.request("POST", path+"/restore", nil, match, 404, nil)
 	}
 	// Verify managed deletion through both services.
 	{
