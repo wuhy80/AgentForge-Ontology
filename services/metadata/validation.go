@@ -372,10 +372,11 @@ func dependencyIDs(d contracts.Definition) []string {
 // compatibleUpdate supports display edits and separately checked safe additions.
 // Endpoint, constraint and existing storage changes require migration support.
 func compatibleUpdate(old, next contracts.Definition) error {
-	if old.ID != next.ID || old.TenantID != next.TenantID || old.Kind != next.Kind || old.CategoryID != next.CategoryID {
-		return problem(422, "unsupported_change", "定义不能改变类型或跨分类移动")
+	if old.ID != next.ID || old.TenantID != next.TenantID || old.Kind != next.Kind {
+		return problem(422, "unsupported_change", "定义不能改变身份或类型")
 	}
 	a, b := withoutDisplayMetadata(old), withoutDisplayMetadata(next)
+	a.CategoryID, b.CategoryID = "", ""
 	a.GroupID, b.GroupID = "", ""
 	if a.Kind == contracts.KindEnum && compatibleEnumUpdate(a, b) {
 		return nil

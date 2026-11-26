@@ -493,8 +493,13 @@ func (h *handler) saveDraft(w http.ResponseWriter, r *http.Request, p contracts.
 		if row.status == disabledDefinition {
 			return problem(409, "definition_disabled", "请先恢复定义再保存草稿")
 		}
-		if row.d.Kind != d.Kind || row.d.CategoryID != d.CategoryID {
-			return problem(422, "unsupported_change", "定义不能改变类型或跨分类移动")
+		if row.d.Kind != d.Kind {
+			return problem(422, "unsupported_change", "定义不能改变类型")
+		}
+		if row.d.CategoryID != d.CategoryID {
+			if err := h.authorize(r.Context(), p, "organization.edit", "", ""); err != nil {
+				return err
+			}
 		}
 		if err := validateOrg(r.Context(), tx, d); err != nil {
 			return err

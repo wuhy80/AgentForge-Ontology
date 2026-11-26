@@ -39,7 +39,7 @@ func (h *handler) publish(w http.ResponseWriter, r *http.Request, p contracts.Pr
 	if err := h.authorize(r.Context(), p, "definition.publish", id, ""); err != nil {
 		return err
 	}
-	pub, err := h.beginPublication(r.Context(), p.TenantID, id, r)
+	pub, err := h.beginPublication(r.Context(), p, id, r)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,8 @@ func (h *handler) publish(w http.ResponseWriter, r *http.Request, p contracts.Pr
 	return nil
 }
 
-func (h *handler) beginPublication(ctx context.Context, tenant, id string, r *http.Request) (publicationRow, error) {
+func (h *handler) beginPublication(ctx context.Context, p contracts.Principal, id string, r *http.Request) (publicationRow, error) {
+	tenant := p.TenantID
 	var pub publicationRow
 	err := h.cfg.Engine.WithTx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "INSERT IGNORE INTO af_meta_tenant_guards (tenant_id) VALUES (?)", tenant); err != nil {
@@ -132,7 +133,20 @@ func (h *handler) beginPublication(ctx context.Context, tenant, id string, r *ht
 			if pub.p.DefinitionID != id {
 				return problem(409, "publication_in_progress", "其他定义有未完成生效操作")
 			}
-			return matchHeader(r, pub.digest)
+			if err := matchHeader(r, pub.digest); err != nil {
+				return err
+			}
+			if pub.p.Status == "committed" || pub.p.Status == "activation_pending" {
+				return nil
+			}
+			var category string
+			if err := tx.QueryRowContext(ctx, "SELECT category_id FROM af_meta_definitions WHERE tenant_id=? AND id=?", tenant, id).Scan(&category); err != nil {
+				return err
+			}
+			if category != pub.candidate.CategoryID {
+				return h.authorize(ctx, p, "organization.edit", "", "")
+			}
+			return nil
 		}
 		row, err := scanDefinition(tx.QueryRowContext(ctx, "SELECT "+definitionColumns+" FROM af_meta_definitions WHERE tenant_id=? AND id=? FOR UPDATE", tenant, id))
 		if err != nil {
@@ -154,6 +168,11 @@ func (h *handler) beginPublication(ctx context.Context, tenant, id string, r *ht
 		}
 		if err := matchHeader(r, row.draftDigest); err != nil {
 			return err
+		}
+		if row.d.CategoryID != candidate.CategoryID {
+			if err := h.authorize(ctx, p, "organization.edit", "", ""); err != nil {
+				return err
+			}
 		}
 		if err := canonicalDefinition(&candidate, false); err != nil {
 			return err
@@ -390,7 +409,7 @@ func (h *handler) commitPublication(ctx context.Context, pub *publicationRow) er
 		}
 		raw, _ := json.Marshal(pub.candidate)
 		_, key, _ := normalizeName(pub.candidate.Name)
-		if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET current_json=?,current_digest=?,draft_json=NULL,draft_digest='',status='active',name=?,name_key=?,group_id=? WHERE tenant_id=? AND id=?", string(raw), pub.digest, pub.candidate.Name, []byte(key), pub.candidate.GroupID, pub.p.TenantID, pub.p.DefinitionID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET current_json=?,current_digest=?,draft_json=NULL,draft_digest='',status='active',name=?,name_key=?,category_id=?,group_id=? WHERE tenant_id=? AND id=?", string(raw), pub.digest, pub.candidate.Name, []byte(key), pub.candidate.CategoryID, pub.candidate.GroupID, pub.p.TenantID, pub.p.DefinitionID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM af_meta_dependencies WHERE tenant_id=? AND source_id=?", pub.p.TenantID, pub.p.DefinitionID); err != nil {

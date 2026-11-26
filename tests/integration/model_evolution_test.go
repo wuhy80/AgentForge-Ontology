@@ -238,6 +238,57 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 			admin.request("GET", path, nil, nil, 404, nil)
 		}
 	}
+	{
+		var destination, destinationGroup c.Organization
+		admin.request("POST", categoriesPath, map[string]string{"name": "Move destination"}, nil, 201, &destination)
+		admin.request("POST", groupsPath, map[string]string{"name": "Move destination group", "categoryId": destination.ID}, nil, 201, &destinationGroup)
+		field := c.NewID()
+		model := publish(c.Definition{Kind: c.KindSchema, Name: "Movable model", Schema: &c.Schema{
+			Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: field, Name: "Label", DataType: "string"}},
+		}})
+		path := definitionURL(model.Definition.ID)
+		instances := dataServer.URL + "/data/schemas/" + model.Definition.ID + "/instances"
+		var instance c.Instance
+		admin.request("POST", instances, c.WriteRequest{IdempotencyKey: c.NewID(), Values: map[string]json.RawMessage{field: raw("retained")}}, nil, 201, &instance)
+		candidate := definitionInput(model.Definition)
+		candidate.CategoryID = destination.ID
+		match := map[string]string{"If-Match": `"` + model.ETag + `"`}
+		admin.request("PUT", path+"/draft", candidate, match, 400, nil)
+		candidate.GroupID = destinationGroup.ID
+		collision := candidate
+		collision.ID = ""
+		var other c.CurrentDefinition
+		admin.request("POST", metaServer.URL+"/metadata/definitions", collision, nil, 201, &other)
+		var draft, current c.CurrentDefinition
+		admin.request("PUT", path+"/draft", candidate, match, 200, &draft)
+		admin.request("GET", path, nil, nil, 200, &current)
+		if current.Definition.CategoryID != category.ID {
+			t.Fatal("saving the draft changed the current category")
+		}
+		var occupied c.Error
+		admin.request("DELETE", groupsPath+"/"+destinationGroup.ID+"?previousName="+url.QueryEscape(destinationGroup.Name), nil, nil, 409, &occupied)
+		if occupied.Code != "organization_not_empty" {
+			t.Fatal("destination group was not reserved by the saved draft")
+		}
+		draftMatch := map[string]string{"If-Match": `"` + draft.ETag + `"`}
+		var conflict c.Error
+		admin.request("POST", path+"/publish", nil, draftMatch, 409, &conflict)
+		if conflict.Code != "name_conflict" {
+			t.Fatalf("unexpected target name conflict: %s", conflict.Code)
+		}
+		candidate.Name = "Moved model"
+		admin.request("PUT", path+"/draft", candidate, draftMatch, 200, &draft)
+		admin.request("POST", path+"/publish", nil, draftMatch, 412, nil)
+		admin.request("POST", path+"/publish", nil, map[string]string{"If-Match": `"` + draft.ETag + `"`}, 200, nil)
+		admin.request("GET", path, nil, nil, 200, &current)
+		if current.Definition.ID != model.Definition.ID || current.Definition.CategoryID != destination.ID || current.Definition.GroupID != destinationGroup.ID {
+			t.Fatal("published move changed identity or failed to update directory")
+		}
+		admin.request("GET", instances+"/"+instance.ID, nil, nil, 200, &instance)
+		if string(instance.Values[field]) != `"retained"` {
+			t.Fatal("published move lost existing data")
+		}
+	}
 	// Verify the published stage notification declaration survives the
 	// Metadata/Data boundary without appearing in the record workflow response.
 	var role c.Role
