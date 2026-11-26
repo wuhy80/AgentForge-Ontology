@@ -103,9 +103,10 @@ export function LayeredPanorama({ records, categories, groups, categoryId, layou
               <button type="button" key={definition.id} onClick={() => inspect(definition.id)}>{definition.name}<small>{definition.kind === 'schema' ? definition.schema?.tags?.join(' · ') : definition.kind === 'action' ? '动作' : '函数'}</small></button>)}</section>
           })}
           {!directory.length && <p className="muted">当前筛选下没有节点。</p>}
-        </div> : <>{inspector(setTag)}
-        {!!evidence.length && <div className="panorama-evidence"><h3>执行关联</h3>{evidence.map(item => <button type="button" className="button subtle" key={JSON.stringify(item)} onClick={() => inspect(item.id)}>{item.label} · {item.name}</button>)}</div>}
-        </>}
+        </div> : <div className="panorama-detail">
+          {inspector(setTag)}
+          {!!evidence.length && <div className="panorama-evidence"><h3>执行关联</h3>{evidence.map(item => <button type="button" className="button subtle" key={JSON.stringify(item)} onClick={() => inspect(item.id)}>{item.label} · {item.name}</button>)}</div>}
+        </div>}
       </aside>}
     </div>
   </div>

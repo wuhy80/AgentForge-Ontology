@@ -71,13 +71,14 @@ export function OntologyInspector({ record, records, categories, groups, categor
 
   return <article className="ontology-inspector" aria-label="本体资源详情">
     <header className="ontology-inspector-heading"><span className={`ontology-inspector-kind ontology-inspector-kind-${definition.kind}`}><Icon size={18} />{kindNames[definition.kind]}</span><span className="ontology-inspector-current">已生效</span><h2>{definition.name}</h2><p>{definition.description || '尚未填写业务说明。'}</p></header>
+    <div className="ontology-inspector-actions"><button type="button" className="button" onClick={() => onOpenDefinition(definition.id)}>查看定义<ArrowUpRight size={14} /></button>{definition.kind === 'schema' && <button type="button" className="button subtle" onClick={() => onQuery(definition.id)}><Search size={14} />查看数据</button>}</div>
+    <dl className="ontology-inspector-facts ontology-inspector-location"><div><dt>分类</dt><dd>{categoryName(definition.categoryId)}</dd></div><div><dt>分组</dt><dd>{groupName}</dd></div></dl>
+
     {filterTag && definition.schema && <section className="ontology-inspector-section panorama-schema-heading">
       <h3>Schema 标签 {definition.schema.panoramaLayer && <span>{definition.schema.panoramaLayer}</span>}</h3>
       <div className="model-tag-list">{definition.schema.tags?.map(tag => <button type="button" className="button subtle" key={tag} onClick={() => filterTag(tag)}>{tag}</button>)}
         <button type="button" className="button subtle" onClick={() => onEditClassification?.(definition.id)}>编辑标签与层位<ArrowUpRight size={13} /></button></div>
     </section>}
-    <div className="ontology-inspector-actions"><button type="button" className="button" onClick={() => onOpenDefinition(definition.id)}>查看定义<ArrowUpRight size={14} /></button>{definition.kind === 'schema' && <button type="button" className="button subtle" onClick={() => onQuery(definition.id)}><Search size={14} />查看数据</button>}</div>
-    <dl className="ontology-inspector-facts ontology-inspector-location"><div><dt>分类</dt><dd>{categoryName(definition.categoryId)}</dd></div><div><dt>分组</dt><dd>{groupName}</dd></div></dl>
 
     {definition.schema && <>
       <section className="ontology-inspector-section"><h3><Database size={15} />来源概要</h3><dl className="ontology-inspector-facts"><div><dt>建模方向</dt><dd>{definition.schema.mode === 'db_2_schema' ? '数据库为准' : '模型为准'}</dd></div><div><dt>来源方式</dt><dd>{definition.schema.storageBinding ? '显式来源映射' : '平台托管'}</dd></div>{definition.schema.storageBinding && <div><dt>主表</dt><dd><code>{[definition.schema.storageBinding.namespace, definition.schema.storageBinding.table].filter(Boolean).join('.')}</code></dd></div>}</dl><p className="ontology-inspector-muted">实际映射与数据源信息在定义页按权限查看。</p></section>

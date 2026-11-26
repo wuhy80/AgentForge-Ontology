@@ -98,7 +98,18 @@
 .panorama-index small { color: var(--muted); }
 .panorama-open { z-index: 5; position: absolute; right: 12px; top: 12px; }
 .panorama-layout[data-drawer=closed] .panorama-hud { right: 110px; }
-.panorama-evidence { display: grid; justify-items: start; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.panorama-detail { padding: 14px 5px; overflow-wrap: anywhere; }
+.panorama-detail .ontology-inspector-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 8px; }
+.panorama-detail .ontology-inspector-heading :is(h2, p) { grid-column: 1 / -1; }
+.panorama-detail .ontology-inspector-heading h2 { font-size: 19px; line-height: 1.4; }
+.panorama-detail .ontology-inspector-heading p { line-height: 1.75; }
+.panorama-detail .ontology-inspector-actions { margin: 12px 0; }
+.panorama-detail .ontology-inspector-location { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-bottom: 0; }
+.panorama-detail .ontology-inspector-location > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.panorama-detail .ontology-inspector-section, .panorama-evidence { margin-top: 12px; padding-top: 12px; }
+.panorama-detail .ontology-inspector-section h3 { margin-bottom: 8px; font-size: 13px; }
+.panorama-schema-heading .model-tag-list { margin-block: 0; }
+.panorama-evidence { display: grid; justify-items: start; gap: 8px; border-top: 1px solid var(--line); }
 .panorama-evidence h3 { margin: 0; font-size: 13px; }
 
 .panorama-layout [data-slab] { --slab-color: var(--muted); }
@@ -187,7 +198,6 @@
 .panorama-drop circle, .panorama-flow { fill: var(--accent); }
 .panorama-flow { pointer-events: none; }
 .panorama-layout .ontology-graph-toolbar button:disabled { opacity: .48; cursor: default; }
-.panorama-layout .ontology-inspector .panorama-schema-heading { padding-block: 8px 4px; }
 .panorama-schema-heading .model-tag-list .button { padding: 4px 7px; min-height: 26px; font-size: 11px; }
 .panorama-schema-heading .model-tag-list .button:not(:last-child) { color: var(--accent); background: var(--accent-soft); }
 @media (max-width: 600px) {
