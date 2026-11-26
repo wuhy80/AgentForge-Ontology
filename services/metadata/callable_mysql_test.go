@@ -189,6 +189,13 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	request("PUT", discardPath+"/draft", discard.ETag, discard.Definition, 404, nil)
+	reuseName := discard.Definition
+	reuseName.ID = ""
+	var reservedName c.Error
+	request("POST", "/metadata/definitions", "", reuseName, 409, &reservedName)
+	if reservedName.Code != "name_conflict" {
+		t.Fatalf("deleted draft did not reserve its name: %+v", reservedName)
+	}
 	var deletedEvents int
 	if err := engine.DB().QueryRow("SELECT COUNT(*) FROM af_meta_outbox WHERE tenant_id=? AND event_type='definition.deleted' AND object_id=?", tenant, discard.Definition.ID).Scan(&deletedEvents); err != nil || deletedEvents != 1 {
 		t.Fatalf("want one deletion audit event, got %d: %v", deletedEvents, err)
