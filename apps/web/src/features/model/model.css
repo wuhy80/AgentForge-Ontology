@@ -1,6 +1,6 @@
 .model-page { width: 100%; }
 .model-inline-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.model-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 22px 0; }
+.model-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 7px 0 22px; }
 .model-filter-controls { display: flex; align-items: center; gap: 12px; }
 .model-search { display: flex; align-items: center; gap: 10px; width: min(290px, 40vw); padding: 10px 13px; border: 1px solid var(--line); background: var(--surface); border-radius: 7px; color: var(--muted); }
 .model-search input { width: 100%; border: 0; background: transparent; font: inherit; font-size: 12px; outline: none; color: var(--ink); }
@@ -34,7 +34,7 @@
 .model-card-footer > span { font-size: 11px; color: var(--muted); }
 .model-card-footer > div { display: flex; gap: 4px; }
 .model-card-action.button { padding: 4px 5px; font-size: 11px; gap: 4px; }
-.model-page-list .model-toolbar { padding: 11px 0; }
+.model-page-list .model-toolbar { padding: 4px 0 11px; }
 .model-page-list .model-search { padding: 7px 10px; }
 .model-page-list .model-catalog-note { margin-top: 15px; }
 .model-list-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }

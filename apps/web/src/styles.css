@@ -848,7 +848,7 @@ td .icon-button {
   white-space: nowrap;
 }
 .main-content {
-  padding: 24px var(--workspace-gutter) 32px;
+  padding: 8px var(--workspace-gutter) 32px;
   flex: 1;
   min-width: 0;
   max-width: none;
@@ -1516,7 +1516,7 @@ textarea.field:disabled {
     padding: 23px 25px;
   }
   .main-content {
-    padding-top: 36px;
+    padding-top: 12px;
   }
   .topbar {
     height: 74px;
@@ -1536,7 +1536,7 @@ textarea.field:disabled {
     padding-right: var(--workspace-gutter);
   }
   .main-content {
-    padding: 27px var(--workspace-gutter);
+    padding: 9px var(--workspace-gutter) 27px;
   }
   .workspace-footer {
     margin-left: var(--workspace-gutter);
@@ -1671,7 +1671,7 @@ textarea.field:disabled {
     min-height: 62px;
   }
   .main-content {
-    padding: 25px var(--workspace-gutter);
+    padding: 8px var(--workspace-gutter) 25px;
   }
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1801,7 +1801,7 @@ textarea.field:disabled {
     font-size: 11px;
   }
   .main-content {
-    padding: 22px var(--workspace-gutter);
+    padding: 7px var(--workspace-gutter) 22px;
   }
   .stat-card {
     padding: 13px;
