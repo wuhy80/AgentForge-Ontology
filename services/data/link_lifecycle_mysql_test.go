@@ -13,9 +13,9 @@ import (
 func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 	f := newMutationFixture(t)
 	id := f.current.Definition.ID
-	invoke := func(restore, preview bool, expected int) *httptest.ResponseRecorder {
+	invokeRoute := func(route string, restore, preview bool, expected int) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest("POST", "/internal/definitions/"+id+"/managed-storage-lifecycle",
+		req := httptest.NewRequest("POST", "/internal/definitions/"+id+"/"+route,
 			bytes.NewReader(mustMutationJSON(t, c.ManagedLinkLifecycle{Digest: f.current.ETag, Restore: restore, Preview: preview})))
 		req.Header.Set("Authorization", "Bearer "+f.core.cfg.ServiceToken)
 		req.Header.Set("X-Tenant-ID", f.p.TenantID)
@@ -26,6 +26,10 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		}
 		return w
 	}
+	invoke := func(restore, preview bool, expected int) *httptest.ResponseRecorder {
+		return invokeRoute("managed-storage-lifecycle", restore, preview, expected)
+	}
+	invokeRoute("managed-storage-delete-check", false, true, 409)
 	if w := invoke(false, true, 204); w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("lifecycle preview must not be cached")
 	}
@@ -96,6 +100,7 @@ func TestMySQLManagedSchemaLifecycle(t *testing.T) {
 		t.Fatal("lifecycle preview must not be cached")
 	}
 	invoke(false, false, 204)
+	invokeRoute("managed-storage-delete-check", false, false, 204)
 	f.call("POST", "/instances", c.WriteRequest{IdempotencyKey: c.NewID(), Values: mutationValues("blocked")}, "", 409)
 	invoke(true, false, 204)
 	if _, err := f.engine.DB().ExecContext(ctx, "ALTER TABLE "+quote(tableName(id))+" ADD COLUMN lifecycle_drift INT NULL"); err != nil {

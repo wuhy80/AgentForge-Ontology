@@ -28,6 +28,11 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 		writeError(w, problem(422, "invalid_lifecycle", "定义标识或摘要无效"))
 		return
 	}
+	deletionCheck := r.Pattern == "POST /internal/definitions/{id}/managed-storage-delete-check"
+	if deletionCheck && command.Restore {
+		writeError(w, problem(422, "invalid_lifecycle", "删除检查不能请求恢复"))
+		return
+	}
 	ctx := r.Context()
 	check := func(tx *sql.Tx) error {
 		statement := "SELECT definition,digest,status FROM af_data_gates WHERE tenant_id=? AND definition_id=?"
@@ -41,6 +46,9 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 		}
 		if err != nil {
 			return err
+		}
+		if deletionCheck && status != "lifecycle_paused" {
+			return problem(409, "mapping_unavailable", "删除检查要求存储已停用")
 		}
 		var definition c.Definition
 		if err := json.Unmarshal([]byte(raw), &definition); err != nil {
@@ -83,7 +91,7 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			}
 			next = "lifecycle_paused"
 		}
-		if !command.Preview && status != next {
+		if !deletionCheck && !command.Preview && status != next {
 			_, err = tx.ExecContext(ctx, "UPDATE af_data_gates SET status=? WHERE tenant_id=? AND definition_id=?", next, tenant, id)
 		}
 		return err

@@ -87,6 +87,7 @@ func NewHandler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /internal/definitions/{id}/storage-impact", h.storageImpactHTTP)
 	mux.HandleFunc("POST /internal/definitions/{id}/managed-link-lifecycle", h.managedLinkLifecycleHTTP)
 	mux.HandleFunc("POST /internal/definitions/{id}/managed-storage-lifecycle", h.managedLinkLifecycleHTTP)
+	mux.HandleFunc("POST /internal/definitions/{id}/managed-storage-delete-check", h.managedLinkLifecycleHTTP)
 	mux.HandleFunc("POST /internal/publications/prepare", h.prepare)
 	mux.HandleFunc("POST /internal/publications/activate", h.activate)
 	mux.HandleFunc("POST /internal/publications/preview", h.preview)
