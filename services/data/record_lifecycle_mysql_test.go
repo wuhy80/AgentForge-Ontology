@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -286,17 +287,17 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	f.p.Subject = actor
 	config := f.core.cfg
 	authorizer := config.Authorizer
-	checkedSecond := false
+	var checkedSecond atomic.Bool
 	revoked := false
 	waitForDeliveryDeadline := true
 	config.Authorizer = authorizerFunc(func(ctx context.Context, p c.Principal, req c.AuthorizationRequest) (c.Decision, error) {
 		if p.Subject == second && req.Operation == "instance.read" {
-			checkedSecond = true
+			checkedSecond.Store(true)
 		}
 		if p.Subject == first && req.Operation == "instance.read" && revoked {
 			return c.Decision{Allow: false}, nil
 		}
-		if checkedSecond && p.Subject == first && req.Operation == "instance.read" {
+		if checkedSecond.Load() && p.Subject == first && req.Operation == "instance.read" {
 			if waitForDeliveryDeadline {
 				select {
 				case <-ctx.Done():
@@ -329,11 +330,24 @@ func TestMySQLRecordLifecycleRecipientAuthorizationFailureRollsBackNotices(t *te
 	f.call("POST", retry, nil, "", 503)
 	countNotices(0)
 	revoked = true
-	worker := &handler{cfg: config, client: f.core.client}
+	start := make(chan struct{})
+	results := make(chan error, 2)
 	for range 2 {
-		if err := worker.retryLifecycleBatch(context.Background()); err != nil {
-			t.Fatal(err)
+		worker := &handler{cfg: config, client: f.core.client}
+		go func() {
+			<-start
+			results <- worker.retryLifecycleBatch(context.Background())
+		}()
+	}
+	close(start)
+	var scanErrors []error
+	for range 2 {
+		if err := <-results; err != nil {
+			scanErrors = append(scanErrors, err)
 		}
+	}
+	if len(scanErrors) > 0 {
+		t.Fatalf("concurrent scans failed: %v", scanErrors)
 	}
 	countNotices(1)
 	if f.lifecycle(row.ID, 200).History[0].NotificationFailed {
