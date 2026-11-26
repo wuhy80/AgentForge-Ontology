@@ -246,6 +246,16 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		model := publish(c.Definition{Kind: c.KindSchema, Name: "Movable model", Schema: &c.Schema{
 			Mode: "schema_2_db", StorageLayout: "single", Properties: []c.Property{{ID: field, Name: "Label", DataType: "string"}},
 		}})
+		link := publish(c.Definition{Kind: c.KindLink, Name: "Movable link", Link: &c.Link{
+			SourceSchemaID: model.Definition.ID, TargetSchemaID: model.Definition.ID,
+			ForwardName: "Next", ReverseName: "Previous", Cardinality: "1:N", OnDelete: "restrict",
+			StorageBinding: &c.LinkStorageBinding{Mode: "managed"},
+		}})
+		function := publish(c.Definition{Kind: c.KindFunction, Name: "Movable function", Function: &c.Callable{
+			SideEffects: "none", Runtime: &c.ScriptRuntime{Language: "python", Entrypoint: "main", TimeoutSeconds: 5, Source: "def main(inputs):\n    return {}\n"},
+		}})
+		action := publish(c.Definition{Kind: c.KindAction, Name: "Movable action", Action: &c.Callable{SideEffects: "none", FunctionID: function.Definition.ID}})
+		enum := publish(c.Definition{Kind: c.KindEnum, Name: "Movable enum", Enum: &c.Enum{Values: []c.EnumValue{{Code: "ready", Label: "Ready"}}}})
 		path := definitionURL(model.Definition.ID)
 		instances := dataServer.URL + "/data/schemas/" + model.Definition.ID + "/instances"
 		var instance c.Instance
@@ -287,6 +297,29 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		admin.request("GET", instances+"/"+instance.ID, nil, nil, 200, &instance)
 		if string(instance.Values[field]) != `"retained"` {
 			t.Fatal("published move lost existing data")
+		}
+		for _, item := range []c.CurrentDefinition{link, function, action, enum} {
+			path := definitionURL(item.Definition.ID)
+			candidate := definitionInput(item.Definition)
+			candidate.CategoryID, candidate.GroupID = destination.ID, destinationGroup.ID
+			var draft, moved c.CurrentDefinition
+			match := map[string]string{"If-Match": `"` + item.ETag + `"`}
+			admin.request("PUT", path+"/draft", candidate, match, 200, &draft)
+			admin.request("POST", path+"/publish", nil, map[string]string{"If-Match": `"` + draft.ETag + `"`}, 200, nil)
+			admin.request("GET", path, nil, nil, 200, &moved)
+			if moved.Definition.ID != item.Definition.ID || moved.Definition.CategoryID != destination.ID || moved.Definition.GroupID != destinationGroup.ID {
+				t.Fatalf("published %s move changed identity or failed to update directory", item.Definition.Kind)
+			}
+			switch item.Definition.Kind {
+			case c.KindLink:
+				if moved.Definition.Link.SourceSchemaID != model.Definition.ID || moved.Definition.Link.TargetSchemaID != model.Definition.ID {
+					t.Fatal("moved Link lost its endpoint bindings")
+				}
+			case c.KindAction:
+				if moved.Definition.Action.FunctionID != function.Definition.ID {
+					t.Fatal("moved Action lost its Function binding")
+				}
+			}
 		}
 	}
 	// Verify the published stage notification declaration survives the
