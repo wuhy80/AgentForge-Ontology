@@ -174,7 +174,7 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 
 	f.call("POST", "/instances/"+row.ID+"/lifecycle/transitions", lifecycleTransitionBody(lifecycleSubmitMove, ""), "", 204)
 	view := f.lifecycle(row.ID, 200)
-	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || !view.History[0].NotificationFailed {
+	if view.StageID != lifecycleReviewStage || len(view.History) != 1 || (!view.History[0].NotificationFailed || !view.History[0].NotificationRetryAllowed) {
 		t.Fatalf("expected committed transition and visible notification failure: %+v", view)
 	}
 	runID := view.History[0].ID
@@ -191,7 +191,7 @@ func TestMySQLRecordLifecycleNoticeFailurePreservesTransition(t *testing.T) {
 	f.mu.Unlock()
 	f.call("POST", retry, nil, "", 403)
 	view = f.lifecycle(row.ID, 200)
-	if len(view.History) != 1 || !view.History[0].NotificationFailed {
+	if len(view.History) != 1 || !view.History[0].NotificationFailed || view.History[0].NotificationRetryAllowed {
 		t.Fatalf("denied retry changed the failure state: %+v", view)
 	}
 	f.mu.Lock()

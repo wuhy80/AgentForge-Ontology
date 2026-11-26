@@ -65,7 +65,7 @@ func (h *handler) recordLifecycle(w http.ResponseWriter, r *http.Request) {
 			} else {
 				view.Available = available
 			}
-			return readLifecycleHistory(ctx, tx, p.TenantID, schemaID, recordID, l, &view)
+			return readLifecycleHistory(ctx, tx, p, schemaID, recordID, l, &view)
 		}
 		move, ok := lifecycleTransition(l, input.TransitionID)
 		if !ok {
@@ -221,9 +221,9 @@ func readLifecycleStage(ctx context.Context, tx *sql.Tx, tenant, schema, record 
 	return stageID, at.UTC().Format(time.RFC3339Nano), true, nil
 }
 
-func readLifecycleHistory(ctx context.Context, tx *sql.Tx, tenant, schema, record string, l *c.SchemaLifecycle, view *c.RecordLifecycle) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id,transition_id,from_stage_id,to_stage_id,note,created_at,notification_failed FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" ORDER BY created_at DESC,id DESC LIMIT ?",
-		tenant, schema, record, c.MaxLifecycleHistory+1)
+func readLifecycleHistory(ctx context.Context, tx *sql.Tx, p c.Principal, schema, record string, l *c.SchemaLifecycle, view *c.RecordLifecycle) error {
+	rows, err := tx.QueryContext(ctx, "SELECT id,transition_id,from_stage_id,to_stage_id,note,created_at,notification_failed,actor FROM af_data_record_lifecycle_runs WHERE "+lifecycleStageScope+" ORDER BY created_at DESC,id DESC LIMIT ?",
+		p.TenantID, schema, record, c.MaxLifecycleHistory+1)
 	if err != nil {
 		return err
 	}
@@ -231,10 +231,12 @@ func readLifecycleHistory(ctx context.Context, tx *sql.Tx, tenant, schema, recor
 	for rows.Next() {
 		var run c.LifecycleRun
 		var at time.Time
-		if err := rows.Scan(&run.ID, &run.TransitionID, &run.From, &run.To, &run.Note, &at, &run.NotificationFailed); err != nil {
+		var actor string
+		if err := rows.Scan(&run.ID, &run.TransitionID, &run.From, &run.To, &run.Note, &at, &run.NotificationFailed, &actor); err != nil {
 			return err
 		}
 		run.At = at.UTC().Format(time.RFC3339Nano)
+		run.NotificationRetryAllowed = run.NotificationFailed && actor == p.Subject && view.Available != nil
 		view.History = append(view.History, run)
 	}
 	if err := rows.Err(); err != nil {
