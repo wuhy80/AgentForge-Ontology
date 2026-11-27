@@ -67,7 +67,7 @@ export function ConnectionsPage({ api }: { api: ApiClient }) {
         if (!current()) return
         if (!result.connection?.id || typeof result.accessToken !== 'string' || !result.accessToken || result.accessToken.length > 4096) throw new Error('连接可能已创建，但凭据响应无效，请刷新目录核对后撤销该连接。')
         setDirectory((value) => value && { ...value, data: [...value.data, result.connection] })
-        setCreated(result); setName(''); setMessage('连接已创建。请保存本次显示的凭据。')
+        setCreated(result); setName(''); setMessage('Key 已生成，请保存本次显示的 Key。')
       } else if (revoking) {
         const id = revoking.id
         await api.revokeConnection(id, controller.signal)
@@ -91,30 +91,39 @@ export function ConnectionsPage({ api }: { api: ApiClient }) {
       await navigator.clipboard.writeText(created.accessToken)
       if (sequence === clipboardGeneration.current) { setCopied(true); setError('') }
     } catch {
-      if (sequence === clipboardGeneration.current) setError('无法访问剪贴板，请手动选择并复制凭据。')
+      if (sequence === clipboardGeneration.current) setError('无法访问剪贴板，请手动选择并复制 Key。')
     }
   }
 
   const config = directory ? `- id: mcp-ontology\n  name: '@deepseek-ai/dsh-mcp-client'\n  config:\n    serverName: ontology\n    transport: streamable-http\n    url: ${JSON.stringify(directory.resource)}\n    expandTemplates: true\n    headers:\n      Authorization: 'Bearer \${credential:ONTOLOGY_MCP_TOKEN}'` : ''
 
+  const apiURL = `${window.location.origin}/api/metadata/categories`
+  const apiExample = `curl -H "Authorization: Bearer <你的Key>" "${apiURL}"`
+
   return <div className="connections-page">
+    <section className="card connections-guide" aria-labelledby="third-party-keys-title">
+      <div className="connections-section-heading"><div><KeyRound size={19} /><h2 id="third-party-keys-title">第三方 Key</h2></div></div>
+      <p className="muted">外部应用可用 Key 直接调用 Ontology API。将 Key 放在请求的 Authorization 请求头中。</p>
+      <pre aria-label="Ontology API 调用示例">{apiExample}</pre>
+      <p className="field-hint">Key 仅能使用你勾选的能力，服务端仍会检查你当前的业务权限。</p>
+    </section>
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
     {loading ? <div className="card empty-state" role="status"><LoaderCircle className="spin" size={26} /><p>正在读取你的连接…</p></div> : !directory ? <div className="card empty-state"><ShieldCheck size={30} /><h2>连接管理暂不可用</h2><p className="muted">刷新后会重新检查当前登录状态和访问权限。</p></div> : <>
       {created && <section className="card connections-secret" aria-labelledby="new-connection-secret">
-        <div className="connections-section-heading"><div><KeyRound size={19} /><h2 id="new-connection-secret">保存连接凭据</h2></div><button type="button" className="icon-button" aria-label="关闭凭据显示" onClick={() => { setCreated(undefined); ++clipboardGeneration.current; setCopied(false) }}><X size={18} /></button></div>
+        <div className="connections-section-heading"><div><KeyRound size={19} /><h2 id="new-connection-secret">保存第三方 Key</h2></div><button type="button" className="icon-button" aria-label="关闭 Key 显示" onClick={() => { setCreated(undefined); ++clipboardGeneration.current; setCopied(false) }}><X size={18} /></button></div>
         <p>此凭据只显示一次。将它保存到外部应用的安全凭据存储；关闭或离开页面后无法再次读取。</p>
-        <label className="field">新连接凭据<textarea readOnly rows={2} spellCheck={false} value={created.accessToken} onFocus={(event) => event.target.select()} /></label>
-        <div className="connections-inline"><button type="button" className="button" onClick={() => void copyToken()}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? '已复制' : '复制凭据'}</button><span className="muted">到期：{dateOf(created.connection.expiresAt)}</span></div>
+        <label className="field">新生成的 Key<textarea readOnly rows={2} spellCheck={false} value={created.accessToken} onFocus={(event) => event.target.select()} /></label>
+        <div className="connections-inline"><button type="button" className="button" onClick={() => void copyToken()}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? '已复制' : '复制 Key'}</button><span className="muted">到期：{dateOf(created.connection.expiresAt)}</span></div>
       </section>}
       <div className="connections-layout">
-        <section className="card connections-create" aria-labelledby="create-connection-title"><div className="connections-section-heading"><div><Plus size={19} /><h2 id="create-connection-title">创建连接</h2></div></div>
+        <section className="card connections-create" aria-labelledby="create-connection-title"><div className="connections-section-heading"><div><Plus size={19} /><h2 id="create-connection-title">生成 Key</h2></div></div>
           <p className="muted">连接范围只是能力上限，实际访问仍受你的当前业务权限控制。</p>
           <form onSubmit={(event) => void mutate('create', event)}>
-            <label className="field">连接名称<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="例如：我的 DeepSeek Harness" required disabled={busy} /></label>
+            <label className="field">Key 名称<input value={name} onChange={(event) => setName(event.target.value)} maxLength={80} placeholder="例如：报表服务" required disabled={busy} /></label>
             <fieldset className="connections-scopes" disabled={busy}><legend>允许的能力</legend>{connectionScopes.map((scope) => <label key={scope.value}><input type="checkbox" disabled={scope.value === 'ontology:discover'} checked={scopes.includes(scope.value)} onChange={(event) => setScopes((previous) => event.target.checked ? [...previous, scope.value] : previous.filter((value) => value !== scope.value))} /><span><strong>{scope.name}</strong><small>{scope.description}</small></span></label>)}</fieldset>
             <label className="field">有效期<select value={lifetime} onChange={(event) => setLifetime(Number(event.target.value))} disabled={busy}><option value={3600}>1 小时</option><option value={86400}>1 天</option><option value={604800}>7 天</option><option value={2592000}>30 天</option></select></label>
-            <button type="submit" className="button primary" disabled={busy || !name.trim() || !scopes.length}>{busy ? <LoaderCircle className="spin" size={16} /> : <KeyRound size={16} />}创建连接凭据</button>
+            <button type="submit" className="button primary" disabled={busy || !name.trim() || !scopes.length}>{busy ? <LoaderCircle className="spin" size={16} /> : <KeyRound size={16} />}生成 Key</button>
           </form>
         </section>
         <section className="card connections-guide" aria-labelledby="connection-guide-title"><div className="connections-section-heading"><div><Link2 size={19} /><h2 id="connection-guide-title">连接 DeepSeek Harness</h2></div></div>
@@ -123,11 +132,11 @@ export function ConnectionsPage({ api }: { api: ApiClient }) {
           <pre aria-label="dsh MCP 配置示例">{config}</pre><p className="field-hint">示例仅引用凭据名称，不包含你的密钥。支持浏览器授权的客户端也可从客户端发起 OAuth 连接。</p>
         </section>
       </div>
-      <section className="card connections-list" aria-labelledby="my-connections-title"><div className="connections-section-heading"><div><Unplug size={19} /><h2 id="my-connections-title">我的连接</h2></div><div className="connections-inline"><span className="badge">{directory.data.length} 个</span><button type="button" className="button" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw size={15} />刷新连接</button></div></div>
-        {!directory.data.length ? <div className="empty-state"><Link2 size={29} /><h3>尚无外部连接</h3><p className="muted">创建连接后，可以随时在这里撤销访问。</p></div> : <ul>{directory.data.map((connection) => {
+      <section className="card connections-list" aria-labelledby="my-connections-title"><div className="connections-section-heading"><div><Unplug size={19} /><h2 id="my-connections-title">访问凭据</h2></div><div className="connections-inline"><span className="badge">{directory.data.length} 个</span><button type="button" className="button" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw size={15} />刷新连接</button></div></div>
+        {!directory.data.length ? <div className="empty-state"><Link2 size={29} /><h3>尚无访问凭据</h3><p className="muted">创建连接后，可以随时在这里撤销访问。</p></div> : <ul>{directory.data.map((connection) => {
           const expired = connection.expiresAt <= Math.floor(Date.now() / 1000)
           const status = connection.revokedAt ? '已撤销' : expired ? '已到期' : '有效'
-          return <li key={connection.id}><div className="connections-item-title"><strong>{connection.name}</strong><span className={`badge ${status === '有效' ? 'badge-green' : ''}`}>{status}</span></div><div className="connections-item-detail"><span>{connection.kind === 'oauth' ? '浏览器授权' : '连接凭据'}</span><span>{connection.scopes.map(scopeName).join('、')}</span></div><small className="muted">创建于 {dateOf(connection.createdAt)} · 到期 {dateOf(connection.expiresAt)}</small><button type="button" className="button subtle" disabled={busy || !!connection.revokedAt || expired} onClick={() => setRevoking(connection)} aria-label={`撤销连接：${connection.name}`}><Unplug size={14} />撤销连接</button></li>
+          return <li key={connection.id}><div className="connections-item-title"><strong>{connection.name}</strong><span className={`badge ${status === '有效' ? 'badge-green' : ''}`}>{status}</span></div><div className="connections-item-detail"><span>{connection.kind === 'oauth' ? '浏览器授权' : '第三方 Key'}</span><span>{connection.scopes.map(scopeName).join('、')}</span></div><small className="muted">创建于 {dateOf(connection.createdAt)} · 到期 {dateOf(connection.expiresAt)}</small><button type="button" className="button subtle" disabled={busy || !!connection.revokedAt || expired} onClick={() => setRevoking(connection)} aria-label={`撤销连接：${connection.name}`}><Unplug size={14} />撤销连接</button></li>
         })}</ul>}
       </section>
     </>}

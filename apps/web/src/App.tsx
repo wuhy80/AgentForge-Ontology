@@ -20,7 +20,7 @@ import {
   Sparkles,
   Workflow,
   Users,
-  KeyRound,
+  Settings,
   ListChecks,
 } from 'lucide-react'
 import { ApiClient, ApiError } from './lib/api'
@@ -41,7 +41,7 @@ import { JobsPage } from './features/execution/JobsPage'
 const QueryPage = lazy(() => import('./features/query/QueryPage').then((module) => ({ default: module.QueryPage })))
 const OntologyPage = lazy(() => import('./features/ontology/OntologyPage').then((module) => ({ default: module.OntologyPage })))
 
-type View = 'overview' | 'ontology' | 'panorama' | 'organizations' | 'sources' | 'models' | 'query' | 'admin' | 'connections' | 'oauth' | 'jobs'
+type View = 'overview' | 'ontology' | 'panorama' | 'organizations' | 'sources' | 'models' | 'query' | 'admin' | 'settings' | 'oauth' | 'jobs'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
 type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
@@ -65,13 +65,14 @@ const navGroups: { name: string; items: NavItem[] }[] = [
     { route: 'jobs', view: 'jobs', name: '我的任务', icon: ListChecks },
     { route: 'organizations', view: 'organizations', name: '分类与分组', icon: FolderTree },
     { route: 'admin', view: 'admin', name: '用户与权限', icon: Users, administrator: true },
-    { route: 'connections', view: 'connections', name: '外部连接', icon: KeyRound },
+    { route: 'settings', view: 'settings', name: '设置', icon: Settings },
   ] },
 ]
 
 function currentView(route = window.location.hash.slice(1)): View {
   const hash = route.split(/[/?]/)[0]
-  return hash === 'panorama' || hash === 'ontology' || hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' || hash === 'connections' || hash === 'oauth' || hash === 'jobs' ? hash : 'overview'
+  if (hash === 'connections') return 'settings'
+  return hash === 'panorama' || hash === 'ontology' || hash === 'organizations' || hash === 'sources' || hash === 'models' || hash === 'query' || hash === 'admin' || hash === 'settings' || hash === 'oauth' || hash === 'jobs' ? hash : 'overview'
 }
 
 function Brand({ light = false }: { light?: boolean }) {
@@ -437,7 +438,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
   const schemas = scopedCurrent.filter((record) => record.definition.kind === 'schema')
   const modelKind = modelRouteKind(route, entries)
   const isCurrentNav = (item: NavItem) => view === item.view && (!item.kind || item.kind === modelKind)
-  const title = navGroups.flatMap((group) => group.items).find(isCurrentNav)?.name ?? (view === 'oauth' ? '应用授权' : view === 'connections' ? '外部连接' : '工作空间')
+  const title = navGroups.flatMap((group) => group.items).find(isCurrentNav)?.name ?? (view === 'oauth' ? '应用授权' : '工作空间')
   return (
     <div className="app-layout">
       <a
@@ -636,9 +637,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
               <section hidden={view !== 'sources'}>
                 <SourcesPage api={session.api} administrator={session.account.user.administrator} active={view === 'sources'} />
               </section>
-              <section hidden={view !== 'connections'}>
-                <ConnectionsPage api={session.api} />
-              </section>
+              {view === 'settings' && <ConnectionsPage api={session.api} />}
               <section hidden={view !== 'query'}>
                 <DialogScope active={view === 'query'}>
                   {queryVisited.current && <Suspense fallback={<p className="muted">正在加载数据查询…</p>}><QueryPage

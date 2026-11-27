@@ -61,9 +61,9 @@ export function OAuthConsentPage({ api, account, route, onDisconnect, disconnect
       <div className="oauth-client"><strong>{preview.client.name}</strong><span>希望连接你的本体工作空间</span></div>
       <dl className="oauth-destinations"><div><dt>应用标识</dt><dd>{preview.client.clientId}</dd></div><div><dt>授权返回地址</dt><dd>{request.input.redirect_uri}</dd></div><div><dt>访问服务</dt><dd>{preview.resource}</dd></div></dl>
       <h2>应用请求以下能力</h2><ul className="oauth-scope-list">{preview.scopes.map((scope) => { const item = connectionScopes.find((option) => option.value === scope)!; return <li key={scope}><Check size={17} /><div><strong>{item.name}</strong><p className="muted">{item.description}</p></div></li> })}</ul>
-      <p className="oauth-boundary">应用获得的访问范围不会超过你的当前业务权限。你可以随时在“外部连接”撤销本次授权。</p>
+      <p className="oauth-boundary">应用获得的访问范围不会超过你的当前业务权限。你可以随时在「设置 → 第三方 Key」撤销本次授权。</p>
       <div className="oauth-actions"><button type="button" className="button" disabled={busy || disconnecting} onClick={() => void decide(false)}>拒绝</button><button type="button" className="button primary" disabled={busy || disconnecting} onClick={() => void decide(true)}>{busy ? <LoaderCircle className="spin" size={16} /> : <ArrowRight size={16} />}允许连接</button></div>
     </> : <p className="muted">没有有效的待授权请求。请回到外部应用重新发起连接。</p>}
-    <div className="oauth-footer"><a href="#connections"><ArrowLeft size={14} />返回我的连接</a><button type="button" className="button subtle" disabled={busy || disconnecting} onClick={() => void onDisconnect()}>切换账号</button></div>
+    <div className="oauth-footer"><a href="#settings"><ArrowLeft size={14} />返回设置</a><button type="button" className="button subtle" disabled={busy || disconnecting} onClick={() => void onDisconnect()}>切换账号</button></div>
   </section></main>
 }

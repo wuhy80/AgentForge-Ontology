@@ -108,4 +108,6 @@ Resources 可后续提供模型语义说明、受权对象内容或查询指南�
 - OAuth 已实现动态客户端注册、Authorization Code + PKCE S256、一次性五分钟授权码、严格回调地址与 resource 校验、撤销端点；refresh token 不支持。
 - 启动脚本已加入 18084 MCP 进程；本机 18083 已被已有系统 HTTP 监听占用，未修改该监听。服务入口不自动迁移，开发脚本先显式执行 Metadata -migrate，再启动服务。
 
-dsh 的连接 URL、凭据模板与完整环境变量见[MCP 服务说明](../services/mcp/README.md)。工作台“外部连接”只显示当前用户的个人连接及 OAuth 授权，可创建并撤销；连接密钥只在创建响应中显示一次。
+dsh 的连接 URL、凭据模板与完整环境变量见[MCP 服务说明](../services/mcp/README.md)。在工作台「数据与管理 → 设置 → 第三方 Key」生成和撤销个人 Key，也可查看已有 OAuth 授权。Key 只在创建时显示一次。外部应用可把它放入 `Authorization: Bearer <Key>` 请求头直接访问 Ontology 公开 API，例如同源网关的 `GET /api/metadata/categories`。可调用范围由 Key 的能力和当前用户权限共同决定。
+
+2026-11-27 设置页验证。前端 535 项测试、生产构建、7 条隔离 Edge 用例通过，截图复核桌面及 390px 的双主题；MySQL 26.7.0 隔离库通过外部凭据及 OAuth 生命周期测试。需要已知账号的工作台真实浏览器联调用例本次跳过。
