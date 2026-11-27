@@ -9,7 +9,13 @@ const messageOf = (cause: unknown) => cause instanceof Error ? cause.message : '
 const denied = (cause: unknown) => cause instanceof ApiError && (cause.status === 401 || cause.status === 403)
 const dateOf = (seconds: number) => Number.isFinite(seconds) ? new Date(seconds * 1000).toLocaleString('zh-CN', { hour12: false }) : '未知'
 
+const settingsTabs = [
+  { id: 'keys', label: '第三方 Key', icon: KeyRound },
+  { id: 'oauth', label: 'OAuth 授权', icon: ShieldCheck },
+] as const
+
 export function ConnectionsPage({ api }: { api: ApiClient }) {
+  const [tab, setTab] = useState<(typeof settingsTabs)[number]['id']>('keys')
   const [directory, setDirectory] = useState<ConnectionDirectory>()
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState<ConnectionScope[]>(['ontology:discover', 'ontology:query'])
@@ -100,13 +106,36 @@ export function ConnectionsPage({ api }: { api: ApiClient }) {
   const apiURL = `${window.location.origin}/api/metadata/categories`
   const apiExample = `curl -H "Authorization: Bearer <你的Key>" "${apiURL}"`
 
+  const entries = directory?.data.filter(item => (item.kind === 'oauth') === (tab === 'oauth')) ?? []
+  function selectTab(id: typeof tab) {
+    if (tab === id) return
+    setTab(id); setCreated(undefined); setCopied(false); setRevoking(undefined); setMessage(''); setError('')
+    ++clipboardGeneration.current
+  }
+
   return <div className="connections-page">
+    <div className="model-editor-tabs" role="tablist" aria-label="设置分类">
+      {settingsTabs.map(({ id, label, icon: Icon }, index) => <button key={id} role="tab" type="button"
+        id={`settings-tab-${id}`} aria-controls={`settings-panel-${id}`} aria-selected={tab === id}
+        tabIndex={tab === id ? 0 : -1} disabled={busy} onClick={() => selectTab(id)} onKeyDown={event => {
+          if (busy || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+          event.preventDefault()
+          const target = settingsTabs[event.key === 'Home' ? 0 : event.key === 'End' ? settingsTabs.length - 1
+            : (index + (event.key === 'ArrowRight' ? 1 : -1) + settingsTabs.length) % settingsTabs.length]
+          selectTab(target.id)
+          document.getElementById(`settings-tab-${target.id}`)?.focus()
+        }}><Icon size={16} aria-hidden="true" />{label}</button>)}
+    </div>
+    {settingsTabs.filter(item => item.id !== tab).map(({ id }) =>
+      <section key={id} id={`settings-panel-${id}`} role="tabpanel" aria-labelledby={`settings-tab-${id}`} hidden />)}
+    <section className="connections-panel" id={`settings-panel-${tab}`} role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
+    {tab === 'keys' &&
     <section className="card connections-guide" aria-labelledby="third-party-keys-title">
       <div className="connections-section-heading"><div><KeyRound size={19} /><h2 id="third-party-keys-title">第三方 Key</h2></div></div>
       <p className="muted">外部应用可用 Key 直接调用 Ontology API。将 Key 放在请求的 Authorization 请求头中。</p>
       <pre aria-label="Ontology API 调用示例">{apiExample}</pre>
       <p className="field-hint">Key 仅能使用你勾选的能力，服务端仍会检查你当前的业务权限。</p>
-    </section>
+    </section>}
     {error && <div className="notice notice-error" role="alert">{error}</div>}
     {message && <div className="notice notice-success" role="status"><Check size={16} />{message}</div>}
     {loading ? <div className="card empty-state" role="status"><LoaderCircle className="spin" size={26} /><p>正在读取你的连接…</p></div> : !directory ? <div className="card empty-state"><ShieldCheck size={30} /><h2>连接管理暂不可用</h2><p className="muted">刷新后会重新检查当前登录状态和访问权限。</p></div> : <>
@@ -116,7 +145,7 @@ export function ConnectionsPage({ api }: { api: ApiClient }) {
         <label className="field">新生成的 Key<textarea readOnly rows={2} spellCheck={false} value={created.accessToken} onFocus={(event) => event.target.select()} /></label>
         <div className="connections-inline"><button type="button" className="button" onClick={() => void copyToken()}>{copied ? <Check size={15} /> : <Copy size={15} />}{copied ? '已复制' : '复制 Key'}</button><span className="muted">到期：{dateOf(created.connection.expiresAt)}</span></div>
       </section>}
-      <div className="connections-layout">
+      {tab === 'keys' && <div className="connections-layout">
         <section className="card connections-create" aria-labelledby="create-connection-title"><div className="connections-section-heading"><div><Plus size={19} /><h2 id="create-connection-title">生成 Key</h2></div></div>
           <p className="muted">连接范围只是能力上限，实际访问仍受你的当前业务权限控制。</p>
           <form onSubmit={(event) => void mutate('create', event)}>
@@ -131,15 +160,16 @@ export function ConnectionsPage({ api }: { api: ApiClient }) {
           <label className="field">MCP 服务地址<input readOnly value={directory.resource} /></label>
           <pre aria-label="dsh MCP 配置示例">{config}</pre><p className="field-hint">示例仅引用凭据名称，不包含你的密钥。支持浏览器授权的客户端也可从客户端发起 OAuth 连接。</p>
         </section>
-      </div>
-      <section className="card connections-list" aria-labelledby="my-connections-title"><div className="connections-section-heading"><div><Unplug size={19} /><h2 id="my-connections-title">访问凭据</h2></div><div className="connections-inline"><span className="badge">{directory.data.length} 个</span><button type="button" className="button" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw size={15} />刷新连接</button></div></div>
-        {!directory.data.length ? <div className="empty-state"><Link2 size={29} /><h3>尚无访问凭据</h3><p className="muted">创建连接后，可以随时在这里撤销访问。</p></div> : <ul>{directory.data.map((connection) => {
+      </div>}
+      <section className="card connections-list" aria-labelledby="my-connections-title"><div className="connections-section-heading"><div><Unplug size={19} /><h2 id="my-connections-title">{tab === 'keys' ? '已生成的 Key' : '已授权的应用'}</h2></div><div className="connections-inline"><span className="badge">{entries.length} 个</span><button type="button" className="button" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw size={15} />刷新连接</button></div></div>
+        {!entries.length ? <div className="empty-state"><Link2 size={29} /><h3>{tab === 'keys' ? '尚未生成 Key' : '尚无 OAuth 授权'}</h3></div> : <ul>{entries.map((connection) => {
           const expired = connection.expiresAt <= Math.floor(Date.now() / 1000)
           const status = connection.revokedAt ? '已撤销' : expired ? '已到期' : '有效'
           return <li key={connection.id}><div className="connections-item-title"><strong>{connection.name}</strong><span className={`badge ${status === '有效' ? 'badge-green' : ''}`}>{status}</span></div><div className="connections-item-detail"><span>{connection.kind === 'oauth' ? '浏览器授权' : '第三方 Key'}</span><span>{connection.scopes.map(scopeName).join('、')}</span></div><small className="muted">创建于 {dateOf(connection.createdAt)} · 到期 {dateOf(connection.expiresAt)}</small><button type="button" className="button subtle" disabled={busy || !!connection.revokedAt || expired} onClick={() => setRevoking(connection)} aria-label={`撤销连接：${connection.name}`}><Unplug size={14} />撤销连接</button></li>
         })}</ul>}
       </section>
     </>}
+    </section>
     {revoking && <Dialog title="撤销外部连接" description={`撤销“${revoking.name}”后，此连接将无法继续访问当前租户。`} onClose={() => setRevoking(undefined)} closeDisabled={busy}><div className="dialog-actions"><button type="button" className="button" disabled={busy} onClick={() => setRevoking(undefined)}>取消</button><button type="button" className="button danger" disabled={busy} onClick={() => void mutate('revoke')}>{busy && <LoaderCircle className="spin" size={15} />}确认撤销</button></div></Dialog>}
   </div>
 }
