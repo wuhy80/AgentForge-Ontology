@@ -11,6 +11,18 @@ const deckWidth = 680
 const deckDepth = 270
 const cameras = { iso: [-.32, .53], front: [0, .28], top: [0, Math.PI / 2] } as const
 type Camera = readonly [number, number]
+type SavedScene = { name: string; start: string; end: string }
+
+function loadScenes(key: string): SavedScene[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
+    return Array.isArray(stored) ? stored.filter((item): item is SavedScene =>
+      item && typeof item.name === 'string' && typeof item.start === 'string' && typeof item.end === 'string').slice(0, 30) : []
+  } catch {
+    return []
+  }
+}
+
 type PathStep = { edge: OntologyGraphEdge; from: string; to: string }
 
 function findPath(edges: OntologyGraphEdge[], from: string, to: string) {
@@ -52,6 +64,7 @@ const unassigned = { id: '', name: '未分层' }
 type Props = Pick<OntologyGraphProps, 'records' | 'categories' | 'categoryId' | 'selectedId' | 'rootIds' | 'onSelect'> & {
   layers: { layers: { id: string; name: string }[]; assignments: Record<string, string> }
   groups: Organization[]
+  layoutScope: string
   focusRef?: Ref<(id: string) => void>
   hiddenLayers?: ReadonlySet<string>
   focusedGroup?: string
@@ -61,7 +74,7 @@ type Props = Pick<OntologyGraphProps, 'records' | 'categories' | 'categoryId' | 
 }
 
 export function OntologyLayerGraph({
-  records, categories, categoryId, selectedId, rootIds, onSelect, layers, groups, focusRef,
+  records, categories, categoryId, selectedId, rootIds, onSelect, layers, groups, layoutScope, focusRef,
   hiddenLayers, focusedGroup, showZones = true, showLabels = false, showAllEdges = false,
 }: Props) {
   const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode: 'dependencies', selectedId, rootIds, panorama: true, focusedGroup }),
@@ -74,6 +87,20 @@ export function OntologyLayerGraph({
   const camera = cameraOverride ?? defaultCamera
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const drag = useRef<{ x: number; y: number; camera: Camera; pan: typeof pan; translate: boolean }>(undefined)
+  const sceneKey = `agentforge:panorama-scenes:${JSON.stringify([layoutScope, categoryId])}`
+  const [scenes, setScenes] = useState(() => loadScenes(sceneKey))
+  const [sceneName, setSceneName] = useState('')
+  const [sceneNotice, setSceneNotice] = useState('')
+  const [activeStep, setActiveStep] = useState('')
+  function storeScenes(next: SavedScene[]) {
+    try {
+      localStorage.setItem(sceneKey, JSON.stringify(next))
+      setScenes(next)
+      setSceneNotice('场景列表已更新。')
+    } catch {
+      setSceneNotice('浏览器无法保存场景。')
+    }
+  }
   const [pathOpen, setPathOpen] = useState(false)
   const [pathStart, setPathStart] = useState('')
   const [pathEnd, setPathEnd] = useState('')
@@ -162,6 +189,7 @@ export function OntologyLayerGraph({
   const pathReady = pathOpen && !!startId && !!endId && startId !== endId
   const pathSteps = pathReady ? findPath(model.edges.filter(edge => placed.has(edge.source) && placed.has(edge.target)), startId, endId) : []
   const pathEdges = new Set(pathSteps.map(step => step.edge.id))
+  const stepsByEdge = new Map(pathSteps.map(step => [step.edge.id, step]))
   const pathNodes = new Set(pathSteps.flatMap(step => [step.from, step.to]))
   const pathOptions = pathOpen ? [...nodes].sort((a, b) => a.record.definition.name.localeCompare(b.record.definition.name, 'zh-CN')) : []
   const inGroup = (id: string) => !!focusedGroup && placed.get(id)?.record.definition.groupId === focusedGroup
@@ -177,12 +205,16 @@ export function OntologyLayerGraph({
     const selected = related(selectedId)
     const onPath = pathEdges.has(edge.id)
     const active = pathSteps.length ? onPath : selected || related(hoveredId)
+    const step = stepsByEdge.get(edge.id)
+    const reverse = !!step && step.from !== edge.source
+    const direction = selectedId === edge.target && selectedId !== edge.source ? 'incoming'
+      : selectedId === edge.source ? 'outgoing' : 'related'
     const labelVisible = !pathSteps.length && (edge.record.definition.id === selectedId && selected || nodes.length <= 12 && active)
     const inFocus = inGroup(edge.source) || inGroup(edge.target)
     const path = loop
       ? `M ${from.x - 18} ${from.y} Q ${x - 90} ${y}, ${x} ${y} Q ${x + 90} ${y}, ${to.x + 18} ${to.y}`
       : `M ${from.x} ${from.y} Q ${(from.x + x) / 2} ${y}, ${x} ${y} Q ${(to.x + x) / 2} ${y}, ${to.x} ${to.y}`
-    return [{ edge, x: x + (!loop && Math.abs(from.x - to.x) < 50 ? 28 : 0), y, selected, active, onPath, inFocus, path, labelVisible,
+    return [{ edge, x: x + (!loop && Math.abs(from.x - to.x) < 50 ? 28 : 0), y, selected, active, onPath, inFocus, path, labelVisible, reverse, direction,
       crossLayer: layerOf(edge.source) !== layerOf(edge.target) }]
   })
   const neighbors = new Set(edges.filter(item => item.active || item.inFocus).flatMap(({ edge }) => [edge.source, edge.target]))
@@ -220,9 +252,7 @@ export function OntologyLayerGraph({
     return [{ ...zone, x: anchor.x, y }]
   }) : []
 
-  function focusNode(id: string) {
-    const node = placed.get(id)
-    if (!node) return
+  function focusPoint(node: { x: number; y: number }) {
     setZoom(current => Math.max(1.4, current))
     requestAnimationFrame(() => {
       const area = viewport.current
@@ -230,6 +260,11 @@ export function OntologyLayerGraph({
       if (!area || !content) return
       area.scrollTo?.(node.x / graphWidth * content.clientWidth - area.clientWidth / 2, node.y / height * content.clientHeight - area.clientHeight / 2)
     })
+  }
+
+  function focusNode(id: string) {
+    const node = placed.get(id)
+    if (node) focusPoint(node)
   }
 
   useImperativeHandle(focusRef, () => focusNode)
@@ -260,7 +295,7 @@ export function OntologyLayerGraph({
       onContextMenu={event => event.preventDefault()}>
       {lanes.length > 0 ? <div ref={stage} className="ontology-lanes panorama-stage" style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}>
         <svg viewBox={`0 0 ${graphWidth} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-          <defs><marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 Z" fill="var(--edge)" /></marker></defs>
+          <defs><marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 Z" fill="context-stroke" /></marker><marker id={`${markerId}-reverse`} viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 10 0 L 0 5 L 10 10 Z" fill="var(--primary)" /></marker></defs>
           {!topView && decks.length > 1 && corners(-deckWidth / 2, deckWidth / 2, decks[0].elevation).map((corner, index) => {
             const cap = corners(-deckWidth / 2, deckWidth / 2, decks[decks.length - 1].elevation)[index]
             return <line key={index} className="panorama-pillar" x1={corner.x} y1={corner.y} x2={cap.x} y2={cap.y} />
@@ -279,10 +314,10 @@ export function OntologyLayerGraph({
             </g>
           })}
           {floor && highlighted && <line className="panorama-drop-line" x1={highlighted.x} y1={highlighted.y} x2={floor.x} y2={floor.y} />}
-          {edges.map(({ edge, path, active, onPath, inFocus, crossLayer }) => <path key={edge.id} d={path} className="ontology-layer-edge" data-active={active} data-path={onPath} data-cross-layer={crossLayer}
+          {edges.map(({ edge, path, active, onPath, inFocus, crossLayer, reverse, direction }) => <path key={edge.id} d={path} className="ontology-layer-edge" data-active={active} data-path={onPath} data-step={onPath && activeStep === edge.id} data-direction={active && !onPath ? direction : undefined} data-cross-layer={crossLayer}
             data-connection={edge.kind}
             data-emphasis={!active ? (pathSteps.length ? 'muted' : inFocus ? 'group' : showAllEdges ? 'all' : focusedGroup || selectedId || hoveredId ? 'muted' : undefined) : undefined}
-            strokeDasharray={edge.kind === 'dependency' ? '5 4' : undefined} markerMid={active ? `url(#${markerId})` : undefined} />)}
+            strokeDasharray={edge.kind === 'dependency' ? '5 4' : undefined} markerMid={active ? `url(#${markerId}${reverse ? '-reverse' : ''})` : undefined} />)}
           {edges.filter(item => !pathSteps.length && item.selected).slice(0, 16).map(({ edge, path }) => <circle key={edge.id} r={3.4} className="panorama-flow">
             <animateMotion path={path} dur="2.1s" repeatCount="indefinite" />
           </circle>)}
@@ -333,16 +368,35 @@ export function OntologyLayerGraph({
       {pathOpen && <div className="panorama-path-body">
         <div className="panorama-path-controls">
           {([['起点', startId, endId, setPathStart], ['终点', endId, startId, setPathEnd]] as const).map(([label, value, other, update]) =>
-            <label key={label}>{label}<select className="field" value={value} onChange={event => update(event.target.value)}>
+            <label key={label}>{label}<select className="field" value={value} onChange={event => { setActiveStep(''); update(event.target.value) }}>
               <option value="">选择节点</option>
               {pathOptions.map(({ id, record }) => <option key={id} value={id} disabled={id === other}>{record.definition.name} · {kindNames[record.definition.kind]}</option>)}
             </select></label>)}
         </div>
         <div role="status">{pathReady ? pathSteps.length ? `最短链路 · ${pathSteps.length} 条关联` : '当前可见节点间没有连通链路。' : '选择起点和终点，在图中查看定义关联。'}</div>
+        <div className="panorama-scene-controls">
+          <label>场景名称<input className="field" value={sceneName} maxLength={60} onChange={event => setSceneName(event.target.value)} /></label>
+          <button type="button" className="button subtle" disabled={!pathSteps.length || !sceneName.trim() || scenes.length >= 30}
+            onClick={() => { storeScenes([...scenes, { name: sceneName.trim(), start: startId, end: endId }]); setSceneName('') }}>保存场景</button>
+        </div>
+        {!!scenes.length && <ul className="panorama-saved-scenes" aria-label="已保存场景">{scenes.map((scene, index) => <li key={index}>
+          <button type="button" className="button subtle" onClick={() => {
+            setActiveStep(''); setPathStart(scene.start); setPathEnd(scene.end)
+            setSceneNotice(placed.has(scene.start) && placed.has(scene.end) ? `已打开：${scene.name}` : '场景端点不在当前可见范围。')
+          }}>{scene.name}</button>
+          <button type="button" className="button subtle" aria-label={`删除场景：${scene.name}`}
+            onClick={() => storeScenes(scenes.filter((_, offset) => offset !== index))}>删除</button>
+        </li>)}</ul>}
+        {sceneNotice && <div role="status">{sceneNotice}</div>}
         {!!pathSteps.length && <ol aria-label="推演链路">
           {pathSteps.map(({ edge, from, to }) => <li key={edge.id}>
             <button type="button" className="button subtle" onClick={() => onSelect(from)}>{placed.get(from)?.record.definition.name}</button>
-            <button type="button" className="button subtle panorama-path-edge" onClick={() => onSelect(edge.record.definition.id)}>
+            <button type="button" className="button subtle panorama-path-edge" aria-pressed={activeStep === edge.id} onClick={() => {
+              const segment = edges.find(item => item.edge.id === edge.id)
+              setActiveStep(edge.id)
+              if (segment) focusPoint(segment)
+              onSelect(edge.record.definition.id)
+            }}>
               {from === edge.source ? edge.label : edge.reverseLabel ?? `反向查看：${edge.label}`}
             </button>
             <button type="button" className="button subtle" onClick={() => onSelect(to)}>{placed.get(to)?.record.definition.name}</button>

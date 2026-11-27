@@ -14,11 +14,12 @@ const layers = [
   { id: 'M0', name: 'M0 · 预留' },
 ]
 
-export function LayeredPanorama({ records, categories, groups, categoryId, selectedId, onSelect, inspector }: {
+export function LayeredPanorama({ records, categories, groups, categoryId, layoutScope, selectedId, onSelect, inspector }: {
   records: DefinitionRecord[]
   categories: Organization[]
   groups: Organization[]
   categoryId: string
+  layoutScope: string
   selectedId?: string
   onSelect: (id: string) => void
   inspector: (onTag: (tag: string) => void) => ReactNode
@@ -106,7 +107,7 @@ export function LayeredPanorama({ records, categories, groups, categoryId, selec
       </div>
       <OntologyLayerGraph showZones={showZones} showLabels={showLabels} showAllEdges={showAllEdges} groups={groups} records={records} categories={categories} categoryId={categoryId}
         layers={configuration} hiddenLayers={hiddenLayers} focusedGroup={group} rootIds={rootIds}
-        selectedId={selectedId} focusRef={focusNode} onSelect={inspect} />
+        selectedId={selectedId} layoutScope={layoutScope} focusRef={focusNode} onSelect={inspect} />
       {drawer !== 'closed' && <aside className="ontology-canvas-panel" aria-label="分层节点详情">
         <div className="panorama-drawer-tabs">
           <button type="button" aria-pressed={narrow ? mobileDetail : drawer === 'detail'} disabled={!selected} onClick={() => narrow ? setMobileDetail(true) : setDrawer('detail')}>节点详情</button>

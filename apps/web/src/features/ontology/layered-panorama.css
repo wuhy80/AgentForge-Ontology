@@ -256,3 +256,10 @@
   margin-bottom: 8px;
   background: var(--surface);
 }
+
+.panorama-layout .ontology-layer-edge[data-step=true] { stroke: var(--accent); stroke-width: 4; }
+.panorama-layout .ontology-layer-edge[data-direction=incoming] { stroke: var(--primary); }
+.panorama-scene-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
+.panorama-scene-controls label { display: grid; gap: 4px; min-width: 0; }
+.panorama-saved-scenes { margin: 0; padding: 0; list-style: none; display: flex; gap: 6px; flex-wrap: wrap; }
+.panorama-path-edge[aria-pressed=true] { background: var(--accent-soft); }

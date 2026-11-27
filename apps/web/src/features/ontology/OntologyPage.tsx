@@ -138,7 +138,7 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, panorama,
         {catalog.unavailableReferences && <p>部分引用当前不可查看，仅显示已授权且已加载的定义。</p>}
         {catalog.referenceTruncated && <p>引用补齐已达到本次读取上限，当前视图不代表完整依赖范围。</p>}
       </div>}
-      {panorama ? <LayeredPanorama records={records} categories={categories} groups={catalog.groups} categoryId={categoryId}
+      {panorama ? <LayeredPanorama records={records} categories={categories} groups={catalog.groups} categoryId={categoryId} layoutScope={layoutScope}
         onSelect={select} selectedId={selectedId} inspector={renderInspector} /> : !local.length ? <div className="empty-state ontology-empty"><Network size={35} /><h2>当前分类还没有已生效定义</h2><p className="muted">在本体建模中维护并生效定义后，可在这里查看它们的联系。</p></div> : <>
         <div className="ontology-type-summary" aria-label="本体定义数量">{kinds.map((item) => <button type="button" key={item.kind} className={`ontology-kind-summary ontology-kind-${item.kind} ${kind === item.kind ? 'is-selected' : ''}`} aria-pressed={kind === item.kind}
           onClick={() => changeFilter(() => { setKind(kind === item.kind ? '' : item.kind); if (!['schema', 'link'].includes(item.kind)) setMode('dependencies') })}><item.icon size={17} /><span>{item.name}</span><strong>{local.filter((record) => record.definition.kind === item.kind).length}</strong></button>)}</div>
