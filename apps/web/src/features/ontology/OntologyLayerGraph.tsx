@@ -9,7 +9,7 @@ const graphWidth = 1000
 const height = 760
 const deckWidth = 680
 const deckDepth = 270
-const cameras = { iso: [-.32, .53], front: [0, .12], top: [0, Math.PI / 2] } as const
+const cameras = { iso: [-.32, .53], front: [0, .28], top: [0, Math.PI / 2] } as const
 type Camera = readonly [number, number]
 type PathStep = { edge: OntologyGraphEdge; from: string; to: string }
 
@@ -66,7 +66,11 @@ export function OntologyLayerGraph({
   const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode: 'dependencies', selectedId, rootIds, panorama: true, focusedGroup }),
     [records, categories, categoryId, selectedId, rootIds, focusedGroup])
   const [zoom, setZoom] = useState(1)
-  const [camera, setCamera] = useState<Camera>(cameras.iso)
+  const [cameraOverride, setCameraOverride] = useState<Camera>()
+  const [viewportSize, setViewportSize] = useState({ width: graphWidth, height })
+  const narrow = viewportSize.width < 520
+  const defaultCamera = narrow ? cameras.front : cameras.iso
+  const camera = cameraOverride ?? defaultCamera
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const drag = useRef<{ x: number; y: number; camera: Camera; pan: typeof pan; translate: boolean }>(undefined)
   const [pathOpen, setPathOpen] = useState(false)
@@ -84,8 +88,15 @@ export function OntologyLayerGraph({
       event.preventDefault()
       setZoom(current => Math.max(1, Math.min(2, current - Math.sign(event.deltaY) * .1)))
     }
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry?.contentRect.width && entry.contentRect.height) setViewportSize({ width: entry.contentRect.width, height: entry.contentRect.height })
+    })
+    observer.observe(area)
     area.addEventListener('wheel', zoomOnWheel, { passive: false })
-    return () => area.removeEventListener('wheel', zoomOnWheel)
+    return () => {
+      observer.disconnect()
+      area.removeEventListener('wheel', zoomOnWheel)
+    }
   }, [])
   const layerIds = new Set(layers.layers.map(layer => layer.id))
   const layerOf = (id: string) => {
@@ -165,15 +176,48 @@ export function OntologyLayerGraph({
     const selected = related(selectedId)
     const onPath = pathEdges.has(edge.id)
     const active = pathSteps.length ? onPath : selected || related(hoveredId)
+    const labelVisible = !pathSteps.length && (edge.record.definition.id === selectedId && selected || nodes.length <= 12 && active)
     const inFocus = inGroup(edge.source) || inGroup(edge.target)
     const path = loop
       ? `M ${from.x - 18} ${from.y} Q ${x - 90} ${y}, ${x} ${y} Q ${x + 90} ${y}, ${to.x + 18} ${to.y}`
       : `M ${from.x} ${from.y} Q ${(from.x + x) / 2} ${y}, ${x} ${y} Q ${(to.x + x) / 2} ${y}, ${to.x} ${to.y}`
-    return [{ edge, x: x + (!loop && Math.abs(from.x - to.x) < 50 ? 28 : 0), y, selected, active, onPath, inFocus, path,
+    return [{ edge, x: x + (!loop && Math.abs(from.x - to.x) < 50 ? 28 : 0), y, selected, active, onPath, inFocus, path, labelVisible,
       crossLayer: layerOf(edge.source) !== layerOf(edge.target) }]
   })
   const neighbors = new Set(edges.filter(item => item.active || item.inFocus).flatMap(({ edge }) => [edge.source, edge.target]))
   const position = (x: number, y: number) => ({ left: `${x / graphWidth * 100}%`, top: `${y / height * 100}%` })
+
+  const scaleX = viewportSize.width * zoom / graphWidth
+  const scaleY = viewportSize.height * zoom / height
+  type LabelBox = { x: number; y: number; width: number; height: number }
+  const labelBoxes: LabelBox[] = nodes.map(node => ({ x: node.x * scaleX - 10, y: node.y * scaleY - 10, width: 20, height: 20 }))
+  function reserveLabel(x: number, y: number, text: string, maxWidth: number, priority = false) {
+    const labelWidth = Math.min(maxWidth, 12 + Array.from(text).reduce((sum, ch) => sum + (ch.charCodeAt(0) > 255 ? 11 : 6), 0))
+    const box = { x: x * scaleX - labelWidth / 2, y: y * scaleY, width: labelWidth, height: 18 }
+    const intersects = labelBoxes.some(other => box.x < other.x + other.width + 3 && box.x + box.width + 3 > other.x
+      && box.y < other.y + other.height + 3 && box.y + box.height + 3 > other.y)
+    if (intersects && !priority) return false
+    labelBoxes.push(box)
+    return true
+  }
+
+  const visibleNames = new Set<string>()
+  const labelLimit = narrow ? 72 : 112
+  const namedNodes = [...nodes].sort((left, right) =>
+    Number(right.id === selectedId || right.id === hoveredId) - Number(left.id === selectedId || left.id === hoveredId))
+  for (const node of namedNodes) {
+    const priority = node.id === selectedId || node.id === hoveredId
+    if (!(priority || nodes.length <= 12 || !pathSteps.length && (showLabels || zoom >= (narrow ? 1.5 : 1.25)))) continue
+    if (reserveLabel(node.x, node.y + 14 / scaleY, node.record.definition.name, labelLimit, priority)) visibleNames.add(node.id)
+  }
+  const upperDeck = decks.at(-1)
+  const zoneLabels = showZones && upperDeck ? upperDeck.zones.flatMap(zone => {
+    if (!zone.name || narrow && zone.id !== focusedGroup) return []
+    const anchor = project(zone.left + groupWidth / 2, upperDeck.elevation, -deckDepth / 2)
+    const y = anchor.y - 22 / scaleY
+    if (!reserveLabel(anchor.x, y - 8 / scaleY, zone.name, narrow ? 72 : 126)) return []
+    return [{ ...zone, x: anchor.x, y }]
+  }) : []
 
   function focusNode(id: string) {
     const node = placed.get(id)
@@ -203,7 +247,7 @@ export function OntologyLayerGraph({
       const scale = graphWidth / (stage.current?.clientWidth || graphWidth)
       setPan({ x: current.pan.x + dx * scale, y: current.pan.y + dy * scale })
     } else {
-      setCamera([current.camera[0] + dx / 240, Math.max(.12, Math.min(1.56, current.camera[1] + dy / 240))])
+      setCameraOverride([current.camera[0] + dx / 240, Math.max(.12, Math.min(1.56, current.camera[1] + dy / 240))])
     }
   }
 
@@ -247,12 +291,10 @@ export function OntologyLayerGraph({
             <span className="panorama-caption-short">{lane.id === 'pending' || !lane.id ? lane.name : lane.id} · {lane.nodes.length}</span>
           </span>
         })}
-        {showZones && decks.flatMap(lane => lane.zones.map(zone => {
-          const anchor = project(zone.left + groupWidth / 2, lane.elevation, deckDepth / 2)
-          return zone.name && <span key={`${lane.id}:${zone.id}`} className="panorama-zone-name" data-upper={lane.id === decks.at(-1)?.id} data-muted={!!focusedGroup && zone.id !== focusedGroup}
-            style={{ ...position(anchor.x, anchor.y), color: `var(${zone.color})` }}>{zone.name}</span>
-        }))}
-        {edges.map(({ edge, x, y, active }) => <button type="button" key={edge.id} className="ontology-layer-label" data-active={active}
+        {zoneLabels.map(zone => <span key={zone.id}
+          className="panorama-zone-name" data-muted={!!focusedGroup && zone.id !== focusedGroup}
+          style={{ ...position(zone.x, zone.y), color: `var(${zone.color})` }}>{zone.name}</span>)}
+        {edges.map(({ edge, x, y, labelVisible }) => <button type="button" key={edge.id} className="ontology-layer-label" data-active={labelVisible}
           style={position(x, y)} aria-label={`查看${edge.record.definition.name}，${edge.label}`} onClick={() => onSelect(edge.record.definition.id)}>
           <span>{edge.label}{edge.cardinality && ` · ${edge.cardinality}`}</span>
         </button>)}
@@ -260,7 +302,7 @@ export function OntologyLayerGraph({
           style={position(x, y)} data-panorama-kind={definition.kind} data-layer={layerOf(id)}
           data-muted={(pathSteps.length ? !pathNodes.has(id) : !!focusedGroup && !inGroup(id) && !neighbors.has(id)) && id !== selectedId && id !== hoveredId}
           data-path={pathNodes.has(id)}
-          data-emphasis={id === selectedId || id === hoveredId || neighbors.has(id) || showLabels || nodes.length <= 12 ? 'label' : undefined}
+          data-emphasis={visibleNames.has(id) ? 'label' : undefined}
           onPointerEnter={() => setHoveredId(id)} onPointerLeave={() => setHoveredId(undefined)}
           onDoubleClick={() => focusNode(id)} aria-pressed={selectedId === id}
           aria-label={`${kindNames[definition.kind]}：${definition.name}`} title={definition.name} onClick={() => onSelect(id)}>
@@ -272,8 +314,8 @@ export function OntologyLayerGraph({
     <div className="ontology-graph-toolbar panorama-camera">
       <div role="group" aria-label="分层画布操作">
         {([['iso', '立体全景'], ['front', '正视分层'], ['top', '俯视分区']] as const).map(([view, name]) =>
-          <button key={view} type="button" aria-pressed={camera === cameras[view]} onClick={() => { setCamera(cameras[view]); setPan({ x: 0, y: 0 }) }}>{name}</button>)}
-        <button type="button" onClick={() => { setCamera(cameras.iso); setPan({ x: 0, y: 0 }); setZoom(1); viewport.current?.scrollTo?.(0, 0) }}>复位</button>
+          <button key={view} type="button" aria-pressed={camera === cameras[view]} onClick={() => { setCameraOverride(cameras[view]); setPan({ x: 0, y: 0 }) }}>{name}</button>)}
+        <button type="button" onClick={() => { setCameraOverride(undefined); setPan({ x: 0, y: 0 }); setZoom(1); viewport.current?.scrollTo?.(0, 0) }}>复位</button>
         <button type="button" disabled={!selectedId || !placed.has(selectedId)} onClick={() => selectedId && focusNode(selectedId)}>聚焦节点</button>
         <button type="button" aria-label="缩小分层画布" disabled={zoom <= 1} onClick={() => setZoom(current => Math.max(1, current - .25))}><ZoomOut size={15} aria-hidden="true" /></button>
         <button type="button" aria-label="放大分层画布" disabled={zoom >= 2} onClick={() => setZoom(current => Math.min(2, current + .25))}><ZoomIn size={15} aria-hidden="true" /></button>

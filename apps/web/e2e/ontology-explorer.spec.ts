@@ -295,3 +295,31 @@ test('场景推演只使用可见定义，显示跨分类最短链路并随图�
   await expect(graph.locator('path[data-path=true]')).toHaveCount(0)
   assertReadOnly(state)
 })
+
+test('密集分层图默认收起标签，放大后展开，窄屏默认正视', async ({ page }) => {
+  const state = await ontologyFixture(page)
+  const source = state.current.find(record => record.definition.id === 'notes')!
+  for (let index = 0; index < 32; index++) {
+    const record = structuredClone(source)
+    record.definition.id = `dense-${index}`
+    record.definition.name = `厂区对象 ${index}`
+    record.definition.groupId = index % 2 ? 'content' : 'organization'
+    record.definition.schema!.panoramaLayer = index % 2 ? 'L1' : 'L3'
+    state.current.push(record)
+  }
+  await page.goto('/#panorama')
+  const graph = page.getByRole('region', { name: '分层全景画布' })
+  const names = graph.locator('[data-panorama-kind][data-emphasis=label]')
+  await expect(names).toHaveCount(1)
+  await expect(graph.locator('.ontology-layer-label[data-active=true]')).toHaveCount(0)
+  await graph.getByRole('button', { name: '放大分层画布' }).click()
+  await expect.poll(() => names.count()).toBeGreaterThan(1)
+
+  await page.setViewportSize({ width: 390, height: 900 })
+  await graph.getByRole('button', { name: '复位' }).click()
+  await expect(graph.getByRole('button', { name: '正视分层' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(names).toHaveCount(1)
+  await graph.getByRole('button', { name: '对象模型：厂区对象 10', exact: true }).click()
+  await expect(inspector(page).getByRole('heading', { name: '厂区对象 10', exact: true })).toBeInViewport()
+  assertReadOnly(state)
+})

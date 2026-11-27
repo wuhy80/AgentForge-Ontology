@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { DefinitionRecord, Organization } from '../../lib/types'
 import { OntologyLayerGraph } from './OntologyLayerGraph'
 import { collectCallableTargets } from './panorama-references'
@@ -22,6 +22,7 @@ export function LayeredPanorama({ records, categories, groups, categoryId, selec
   onSelect: (id: string) => void
   inspector: (onTag: (tag: string) => void) => ReactNode
 }) {
+  const details = useRef<HTMLElement>(null)
   const [drawer, setDrawer] = useState<'catalog' | 'detail' | 'closed'>(selectedId ? 'detail' : 'catalog')
   const [showZones, setShowZones] = useState(true)
   const [showLabels, setShowLabels] = useState(false)
@@ -67,6 +68,9 @@ export function LayeredPanorama({ records, categories, groups, categoryId, selec
   function inspect(id: string) {
     setDrawer('detail')
     onSelect(id)
+    if (window.matchMedia?.('(max-width: 850px)').matches) {
+      requestAnimationFrame(() => details.current?.scrollIntoView({ block: 'nearest' }))
+    }
   }
   return <div className="ontology-panorama">
     <div className="panorama-layout" data-drawer={drawer}>
@@ -88,7 +92,7 @@ export function LayeredPanorama({ records, categories, groups, categoryId, selec
       <OntologyLayerGraph showZones={showZones} showLabels={showLabels} showAllEdges={showAllEdges} groups={groups} records={records} categories={categories} categoryId={categoryId}
         layers={configuration} hiddenLayers={hiddenLayers} focusedGroup={group} rootIds={rootIds}
         selectedId={selectedId} onSelect={inspect} />
-      {drawer !== 'closed' && <aside className="ontology-canvas-panel" aria-label="分层节点详情">
+      {drawer !== 'closed' && <aside ref={details} className="ontology-canvas-panel" aria-label="分层节点详情">
         <div className="panorama-drawer-tabs">
           <button type="button" aria-pressed={drawer === 'detail'} disabled={!selected} onClick={() => setDrawer('detail')}>节点详情</button>
           <button type="button" aria-pressed={drawer === 'catalog'} onClick={() => setDrawer('catalog')}>节点目录 · {directory.length}</button>
