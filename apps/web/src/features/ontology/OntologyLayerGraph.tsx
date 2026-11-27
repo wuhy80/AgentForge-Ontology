@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { ZoomIn, ZoomOut } from 'lucide-react'
 import type { Organization } from '../../lib/types'
 import type { OntologyGraphProps } from './OntologyGraph'
@@ -6,6 +6,11 @@ import { buildOntologyGraph } from './ontology-graph'
 import './ontology-layer-graph.css'
 
 const graphWidth = 1000
+const height = 760
+const deckWidth = 680
+const deckDepth = 270
+const cameras = { iso: [-.32, .53], front: [0, .12], top: [0, Math.PI / 2] } as const
+type Camera = readonly [number, number]
 const schemaLayerSymbols: Record<string, string> = { L1: 'P', L2: 'C', L3: 'T' }
 const zoneColors = ['--schema', '--link', '--enum', '--action', '--function', '--success']
 const kindNames = { schema: '对象模型', link: '关系', enum: '枚举', action: '动作', function: '函数' }
@@ -28,10 +33,24 @@ export function OntologyLayerGraph({
   const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode: 'dependencies', selectedId, rootIds, panorama: true, focusedGroup }),
     [records, categories, categoryId, selectedId, rootIds, focusedGroup])
   const [zoom, setZoom] = useState(1)
+  const [camera, setCamera] = useState<Camera>(cameras.iso)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const drag = useRef<{ x: number; y: number; camera: Camera; pan: typeof pan; translate: boolean }>(undefined)
   const [hoveredId, setHoveredId] = useState<string>()
   const viewport = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const markerId = useId()
+  useEffect(() => {
+    const area = viewport.current
+    if (!area) return
+    function zoomOnWheel(event: WheelEvent) {
+      if (event.ctrlKey || !event.deltaY) return
+      event.preventDefault()
+      setZoom(current => Math.max(1, Math.min(2, current - Math.sign(event.deltaY) * .1)))
+    }
+    area.addEventListener('wheel', zoomOnWheel, { passive: false })
+    return () => area.removeEventListener('wheel', zoomOnWheel)
+  }, [])
   const layerIds = new Set(layers.layers.map(layer => layer.id))
   const layerOf = (id: string) => {
     const assignment = Object.hasOwn(layers.assignments, id) ? layers.assignments[id] : unassigned.id
@@ -49,36 +68,46 @@ export function OntologyLayerGraph({
   const namedGroups = groups.filter(group => occupied.has(group.id)).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   const namedIds = new Set(namedGroups.map(group => group.id))
   const groupSlots = [...namedIds, ...[...occupied].filter(id => !namedIds.has(id)).sort()]
-  const minWidth = Math.max(320, groupSlots.length * 116)
-  const groupWidth = graphWidth / Math.max(1, groupSlots.length)
-  const allLayers = [...layers.layers, unassigned]
-  let nextTop = 0
-  const lanes = allLayers.flatMap(layer => {
-    const members = buckets.get(layer.id) ?? []
-    if (layer.id === unassigned.id && !members.length) return []
-    const zones = groupSlots.flatMap((id, index) => {
-      const entries = members.filter(node => node.record.definition.groupId === id)
-        .sort((a, b) => a.record.definition.name.localeCompare(b.record.definition.name, 'zh-CN') || a.id.localeCompare(b.id))
-      if (!entries.length) return []
-      const columns = Math.min(entries.length, Math.max(1, Math.floor(minWidth / groupSlots.length / 108)))
-      return [{ id, name: namedGroups.find(group => group.id === id)?.name, entries, columns,
-        left: index * groupWidth, color: zoneColors[index % zoneColors.length] }]
-    })
-    const top = nextTop
-    const rows = Math.max(0, ...zones.map(zone => Math.ceil(zone.entries.length / zone.columns)))
-    const height = rows ? 52 + rows * 62 : 54
-    nextTop += height
-    // Keep the remaining panorama lanes in place when a layer is hidden.
+  const allLayers = [...layers.layers, ...(buckets.has(unassigned.id) ? [unassigned] : [])]
+  const groupWidth = deckWidth / Math.max(1, groupSlots.length)
+  const [yaw, pitch] = camera
+  const project = (x: number, elevation: number, depth: number) => {
+    const across = x * Math.cos(yaw) - depth * Math.sin(yaw)
+    const away = x * Math.sin(yaw) + depth * Math.cos(yaw)
+    return { x: graphWidth / 2 + across + pan.x, y: height / 2 - elevation * Math.cos(pitch) + away * Math.sin(pitch) + pan.y }
+  }
+  const point = ({ x, y }: { x: number; y: number }) => `${x},${y}`
+  const corners = (left: number, right: number, elevation: number, near = -deckDepth / 2, far = deckDepth / 2) =>
+    [project(left, elevation, near), project(right, elevation, near), project(right, elevation, far), project(left, elevation, far)]
+  const polygon = (...args: Parameters<typeof corners>) => corners(...args).map(point).join(' ')
+  const lanes = allLayers.flatMap((layer, layerIndex) => {
     if (hiddenLayers?.has(layer.id)) return []
-
-    const nodes = zones.flatMap(zone => zone.entries.map((node, index) => ({
-      ...node, x: zone.left + (index % zone.columns + .5) * groupWidth / zone.columns,
-      y: top + 62 + Math.floor(index / zone.columns) * 62,
-    })))
-    return [{ ...layer, top, height, zones, nodes }]
+    const elevation = 245 - layerIndex * (490 / Math.max(1, allLayers.length - 1))
+    const zones = groupSlots.map((id, slot) => {
+      const entries = (buckets.get(layer.id) ?? []).filter(node => node.record.definition.groupId === id)
+        .sort((a, b) => a.record.definition.name.localeCompare(b.record.definition.name, 'zh-CN') || a.id.localeCompare(b.id))
+      const left = -deckWidth / 2 + slot * groupWidth
+      return { id, name: namedGroups.find(group => group.id === id)?.name, entries, left, color: zoneColors[slot % zoneColors.length] }
+    })
+    const nodes = zones.flatMap(zone => {
+      const columns = Math.max(1, Math.min(zone.entries.length, Math.ceil(Math.sqrt(zone.entries.length * groupWidth / deckDepth))))
+      const rows = Math.ceil(zone.entries.length / columns)
+      return zone.entries.map((node, index) => ({
+        ...node,
+        worldX: zone.left + (index % columns + .5) * groupWidth / columns,
+        depth: ((Math.floor(index / columns) + .5) / rows - .5) * (deckDepth - 34),
+      })).map(node => ({
+        ...node,
+        ...project(node.worldX, elevation + 6, node.depth + (camera === cameras.top ? layerIndex * 17 : 0)),
+      }))
+    })
+    return [{ ...layer, elevation, zones, nodes }]
   })
-  const height = nextTop
+  const topView = camera === cameras.top
+  const decks = topView ? lanes.slice(-1) : [...lanes].reverse()
   const nodes = lanes.flatMap(lane => lane.nodes)
+  const highlighted = nodes.find(node => node.id === (hoveredId ?? selectedId))
+  const floor = highlighted && !topView && decks.length ? project(highlighted.worldX, decks[0].elevation, highlighted.depth) : undefined
   const placed = new Map(nodes.map(node => [node.id, node]))
   const inGroup = (id: string) => !!focusedGroup && placed.get(id)?.record.definition.groupId === focusedGroup
   const edges = model.edges.flatMap(edge => {
@@ -114,24 +143,51 @@ export function OntologyLayerGraph({
     })
   }
 
-  return <section className="ontology-graph" aria-label="分层全景二维画布">
-    <div className="ontology-graph-toolbar">
-      <div role="group" aria-label="分层画布操作">
-        <button type="button" aria-label="放大分层画布" disabled={zoom >= 2} onClick={() => setZoom(current => Math.min(2, current + .25))}><ZoomIn size={15} aria-hidden="true" /></button>
-        <button type="button" aria-label="缩小分层画布" disabled={zoom <= 1} onClick={() => setZoom(current => Math.max(1, current - .25))}><ZoomOut size={15} aria-hidden="true" /></button>
-        <button type="button" onClick={() => { setZoom(1); viewport.current?.scrollTo?.(0, 0) }}>复位</button>
-        <button type="button" disabled={!selectedId || !placed.has(selectedId)} onClick={() => selectedId && focusNode(selectedId)}>聚焦节点</button>
-      </div>
-    </div>
-    <div ref={viewport} className="ontology-layer-viewport" aria-label="二维泳道" tabIndex={0}>
-      {lanes.length > 0 ? <div ref={stage} className="ontology-lanes" style={{ width: `${zoom * 100}%`, minWidth: minWidth * zoom, height: height * zoom, minHeight: `${zoom * 100}%` }}>
+  function startDrag(event: PointerEvent<HTMLDivElement>) {
+    if (event.target instanceof Element && event.target.closest('button')) return
+    if (event.button !== 0 && event.button !== 2) return
+    drag.current = { x: event.clientX, y: event.clientY, camera, pan, translate: event.shiftKey || event.button === 2 }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function moveDrag(event: PointerEvent<HTMLDivElement>) {
+    const current = drag.current
+    if (!current) return
+    const dx = event.clientX - current.x
+    const dy = event.clientY - current.y
+    if (current.translate) {
+      const scale = graphWidth / (stage.current?.clientWidth || graphWidth)
+      setPan({ x: current.pan.x + dx * scale, y: current.pan.y + dy * scale })
+    } else {
+      setCamera([current.camera[0] + dx / 240, Math.max(.12, Math.min(1.56, current.camera[1] + dy / 240))])
+    }
+  }
+
+  return <section className="ontology-graph" aria-label="分层全景画布">
+    <div ref={viewport} className="ontology-layer-viewport panorama-viewport" aria-label="立体分层图" tabIndex={0}
+      onPointerDown={startDrag} onPointerMove={moveDrag} onLostPointerCapture={() => { drag.current = undefined }}
+      onContextMenu={event => event.preventDefault()}>
+      {lanes.length > 0 ? <div ref={stage} className="ontology-lanes panorama-stage" style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}>
         <svg viewBox={`0 0 ${graphWidth} ${height}`} preserveAspectRatio="none" aria-hidden="true">
           <defs><marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 Z" fill="var(--edge)" /></marker></defs>
-          {lanes.map(lane => <g key={lane.id}>
-            <rect className="ontology-layer-lane" data-panorama-layer={lane.id} width={graphWidth} y={lane.top} height={lane.height} />
-            {showZones && lane.zones.map(zone => <rect key={zone.id} className="panorama-zone" data-muted={!!focusedGroup && zone.id !== focusedGroup}
-              style={{ color: `var(${zone.color})` }} x={zone.left + groupWidth * .025} y={lane.top + 26} width={groupWidth * .95} height={lane.height - 30} />)}
-          </g>)}
+          {!topView && decks.length > 1 && corners(-deckWidth / 2, deckWidth / 2, decks[0].elevation).map((corner, index) => {
+            const cap = corners(-deckWidth / 2, deckWidth / 2, decks[decks.length - 1].elevation)[index]
+            return <line key={index} className="panorama-pillar" x1={corner.x} y1={corner.y} x2={cap.x} y2={cap.y} />
+          })}
+          {decks.map(lane => {
+            const slab = corners(-deckWidth / 2, deckWidth / 2, lane.elevation)
+            return <g key={lane.id} data-panorama-layer={lane.id}>
+              <polygon className="panorama-slab-rim" points={[slab[3], slab[2], { ...slab[2], y: slab[2].y + 9 }, { ...slab[3], y: slab[3].y + 9 }].map(point).join(' ')} />
+              <polygon className="ontology-layer-lane" data-panorama-layer={lane.id} points={slab.map(point).join(' ')} />
+              {showZones && [-.25, 0, .25].map(fraction => {
+                const [from, to] = corners(-deckWidth / 2, deckWidth / 2, lane.elevation, deckDepth * fraction)
+                return <line key={fraction} className="panorama-floor-line" x1={from.x} y1={from.y} x2={to.x} y2={to.y} />
+              })}
+              {showZones && lane.zones.map(zone => <polygon key={zone.id} className="panorama-zone" data-muted={!!focusedGroup && zone.id !== focusedGroup}
+                style={{ color: `var(${zone.color})` }} points={polygon(zone.left + 4, zone.left + groupWidth - 4, lane.elevation, -deckDepth / 2 + 5, deckDepth / 2 - 5)} />)}
+            </g>
+          })}
+          {floor && highlighted && <line className="panorama-drop-line" x1={highlighted.x} y1={highlighted.y} x2={floor.x} y2={floor.y} />}
           {edges.map(({ edge, path, active, inFocus, crossLayer }) => <path key={edge.id} d={path} className="ontology-layer-edge" data-active={active} data-cross-layer={crossLayer}
             data-connection={edge.kind}
             data-emphasis={!active ? (inFocus ? 'group' : showAllEdges ? 'all' : focusedGroup || selectedId || hoveredId ? 'muted' : undefined) : undefined}
@@ -140,12 +196,18 @@ export function OntologyLayerGraph({
             <animateMotion path={path} dur="2.1s" repeatCount="indefinite" />
           </circle>)}
         </svg>
-        {lanes.map(lane => <span key={lane.id} className="ontology-layer-caption" data-panorama-layer={lane.id} style={position(0, lane.top)}>
-          {lane.name} · {lane.id === 'M0' ? '暂无实例' : lane.nodes.length}
-        </span>)}
-        {showZones && lanes.flatMap(lane => lane.zones.map(zone => zone.name && <span key={`${lane.id}:${zone.id}`}
-          className="panorama-zone-name" data-muted={!!focusedGroup && zone.id !== focusedGroup}
-          style={{ ...position(zone.left + groupWidth / 2, lane.top + 26), color: `var(${zone.color})` }}>{zone.name}</span>))}
+        {!topView && lanes.map(lane => {
+          const anchor = project(-deckWidth / 2, lane.elevation, deckDepth / 2)
+          return <span key={lane.id} className="ontology-layer-caption" data-panorama-layer={lane.id} style={position(anchor.x, anchor.y)}>
+            <span className="panorama-caption-full">{lane.name} · {lane.id === 'M0' ? '暂无实例' : lane.nodes.length}</span>
+            <span className="panorama-caption-short">{lane.id === 'pending' || !lane.id ? lane.name : lane.id} · {lane.nodes.length}</span>
+          </span>
+        })}
+        {showZones && decks.flatMap(lane => lane.zones.map(zone => {
+          const anchor = project(zone.left + groupWidth / 2, lane.elevation, deckDepth / 2)
+          return zone.name && <span key={`${lane.id}:${zone.id}`} className="panorama-zone-name" data-upper={lane.id === decks.at(-1)?.id} data-muted={!!focusedGroup && zone.id !== focusedGroup}
+            style={{ ...position(anchor.x, anchor.y), color: `var(${zone.color})` }}>{zone.name}</span>
+        }))}
         {edges.map(({ edge, x, y, active }) => <button type="button" key={edge.id} className="ontology-layer-label" data-active={active}
           style={position(x, y)} aria-label={`查看${edge.record.definition.name}，${edge.label}`} onClick={() => onSelect(edge.record.definition.id)}>
           <span>{edge.label}{edge.cardinality && ` · ${edge.cardinality}`}</span>
@@ -161,6 +223,17 @@ export function OntologyLayerGraph({
           <strong>{definition.name}</strong>
         </button>)}
       </div> : <div className="ontology-graph-empty">当前范围没有可显示的定义，请调整筛选。</div>}
+    </div>
+    <div className="ontology-graph-toolbar panorama-camera">
+      <div role="group" aria-label="分层画布操作">
+        {([['iso', '立体全景'], ['front', '正视分层'], ['top', '俯视分区']] as const).map(([view, name]) =>
+          <button key={view} type="button" aria-pressed={camera === cameras[view]} onClick={() => { setCamera(cameras[view]); setPan({ x: 0, y: 0 }) }}>{name}</button>)}
+        <button type="button" onClick={() => { setCamera(cameras.iso); setPan({ x: 0, y: 0 }); setZoom(1); viewport.current?.scrollTo?.(0, 0) }}>复位</button>
+        <button type="button" disabled={!selectedId || !placed.has(selectedId)} onClick={() => selectedId && focusNode(selectedId)}>聚焦节点</button>
+        <button type="button" aria-label="缩小分层画布" disabled={zoom <= 1} onClick={() => setZoom(current => Math.max(1, current - .25))}><ZoomOut size={15} aria-hidden="true" /></button>
+        <button type="button" aria-label="放大分层画布" disabled={zoom >= 2} onClick={() => setZoom(current => Math.min(2, current + .25))}><ZoomIn size={15} aria-hidden="true" /></button>
+      </div>
+      <small>拖动旋转 · 滚轮缩放 · Shift 拖动平移</small>
     </div>
     <div className="ontology-graph-footer"><span>实线 · Link　虚线 · 动作与函数关联</span><span>{nodes.length} 个节点 · {edges.length} 条连线</span></div>
     {model.unavailableRelations && <p className="ontology-graph-hint" role="status">部分关系端点当前不可查看，相关连线未绘制。</p>}

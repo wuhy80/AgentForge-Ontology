@@ -138,7 +138,7 @@ test('390px目录、详情对话框和画布聚焦可用且页面无横向溢出
   assertReadOnly(state)
 })
 
-test('分层全景的二维泳道在桌面和 390px 双主题保留筛选、聚焦和检视', async ({ page }) => {
+test('分层全景的立体画布在桌面和 390px 双主题保留筛选、聚焦和检视', async ({ page }) => {
   const state = await ontologyFixture(page)
   const note = state.current.find(record => record.definition.id === 'notes')!
   const tag = state.current.find(record => record.definition.id === 'tags')!
@@ -146,11 +146,29 @@ test('分层全景的二维泳道在桌面和 390px 双主题保留筛选、聚�
   tag.definition.schema!.panoramaLayer = 'L1'
   tag.definition.groupId = 'organization'
   await page.goto('/#panorama')
-  const graph = page.getByRole('region', { name: '分层全景二维画布' })
+  const graph = page.getByRole('region', { name: '分层全景画布' })
   const node = graph.getByRole('button', { name: '对象模型：笔记', exact: true })
   const focus = graph.getByRole('button', { name: '聚焦节点' })
   const stage = graph.locator('.ontology-lanes')
   await expect(node).toHaveAttribute('aria-pressed', 'true')
+  const planes = graph.locator('.ontology-layer-lane')
+  await expect(planes).toHaveCount(5)
+  const iso = await planes.first().getAttribute('points')
+  await graph.getByRole('button', { name: '正视分层' }).click()
+  await expect(planes.first()).not.toHaveAttribute('points', iso!)
+  await graph.getByRole('button', { name: '俯视分区' }).click()
+  await expect(planes).toHaveCount(1)
+  await graph.getByRole('button', { name: '立体全景' }).click()
+  await expect(planes.first()).toHaveAttribute('points', iso!)
+  const canvas = graph.getByLabel('立体分层图')
+  const area = (await canvas.boundingBox())!
+  await page.mouse.move(area.x + 20, area.y + 20)
+  await page.mouse.down()
+  await page.mouse.move(area.x + 66, area.y + 42, { steps: 4 })
+  await page.mouse.up()
+  await expect(planes.first()).not.toHaveAttribute('points', iso!)
+  await page.mouse.wheel(0, -100)
+  await expect.poll(() => stage.evaluate(element => element.clientWidth)).toBeGreaterThan(area.width)
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 })
     for (const [name, theme] of [['深空蓝', 'deep'], ['精密白', 'light']]) {
@@ -189,7 +207,7 @@ for (const width of [1440, 390]) test(`两类全景在 ${width}px 随窗口增�
     if (route === 'ontology' && width === 390) {
       await page.getByRole('group', { name: '浏览区域', exact: true }).getByRole('button', { name: '画布', exact: true }).click()
     }
-    const graph = route === 'ontology' ? relationGraph(page) : page.getByRole('region', { name: '分层全景二维画布', exact: true })
+    const graph = route === 'ontology' ? relationGraph(page) : page.getByRole('region', { name: '分层全景画布', exact: true })
     const surface = graph.locator(route === 'ontology' ? '.ontology-graph-surface' : '.ontology-layer-viewport')
     await expect(surface).toBeVisible()
     for (const theme of ['深空蓝', '精密白']) {

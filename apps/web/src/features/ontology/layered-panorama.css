@@ -152,3 +152,64 @@
   .panorama-layout .ontology-layer-label:not(:focus-visible, :hover) > span { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .panorama-flow { display: none; } }
+
+.panorama-layout .panorama-viewport {
+  flex-basis: max(420px, 48dvh);
+  background-color: var(--canvas);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px);
+  background-size: 21px 21px;
+  cursor: grab;
+  touch-action: pan-y;
+}
+.panorama-viewport:active { cursor: grabbing; }
+.panorama-stage { min-height: 100%; }
+.panorama-layout .ontology-layer-lane {
+  fill-opacity: .12;
+  stroke-opacity: .66;
+  filter: drop-shadow(0 4px 5px var(--shadow));
+}
+.panorama-slab-rim {
+  fill: var(--layer-color);
+  fill-opacity: .18;
+  stroke: var(--layer-color);
+  stroke-opacity: .36;
+  vector-effect: non-scaling-stroke;
+}
+.panorama-pillar {
+  stroke: var(--muted);
+  stroke-opacity: .35;
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
+}
+.panorama-floor-line {
+  stroke: var(--layer-color);
+  stroke-opacity: .24;
+  vector-effect: non-scaling-stroke;
+}
+.panorama-layout .ontology-layer-caption {
+  transform: translateY(35%);
+  border: 1px solid color-mix(in srgb, var(--layer-color) 55%, var(--line));
+  border-radius: 5px;
+  background: var(--surface);
+  white-space: nowrap;
+}
+.panorama-camera { border-bottom: 0; }
+.panorama-camera small { color: var(--muted); }
+.panorama-camera button[aria-pressed='true'] { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+@media (max-width: 600px) {
+  .panorama-layout .ontology-layer-caption { font-size: 10px; }
+  .panorama-layout .panorama-viewport { flex-basis: max(360px, 50dvh); }
+  .panorama-camera small { display: none; }
+}
+.panorama-drop-line {
+  stroke: var(--accent);
+  stroke-opacity: .6;
+  stroke-dasharray: 3 5;
+  vector-effect: non-scaling-stroke;
+}
+.panorama-stage { position: absolute; inset: 0 auto auto 0; }
+.panorama-caption-short { display: none; }
+@media (max-width: 600px) {
+  .panorama-caption-full, .panorama-zone-name[data-upper='false'] { display: none; }
+  .panorama-caption-short { display: inline; }
+}
