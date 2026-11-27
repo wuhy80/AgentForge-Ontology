@@ -60,17 +60,17 @@ func loopbackHost(host string) bool {
 
 func normalizeScopes(input []string) ([]string, error) {
 	seen := map[string]bool{}
-	if len(input) == 0 || len(input) > 3 {
-		return nil, problem(422, "invalid_scope", "请选择1到3个有效接入范围")
+	if len(input) == 0 || len(input) > 4 {
+		return nil, problem(422, "invalid_scope", "请选择1到4个有效接入范围")
 	}
 	for _, scope := range input {
-		if scope != platform.ScopeDiscover && scope != platform.ScopeQuery && scope != platform.ScopeInvoke || seen[scope] {
+		if scope != platform.ScopeDiscover && scope != platform.ScopeQuery && scope != platform.ScopeInvoke && scope != platform.ScopeWorkspace || seen[scope] {
 			return nil, problem(422, "invalid_scope", "接入范围未知或重复")
 		}
 		seen[scope] = true
 	}
 	if !seen[platform.ScopeDiscover] {
-		return nil, problem(422, "invalid_scope", "查询与调用需要同时选择模型发现范围")
+		return nil, problem(422, "invalid_scope", "第三方凭据需要选择模型发现范围")
 	}
 	out := append([]string{}, input...)
 	sort.Strings(out)
@@ -290,7 +290,7 @@ func (s *Store) oauthMetadata(w http.ResponseWriter, r *http.Request) {
 		oauthError(w, 503, "server_error")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/oauth/authorize", "token_endpoint": issuer + "/oauth/token", "registration_endpoint": issuer + "/oauth/register", "revocation_endpoint": issuer + "/oauth/revoke", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code"}, "code_challenge_methods_supported": []string{"S256"}, "scopes_supported": []string{platform.ScopeDiscover, platform.ScopeQuery, platform.ScopeInvoke}, "token_endpoint_auth_methods_supported": []string{"none"}})
+	writeJSON(w, 200, map[string]any{"issuer": issuer, "authorization_endpoint": issuer + "/oauth/authorize", "token_endpoint": issuer + "/oauth/token", "registration_endpoint": issuer + "/oauth/register", "revocation_endpoint": issuer + "/oauth/revoke", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code"}, "code_challenge_methods_supported": []string{"S256"}, "scopes_supported": []string{platform.ScopeDiscover, platform.ScopeQuery, platform.ScopeInvoke, platform.ScopeWorkspace}, "token_endpoint_auth_methods_supported": []string{"none"}})
 }
 func validRedirect(raw string) bool {
 	u, e := url.Parse(raw)

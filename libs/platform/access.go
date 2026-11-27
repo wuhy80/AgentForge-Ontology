@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	ScopeDiscover = "ontology:discover"
-	ScopeQuery    = "ontology:query"
-	ScopeInvoke   = "ontology:invoke"
+	ScopeDiscover  = "ontology:discover"
+	ScopeQuery     = "ontology:query"
+	ScopeInvoke    = "ontology:invoke"
+	ScopeWorkspace = "ontology:workspace"
 )
 
 var accessCredential = regexp.MustCompile(`^mcp_[a-f0-9]{64}$`)
@@ -32,6 +33,8 @@ func AccessRoute(method, requestPath string) (string, bool) {
 	parts := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")
 	if method == http.MethodGet {
 		switch requestPath {
+		case "/metadata/auth/session", "/metadata/definitions":
+			return ScopeWorkspace, true
 		case "/metadata/capabilities", "/metadata/categories", "/metadata/groups", "/data/query/context":
 			return ScopeDiscover, true
 		case "/data/capabilities":
@@ -40,6 +43,9 @@ func AccessRoute(method, requestPath string) (string, bool) {
 			return ScopeInvoke, true
 		case "/metadata/callables":
 			return ScopeDiscover, true
+		}
+		if len(parts) == 3 && parts[0] == "metadata" && parts[1] == "definitions" {
+			return ScopeWorkspace, true
 		}
 		if len(parts) == 3 && parts[0] == "metadata" && parts[1] == "callables" && parts[2] != "" {
 			return ScopeDiscover, true

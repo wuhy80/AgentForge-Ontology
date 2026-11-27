@@ -19,8 +19,8 @@ const kinds: { kind: Kind; name: string; icon: typeof Box }[] = [
 type Props = {
   api: ApiClient; categoryId: string; categories: Organization[]; layoutScope: string
   panorama?: boolean
-  onOpenDefinition: (id: string, categoryId: string, tab?: 'basics') => void
-  onQuery: (schemaId: string, categoryId: string) => void
+  onOpenDefinition?: (id: string, categoryId: string, tab?: 'basics') => void
+  onQuery?: (schemaId: string, categoryId: string) => void
 }
 
 function useNarrow() {
@@ -108,11 +108,11 @@ function OntologyWorkspace({ api, categoryId, categories, layoutScope, panorama,
   function changeFilter(update: () => void) { update(); setSelectedId(undefined); setFocusId(undefined); setDetailOpen(false) }
   function visit(id: string, callback: Props['onOpenDefinition']) {
     const record = records.find((item) => item.definition.id === id)
-    if (record) callback(id, record.definition.categoryId)
+    if (record) callback?.(id, record.definition.categoryId)
   }
   const renderInspector = (filterTag?: (tag: string) => void) => <OntologyInspector record={selected} records={records} categories={categories} groups={catalog?.groups ?? []} categoryId={categoryId} onSelect={select}
-    onOpenDefinition={(id) => visit(id, onOpenDefinition)} onQuery={(id) => visit(id, onQuery)}
-    filterTag={filterTag} onEditClassification={(id) => visit(id, (target, category) => onOpenDefinition(target, category, 'basics'))} />
+    onOpenDefinition={onOpenDefinition && (id => visit(id, onOpenDefinition))} onQuery={onQuery && (id => visit(id, onQuery))}
+    filterTag={filterTag} onEditClassification={onOpenDefinition && (id => visit(id, (target, category) => onOpenDefinition(target, category, 'basics')))} />
   const inspector = renderInspector()
   const graphProps = { records, rootIds, categories, categoryId, mode, selectedId, focusId, onSelect: select, onFocus: setFocusId, layoutKey: layoutScope }
 

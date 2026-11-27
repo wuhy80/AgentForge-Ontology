@@ -43,7 +43,7 @@ const OntologyPage = lazy(() => import('./features/ontology/OntologyPage').then(
 
 type View = 'overview' | 'ontology' | 'panorama' | 'organizations' | 'sources' | 'models' | 'query' | 'admin' | 'settings' | 'oauth' | 'jobs'
 type Identity = { tenantId: string; subject: string; expiresAt: number }
-type Session = { api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data: DataCapabilities; account: AccountSession }
+type Session = { keyLogin?: boolean; api: ApiClient; identity: Identity; metadata: MetadataCapabilities; data?: DataCapabilities; account: AccountSession }
 const kindNames = { schema: '对象类型', enum: '枚举', link: '关系', action: '操作', function: '函数' }
 type NavItem = { route: string; view: View; name: string; icon: typeof Box; kind?: Kind; administrator?: boolean }
 const navGroups: { name: string; items: NavItem[] }[] = [
@@ -131,7 +131,9 @@ function OntologyIllustration() {
   )
 }
 
-function Connect({ onConnect, reason }: { onConnect: (tenant: string, username: string, password: string) => Promise<void>; reason: string }) {
+function Connect({ onConnect, onKeyConnect, reason }: { onKeyConnect: (key: string) => Promise<void>; onConnect: (tenant: string, username: string, password: string) => Promise<void>; reason: string }) {
+  const [keyMode, setKeyMode] = useState(false)
+  const [key, setKey] = useState('')
   const [tenant, setTenant] = useState('demo-tenant')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -143,7 +145,9 @@ function Connect({ onConnect, reason }: { onConnect: (tenant: string, username: 
     setBusy(true)
     setError('')
     try {
-      await onConnect(tenant.trim(), username.trim(), password)
+      if (keyMode) await onKeyConnect(key.trim())
+      else await onConnect(tenant.trim(), username.trim(), password)
+      setKey('')
       setPassword('')
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '连接失败，请稍后重试')
@@ -193,7 +197,12 @@ function Connect({ onConnect, reason }: { onConnect: (tenant: string, username: 
               {error}
             </div>
           )}
+          <button type="button" className="button subtle" disabled={busy} onClick={() => {
+            setKeyMode(!keyMode); setError(''); setPassword(''); setKey('')
+          }}>{keyMode ? '使用账号密码登录' : '使用第三方 Key 登录'}</button>
           <form onSubmit={submit}>
+            {keyMode ? <label className="field">第三方 Key<input type="password" autoComplete="off" spellCheck={false}
+              value={key} onChange={event => setKey(event.target.value)} required disabled={busy} /></label> : <>
             <label className="field">租户<input name="tenant" autoComplete="organization" value={tenant} onChange={(event) => setTenant(event.target.value)} required disabled={busy} /></label>
             <label className="field">用户名<input name="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required disabled={busy} /></label>
             <label className="field">
@@ -213,7 +222,8 @@ function Connect({ onConnect, reason }: { onConnect: (tenant: string, username: 
             <p className="field-hint">
               <ShieldCheck size={15} /> 账号与访问权限由你的租户管理员管理。
             </p>
-            <button className="button primary connect-submit" disabled={busy || !tenant.trim() || !username.trim() || !password}>
+            </>}
+            <button className="button primary connect-submit" disabled={busy || (keyMode ? !/^mcp_[a-f0-9]{64}$/.test(key.trim()) : !tenant.trim() || !username.trim() || !password)}>
               {busy ? <LoaderCircle className="spin" size={18} /> : null}
               {busy ? '正在登录…' : '登录'}
               {!busy && <ArrowRight size={18} />}
@@ -236,9 +246,9 @@ export function App() {
   const activeClient = useRef<ApiClient | null>(null)
   const [checking, setChecking] = useState(true)
   const [disconnecting, setDisconnecting] = useState(false)
-  const establish = useCallback(async (credentials?: { tenant: string; username: string; password: string }) => {
+  const establish = useCallback(async (credentials?: { tenant: string; username: string; password: string }, key?: string) => {
     const request = ++connecting.current
-    const api: ApiClient = new ApiClient(undefined, () => {
+    const api: ApiClient = new ApiClient(key, () => {
       if (activeClient.current !== api) return
       activeClient.current = null
       setSession(null)
@@ -246,11 +256,11 @@ export function App() {
     })
     const account = credentials ? await api.login(credentials) : await api.getSession()
     const identity = { tenantId: account.user.tenantId, subject: account.user.displayName || account.user.username, expiresAt: account.expiresAt }
-    const [metadata, data] = await Promise.all([api.metadataCapabilities(), api.dataCapabilities()])
+    const [metadata, data] = await Promise.all([api.metadataCapabilities(), key ? Promise.resolve(undefined) : api.dataCapabilities()])
     if (request !== connecting.current) return
     activeClient.current = api
     setReason('')
-    setSession({ api, identity, metadata, data, account })
+    setSession({ api, identity, metadata, data, account, keyLogin: !!key })
   }, [])
   const connect = (tenant: string, username: string, password: string) => establish({ tenant, username, password })
   useEffect(() => {
@@ -274,7 +284,7 @@ export function App() {
     return () => window.clearTimeout(timer)
   }, [session])
   if (checking) return <div className="empty-state"><LoaderCircle className="spin" size={25} /><p>正在检查登录状态…</p></div>
-  if (!session) return <Connect onConnect={connect} reason={reason} />
+  if (!session) return <Connect onConnect={connect} onKeyConnect={key => establish(undefined, key)} reason={reason} />
   return (
     <Workspace
       key={`${session.identity.tenantId}:${session.account.user.id}`}
@@ -300,7 +310,8 @@ export function App() {
 
 function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnecting }: { session: Session; onDisconnect: () => Promise<void>; onAccountUpdated: (account: AccountSession) => void; notice: string; disconnecting: boolean }) {
   const [route, setRoute] = useState(() => window.location.hash.slice(1))
-  const view = currentView(route)
+  const requestedView = currentView(route)
+  const view = session.keyLogin && requestedView !== 'ontology' ? 'panorama' : requestedView
   const queryVisited = useRef(view === 'query')
   if (view === 'query') queryVisited.current = true
   const routeRef = useRef(route)
@@ -335,7 +346,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
       const [categoryResult, currentResult, draftResult] = await Promise.allSettled([
         session.api.listCategories(active.signal),
         session.api.listDefinitions({ view: 'current' }, active.signal),
-        session.api.listDefinitions({ view: 'draft' }, active.signal),
+        session.keyLogin ? Promise.resolve([]) : session.api.listDefinitions({ view: 'draft' }, active.signal),
       ])
       if (sequence !== requests.current || active.signal.aborted) return
       if (categoryResult.status === 'rejected') throw categoryResult.reason
@@ -464,7 +475,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
         <nav aria-label="工作台导航">
           {navGroups.map((group) => <div className="nav-group" role="group" aria-label={group.name} key={group.name}>
             <div className="nav-label">{group.name}</div>
-            {group.items.filter((item) => !item.administrator || session.account.user.administrator).map((item) => (
+            {group.items.filter((item) => session.keyLogin ? ['ontology', 'panorama'].includes(item.view) : !item.administrator || session.account.user.administrator).map((item) => (
             <a
               href={`#${item.route}`}
               onClick={(event) => {
@@ -536,7 +547,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
             <span className="topbar-separator" />
             <span className="user-avatar">{session.identity.subject.slice(0, 1).toUpperCase()}</span>
             <span className="subject-name">{session.identity.subject}</span>
-            <button className="button subtle" type="button" onClick={() => setPasswordOpen(true)}>修改密码</button>
+            {!session.keyLogin && <button className="button subtle" type="button" onClick={() => setPasswordOpen(true)}>修改密码</button>}
             <button
               type="button"
               className="icon-button"
@@ -590,7 +601,7 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
             </div>
           ) : (
             <>
-              <section hidden={view !== 'overview'}>
+              {!session.keyLogin && <section hidden={view !== 'overview'}>
                 <Overview
                   categories={categories}
                   categoryId={categoryId}
@@ -602,18 +613,18 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                   onOrganizations={() => navigate('organizations')}
                   onQuery={query}
                 />
-              </section>
-              <section hidden={view !== 'organizations'}>
+              </section>}
+              {!session.keyLogin && <section hidden={view !== 'organizations'}>
                 <DialogScope active={view === 'organizations'}>
                   <OrganizationsPage api={session.api} categories={categories} categoryId={categoryId} onSelectCategory={selectCategory} onRefresh={refresh} />
                 </DialogScope>
-              </section>
+              </section>}
               {(view === 'ontology' || view === 'panorama') && <Suspense fallback={<p className="muted">正在加载本体全景…</p>}><OntologyPage
                 panorama={view === 'panorama'} api={session.api} categoryId={categoryId} categories={categories} layoutScope={`${session.identity.tenantId}:${session.account.user.id}`}
-                onOpenDefinition={(id, targetCategory, tab) => { selectCategory(targetCategory); navigate(`models/${encodeURIComponent(id)}${tab ? `?tab=${tab}` : ''}`) }}
-                onQuery={(id, targetCategory) => { selectCategory(targetCategory); query(id) }}
+                onOpenDefinition={session.keyLogin ? undefined : (id, targetCategory, tab) => { selectCategory(targetCategory); navigate(`models/${encodeURIComponent(id)}${tab ? `?tab=${tab}` : ''}`) }}
+                onQuery={session.keyLogin ? undefined : (id, targetCategory) => { selectCategory(targetCategory); query(id) }}
               /></Suspense>}
-              <section hidden={view !== 'models'}>
+              {!session.keyLogin && <section hidden={view !== 'models'}>
                 <DialogScope active={view === 'models'}>
                   <ModelsPage
                     api={session.api}
@@ -633,10 +644,10 @@ function Workspace({ session, onDisconnect, onAccountUpdated, notice, disconnect
                     onSources={session.account.user.administrator ? () => navigate('sources', true) : undefined}
                   />
                 </DialogScope>
-              </section>
-              <section hidden={view !== 'sources'}>
+              </section>}
+              {!session.keyLogin && <section hidden={view !== 'sources'}>
                 <SourcesPage api={session.api} administrator={session.account.user.administrator} active={view === 'sources'} />
-              </section>
+              </section>}
               {view === 'settings' && <ConnectionsPage api={session.api} />}
               <section hidden={view !== 'query'}>
                 <DialogScope active={view === 'query'}>
@@ -852,7 +863,7 @@ function Overview({
           <ul>
             <li>
               <Check size={15} />
-              <span>{session.data.backend.toUpperCase()} 数据后端</span>
+              <span>{session.data?.backend.toUpperCase()} 数据后端</span>
               <span className="tiny-badge">已连接</span>
             </li>
             <li>
@@ -861,7 +872,7 @@ function Overview({
             </li>
             <li>
               <Check size={15} />
-              <span>每页最多 {session.data.maxPageSize} 条</span>
+              <span>每页最多 {session.data?.maxPageSize} 条</span>
             </li>
             <li>
               <ShieldCheck size={15} />

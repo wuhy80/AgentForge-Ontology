@@ -145,6 +145,7 @@ export class ApiClient {
   }
   getSession(signal?: AbortSignal): Promise<Session> { return this.readSession('/api/metadata/auth/session', { signal }) }
   async logout(): Promise<void> {
+    if (this.token) return
     await this.request<void>('/api/metadata/auth/logout', { method: 'POST' })
     this.expire()
   }

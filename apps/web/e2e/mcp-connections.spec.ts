@@ -143,3 +143,32 @@ test('设置中的第三方 Key 在双主题和窄屏可生成、撤销，离开
   await page.goto('/#connections')
   await expect(page.getByRole('main', { name: '设置', exact: true })).toBeVisible()
 })
+
+test('第三方 Key 登录进入只读分层全景，退出后清除凭据', async ({ page }) => {
+  const state = await ontologyFixture(page)
+  const token = 'mcp_' + 'b'.repeat(64)
+  let authenticated = false
+  await page.route('**/api/metadata/auth/session', async route => {
+    const supplied = route.request().headers().authorization
+    expect(supplied === undefined || supplied === `Bearer ${token}`).toBe(true)
+    if (!supplied) return route.fulfill({ status: 401, json: { code: 'unauthenticated', message: '请登录' } })
+    authenticated = true
+    return route.fulfill({ json: {
+      user: { id: 'reader', tenantId: state.categories[0].tenantId, username: 'reader', displayName: 'Key 用户', enabled: true, administrator: false, roleIds: [], etag: 'key-user' },
+      expiresAt: Math.floor(Date.now() / 1000) + 3600, csrfToken: '', accessScopes: ['ontology:discover', 'ontology:workspace'],
+    } })
+  })
+  await page.goto('/#panorama')
+  await page.getByRole('button', { name: '使用第三方 Key 登录', exact: true }).click()
+  await page.getByLabel('第三方 Key', { exact: true }).fill(token)
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await expect(page.getByRole('region', { name: '分层全景画布' })).toBeVisible()
+  expect(authenticated).toBe(true)
+  await expect(page.getByRole('link', { name: '设置', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '编辑标签与层位' })).toHaveCount(0)
+  expect(state.directoryRequests.every(item => item.view === 'current')).toBe(true)
+  expect(await page.evaluate(() => Object.values(localStorage).concat(Object.values(sessionStorage)).some(value => value.startsWith('mcp_')))).toBe(false)
+  await page.getByRole('button', { name: '退出工作空间', exact: true }).click()
+  await expect(page.getByRole('button', { name: '使用第三方 Key 登录', exact: true })).toBeVisible()
+  expect(state.businessRequests).toEqual([])
+})

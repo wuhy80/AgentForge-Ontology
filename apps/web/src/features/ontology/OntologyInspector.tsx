@@ -12,8 +12,8 @@ type Props = {
   onSelect: (id: string) => void
   filterTag?: (tag: string) => void
   onEditClassification?: (id: string) => void
-  onOpenDefinition: (id: string) => void
-  onQuery: (schemaId: string) => void
+  onOpenDefinition?: (id: string) => void
+  onQuery?: (schemaId: string) => void
 }
 
 const kindNames: Record<Kind, string> = { schema: '对象模型', enum: '枚举', link: '关系', action: '动作', function: '函数' }
@@ -77,13 +77,13 @@ export function OntologyInspector({ record, records, categories, groups, categor
 
   return <article className="ontology-inspector" aria-label="本体资源详情">
     <header className="ontology-inspector-heading"><span className={`ontology-inspector-kind ontology-inspector-kind-${definition.kind}`}><Icon size={18} />{kindNames[definition.kind]}</span><span className="ontology-inspector-current">已生效</span><h2>{definition.name}</h2><p>{definition.description || '尚未填写业务说明。'}</p></header>
-    <div className="ontology-inspector-actions"><button type="button" className="button" onClick={() => onOpenDefinition(definition.id)}>查看定义<ArrowUpRight size={14} /></button>{definition.kind === 'schema' && <button type="button" className="button subtle" onClick={() => onQuery(definition.id)}><Search size={14} />查看数据</button>}</div>
+    {(onOpenDefinition || onQuery) && <div className="ontology-inspector-actions">{onOpenDefinition && <button type="button" className="button" onClick={() => onOpenDefinition(definition.id)}>查看定义<ArrowUpRight size={14} /></button>}{definition.kind === 'schema' && onQuery && <button type="button" className="button subtle" onClick={() => onQuery(definition.id)}><Search size={14} />查看数据</button>}</div>}
     <dl className="ontology-inspector-facts ontology-inspector-location"><div><dt>分类</dt><dd>{categoryName(definition.categoryId)}</dd></div><div><dt>分组</dt><dd>{groupName}</dd></div></dl>
 
     {filterTag && definition.schema && <section className="ontology-inspector-section panorama-schema-heading">
       <h3>Schema 标签 {definition.schema.panoramaLayer && <span>{definition.schema.panoramaLayer}</span>}</h3>
       <div className="model-tag-list">{definition.schema.tags?.map(tag => <button type="button" className="button subtle" key={tag} onClick={() => filterTag(tag)}>{tag}</button>)}
-        <button type="button" className="button subtle" onClick={() => onEditClassification?.(definition.id)}>编辑标签与层位<ArrowUpRight size={13} /></button></div>
+        {onEditClassification && <button type="button" className="button subtle" onClick={() => onEditClassification(definition.id)}>编辑标签与层位<ArrowUpRight size={13} /></button>}</div>
     </section>}
 
     {definition.schema && <>

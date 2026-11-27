@@ -8,7 +8,11 @@ func TestAccessRouteScopes(t *testing.T) {
 		ok                  bool
 	}{
 		{"GET", "/metadata/categories", ScopeDiscover, true},
-		{"GET", "/metadata/definitions/secret", "", false},
+		{"GET", "/metadata/auth/session", ScopeWorkspace, true},
+		{"GET", "/metadata/definitions", ScopeWorkspace, true},
+		{"GET", "/metadata/definitions/schema", ScopeWorkspace, true},
+		{"GET", "/metadata/definitions/schema/draft", "", false},
+		{"POST", "/metadata/definitions", "", false},
 		{"GET", "/metadata/definitions/secret/dependencies", "", false},
 		{"GET", "/data/query/context", ScopeDiscover, true},
 		{"POST", "/data/query/ontology-sql", ScopeQuery, true},

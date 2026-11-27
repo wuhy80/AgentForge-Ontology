@@ -1,6 +1,7 @@
 export const connectionScopes = [
   { value: 'ontology:discover', name: '发现本体', description: '查看当前可访问的模型、字段和可调用签名。' },
   { value: 'ontology:query', name: '查询数据', description: '按当前业务权限读取对象、关系及运行本体查询。' },
+  { value: 'ontology:workspace', name: '登录工作台', description: '使用 Key 登录，只读查看已授权的当前定义和本体全景。' },
   { value: 'ontology:invoke', name: '运行计算', description: '调用已生效的纯计算操作和函数，读取自己的执行结果。' },
 ] as const
 

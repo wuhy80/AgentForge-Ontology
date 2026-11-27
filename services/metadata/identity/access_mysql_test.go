@@ -124,9 +124,34 @@ func TestMySQLExternalConnectionsAndOAuth(t *testing.T) {
 		}
 	}
 	discover := create(platform.ScopeDiscover)
+	workspace := create(platform.ScopeDiscover, platform.ScopeWorkspace)
+	checkToken(discover.AccessToken, "GET", "/metadata/auth/session", "", 403)
+	checkToken(workspace.AccessToken, "GET", "/metadata/definitions", "", 200)
+	checkToken(workspace.AccessToken, "POST", "/metadata/definitions", "", 401)
+	for _, tc := range []struct {
+		path   string
+		status int
+	}{
+		{"/metadata/auth/session", 200},
+		{"/metadata/definitions?view=draft", 403},
+	} {
+		r := httptest.NewRequest("GET", origin+tc.path, nil)
+		r.Header.Set("Authorization", "Bearer "+workspace.AccessToken)
+		w := httptest.NewRecorder()
+		app.ServeHTTP(w, r)
+		if tc.path == "/metadata/auth/session" {
+			var session c.Session
+			expect(w, tc.status, &session)
+			if session.User.Administrator || session.User.TenantID != tenant || session.CSRFToken != "" || len(w.Result().Cookies()) != 0 {
+				t.Fatal("workspace key must preserve tenant identity without granting a browser cookie or administrator session")
+			}
+		} else {
+			expect(w, tc.status, nil)
+		}
+	}
 	checkToken(discover.AccessToken, "GET", "/data/query/context", "", 200)
 	checkToken(discover.AccessToken, "POST", "/data/query", "", 403)
-	checkToken(discover.AccessToken, "GET", "/metadata/definitions/secret", "", 401)
+	checkToken(discover.AccessToken, "GET", "/metadata/definitions/secret", "", 403)
 	checkToken(discover.AccessToken, "POST", "/mcp", resource+"-wrong", 401)
 	listed := request("GET", "/metadata/auth/connections", &admin, nil)
 	expect(listed, 200, nil)

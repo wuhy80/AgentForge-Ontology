@@ -85,7 +85,7 @@ func SessionRequest(r *http.Request) (contracts.SessionCheck, error) {
 		if cookiePresent || cookieError != nil {
 			return check, &AccessError{Status: 401, Code: "ambiguous_credentials", Message: "请分别使用浏览器会话或外部连接凭据"}
 		}
-		if _, allowed := AccessRoute(r.Method, r.URL.Path); !allowed {
+		if _, allowed := AccessRoute(r.Method, r.URL.Path); !allowed || r.URL.Path == "/metadata/definitions" && r.URL.Query().Get("view") == "draft" {
 			return check, &AccessError{Status: 403, Code: "connection_scope_denied", Message: "外部连接不允许此接口"}
 		}
 		if check.Origin != "" {

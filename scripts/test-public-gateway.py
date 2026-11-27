@@ -255,7 +255,11 @@ func main() {
             assert status == 200 and value['authorization'] == mcp['Authorization'] and value['mcpVersion'] == mcp['MCP-Protocol-Version']
             status, _, value = request('POST','/mcp',{'Authorization':'Bearer '+synthetic})
             assert status == 200 and value['authorization'] == ''
-            checks += 2
+            status, _, value = request('GET', '/api/metadata/auth/session', {'Authorization': mcp['Authorization']})
+            assert status == 200 and value['authorization'] == mcp['Authorization']
+            status, _, value = request('GET', '/api/ontoapp-ontology/metadata/auth/session', {'Authorization': mcp['Authorization']})
+            assert status == 200 and value['authorization'] == ''
+            checks += 4
             # Oversized declared length must fail before reading the body.
             status, response_headers, value = request('POST','/api/data/query',{'Content-Length':str(9<<20)})
             assert status == 413 and value['code'] == 'request_too_large' and response_headers.get('cache-control') == 'no-store'

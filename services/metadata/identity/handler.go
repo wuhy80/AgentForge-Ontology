@@ -146,6 +146,21 @@ func (s *Store) loginHTTP(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Store) sessionHTTP(w http.ResponseWriter, r *http.Request) error {
+	if strings.HasPrefix(platform.Bearer(r), "mcp_") {
+		check, err := platform.SessionRequest(r)
+		if err != nil {
+			return err
+		}
+		session, err := s.CheckSession(r.Context(), check)
+		if err != nil {
+			return err
+		}
+		platform.AuditIdentity(r, session.User)
+		session.User.Administrator = false
+		session.User.RoleIDs = nil
+		writeJSON(w, 200, session)
+		return nil
+	}
 	session, err := s.sessionForRequest(r)
 	if err != nil {
 		return err
