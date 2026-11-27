@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type PointerEvent, type Ref } from 'react'
 import { ZoomIn, ZoomOut } from 'lucide-react'
 import type { Organization } from '../../lib/types'
 import type { OntologyGraphProps } from './OntologyGraph'
@@ -52,6 +52,7 @@ const unassigned = { id: '', name: '未分层' }
 type Props = Pick<OntologyGraphProps, 'records' | 'categories' | 'categoryId' | 'selectedId' | 'rootIds' | 'onSelect'> & {
   layers: { layers: { id: string; name: string }[]; assignments: Record<string, string> }
   groups: Organization[]
+  focusRef?: Ref<(id: string) => void>
   hiddenLayers?: ReadonlySet<string>
   focusedGroup?: string
   showZones?: boolean
@@ -60,7 +61,7 @@ type Props = Pick<OntologyGraphProps, 'records' | 'categories' | 'categoryId' | 
 }
 
 export function OntologyLayerGraph({
-  records, categories, categoryId, selectedId, rootIds, onSelect, layers, groups,
+  records, categories, categoryId, selectedId, rootIds, onSelect, layers, groups, focusRef,
   hiddenLayers, focusedGroup, showZones = true, showLabels = false, showAllEdges = false,
 }: Props) {
   const model = useMemo(() => buildOntologyGraph({ records, categories, categoryId, mode: 'dependencies', selectedId, rootIds, panorama: true, focusedGroup }),
@@ -230,6 +231,8 @@ export function OntologyLayerGraph({
       area.scrollTo?.(node.x / graphWidth * content.clientWidth - area.clientWidth / 2, node.y / height * content.clientHeight - area.clientHeight / 2)
     })
   }
+
+  useImperativeHandle(focusRef, () => focusNode)
 
   function startDrag(event: PointerEvent<HTMLDivElement>) {
     if (event.target instanceof Element && event.target.closest('button')) return

@@ -8,6 +8,7 @@ type DialogProps = {
   onClose: () => void
   children: ReactNode
   wide?: boolean
+  bottomSheet?: boolean
   closeDisabled?: boolean
 }
 
@@ -22,7 +23,7 @@ export function Dialog(props: DialogProps) {
   return visible ? <DialogContent {...props} /> : null
 }
 
-function DialogContent({ title, description, onClose, children, wide, closeDisabled }: DialogProps) {
+function DialogContent({ title, description, onClose, children, wide, bottomSheet, closeDisabled }: DialogProps) {
   const titleId = useId()
   const descriptionId = useId()
   const dialog = useRef<HTMLDivElement>(null)
@@ -84,7 +85,7 @@ function DialogContent({ title, description, onClose, children, wide, closeDisab
   }, [])
   return createPortal(
     <div
-      className="dialog-backdrop"
+      className={bottomSheet ? 'dialog-backdrop dialog-backdrop-bottom' : 'dialog-backdrop'}
       onClick={(event) => {
         if (event.target === event.currentTarget && !closeDisabled) onClose()
       }}

@@ -237,3 +237,22 @@
   .panorama-layout [data-panorama-kind] > strong { top: 22px; }
   .panorama-layout .ontology-layer-caption { transform: translate(-100%, -45%); margin-left: 1px; }
 }
+
+.dialog-backdrop-bottom {
+  align-items: flex-end;
+  padding: 0;
+}
+.dialog-backdrop-bottom > .dialog {
+  width: min(100%, 640px);
+  max-height: min(72dvh, 680px);
+  padding-bottom: max(19px, env(safe-area-inset-bottom));
+  border-radius: 14px 14px 0 0;
+}
+.dialog-backdrop-bottom .dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-block: 5px;
+  margin-bottom: 8px;
+  background: var(--surface);
+}
