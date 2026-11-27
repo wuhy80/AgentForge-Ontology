@@ -258,3 +258,40 @@ test('改名保留稳定选择和个人位置，同名新定义不接管旧选�
   await expect.poll(storedPosition).toBeFalsy()
   assertReadOnly(state)
 })
+
+test('场景推演只使用可见定义，显示跨分类最短链路并随图层更新', async ({ page }) => {
+  const state = await ontologyFixture(page)
+  state.current.find(record => record.definition.id === 'notes')!.definition.schema!.panoramaLayer = 'L3'
+  state.current.find(record => record.definition.id === 'tags')!.definition.schema!.panoramaLayer = 'L1'
+  await page.goto('/#panorama')
+  const graph = page.getByRole('region', { name: '分层全景画布' })
+  await graph.getByRole('button', { name: '场景推演', exact: true }).click()
+  await graph.getByLabel('起点').selectOption('tags')
+  await graph.getByLabel('终点').selectOption('summary-function')
+  const path = graph.getByRole('list', { name: '推演链路' })
+  await expect(path.getByRole('listitem')).toHaveCount(3)
+  await expect(path.getByRole('button', { name: '反向查看：作用对象' })).toBeVisible()
+  await expect(graph.locator('path[data-path=true]')).toHaveCount(3)
+  await path.getByRole('button', { name: '绑定函数', exact: true }).click()
+  await expect(inspector(page).getByRole('heading', { name: '生成笔记摘要', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'L3 · 事件与单据', exact: true }).click()
+  await expect(graph.getByText('当前可见节点间没有连通链路。')).toBeVisible()
+  await expect(graph.locator('path[data-path=true]')).toHaveCount(0)
+  await page.getByRole('button', { name: 'L3 · 事件与单据', exact: true }).click()
+  await expect(path.getByRole('listitem')).toHaveCount(3)
+
+  await page.setViewportSize({ width: 390, height: 900 })
+  for (const theme of ['深空蓝', '精密白']) {
+    await page.getByRole('group', { name: '界面主题', exact: true }).getByRole('button', { name: theme, exact: true }).click()
+    const endpoint = graph.getByLabel('终点')
+    await endpoint.focus()
+    await expect(endpoint).toBeFocused()
+    await expect(path.getByRole('listitem').first()).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  }
+  await graph.getByRole('button', { name: '收起场景推演' }).click()
+  await expect(path).toHaveCount(0)
+  await expect(graph.locator('path[data-path=true]')).toHaveCount(0)
+  assertReadOnly(state)
+})

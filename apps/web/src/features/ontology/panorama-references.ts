@@ -14,7 +14,7 @@ export function collectCallableTargets({ definition }: DefinitionRecord): Defini
   for (const id of callable.targetSchemaIds ?? []) add(id, '作用对象')
   for (const target of callable.dataWrite ?? []) add(target.schemaId, '声明写入')
   if (callable.recordRead) add(callable.recordRead.schemaId, '声明读取')
-  if (callable.functionId) add(callable.functionId, '绑定函数')
+  if (callable.functionId) add(callable.functionId, '绑定函数', 'function')
   const runtime = callable.runtime
   if (!runtime) return [...references.values()]
   const tokens = runtime.source.match(/\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|#[^\r\n]*|"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`[\s\S]*?`|[a-zA-Z_$][\w$]*|[^\s]/g)?.filter(token => !token.startsWith('#') && !token.startsWith('//') && !token.startsWith('/*')) ?? []

@@ -213,3 +213,15 @@
   .panorama-caption-full, .panorama-zone-name[data-upper='false'] { display: none; }
   .panorama-caption-short { display: inline; }
 }
+
+.panorama-path { padding: 8px 12px; border-top: 1px solid var(--line); background: var(--surface); }
+.panorama-path .button { min-height: 28px; padding: 4px 8px; font-size: 12px; }
+.panorama-path-body { display: grid; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.panorama-path-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 8px; }
+.panorama-path-controls label { display: grid; gap: 4px; min-width: 0; }
+.panorama-path-controls .field { min-width: 0; width: 100%; }
+.panorama-path-body ol { display: grid; gap: 4px; margin: 0; padding-left: 22px; max-height: 128px; overflow: auto; }
+.panorama-path-body li > button { margin: 2px; }
+.panorama-path-body .panorama-path-edge { color: var(--accent); }
+.panorama-layout .ontology-layer-edge[data-path=true] { stroke: var(--primary); stroke-width: 2.8; opacity: 1; }
+.panorama-layout [data-panorama-kind][data-path=true] > span { box-shadow: 0 0 0 3px var(--primary-soft), 0 0 0 4px var(--primary); }
