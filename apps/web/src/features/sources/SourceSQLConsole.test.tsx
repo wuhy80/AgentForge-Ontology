@@ -93,7 +93,7 @@ describe('独立数据源 SQL 控制台', () => {
     fireEvent.click(screen.getByRole('button', { name: '一键格式化' }))
     await screen.findByText('SQL 已格式化')
     expect(api.formatSourceSQL).toHaveBeenCalledWith('db', props.sql, 'source-etag', expect.any(AbortSignal), 25)
-    expect(editor().state.doc.toString()).toBe(success.sql)
+    await waitFor(() => expect(editor().state.doc.toString()).toBe(success.sql))
     fireEvent.click(screen.getByRole('button', { name: '校验语法' }))
     await screen.findByText('语法校验通过')
     expect(api.analyzeSourceSQL).toHaveBeenCalledWith('db', success.sql, 'source-etag', expect.any(AbortSignal), 25)
