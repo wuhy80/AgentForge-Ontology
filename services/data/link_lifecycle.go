@@ -59,9 +59,9 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			(definition.Link.StorageBinding.Mode == "junction" || definition.Link.StorageBinding.Mode == "foreign_key")
 		schema := definition.Kind == c.KindSchema && definition.Schema != nil && definition.Schema.Mode == "schema_2_db" &&
 			definition.Schema.StorageLayout == "single" && definition.Schema.StorageBinding == nil
-		mappedSchema := definition.Kind == c.KindSchema && definition.Schema != nil && definition.Schema.Mode == "db_2_schema" &&
+		mappedSchema := definition.Kind == c.KindSchema && definition.Schema != nil && (definition.Schema.Mode == "db_2_schema" || definition.Schema.Mode == "schema_2_db") &&
 			definition.Schema.StorageLayout == "single" && definition.Schema.StorageBinding != nil
-		if definition.ID != id || definition.TenantID != tenant || (!link && !schema && !mappedLink && !mappedSchema) || deletionCheck && mappedSchema {
+		if definition.ID != id || definition.TenantID != tenant || (!link && !schema && !mappedLink && !mappedSchema) {
 			return problem(422, "unsupported_lifecycle", "定义存储不支持当前生命周期操作")
 		}
 		var hasData bool
@@ -112,7 +112,7 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			if hasData {
 				return problem(409, "definition_data_in_use", "定义仍有实例")
 			}
-			if deletionCheck && schema {
+			if deletionCheck && (schema || mappedSchema) {
 				for _, table := range []string{
 					"af_data_property_files", "af_data_record_comments", "af_data_comment_reply_reads", "af_data_record_follows",
 					"af_data_record_notices", "af_data_record_approvals", "af_data_record_lifecycles",

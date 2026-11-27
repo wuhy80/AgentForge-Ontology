@@ -86,6 +86,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const [lifecycleAvailable, setLifecycleAvailable] = useState(false)
   const [recordReadAvailable, setRecordReadAvailable] = useState(false)
   const [managedDeleteAvailable, setManagedDeleteAvailable] = useState(false)
+  const [mappedDeleteAvailable, setMappedDeleteAvailable] = useState(false)
   const [draftDeleteAvailable, setDraftDeleteAvailable] = useState(false)
   const [disabledEnumDeleteAvailable, setDisabledEnumDeleteAvailable] = useState(false)
   const [disabledCallableDeleteAvailable, setDisabledCallableDeleteAvailable] = useState(false)
@@ -114,7 +115,9 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   }, [lifecycleTabHidden, tab])
   const suspended = record?.status === 'disabled'
   const locked = !!(record?.hasCurrent || record?.status === 'active' || suspended)
-  const canDeleteManaged = managedDeleteAvailable && suspended && definition.schema?.mode === 'schema_2_db' && definition.schema.storageLayout === 'single' && !definition.schema.storageBinding
+  const canDeleteManaged = suspended && definition.schema?.storageLayout === 'single' && (definition.schema.storageBinding
+    ? mappedDeleteAvailable
+    : definition.schema.mode === 'schema_2_db' && managedDeleteAvailable)
   const canDeleteEnum = disabledEnumDeleteAvailable && suspended && record?.definition.kind === 'enum'
   const retainedCallable = record?.definition.action ?? record?.definition.function
   const canDeleteCallable = disabledCallableDeleteAvailable && suspended && !!retainedCallable &&
@@ -125,7 +128,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
   const disabled = !!busy || uncertain || suspended
   const callable = definition.action ?? definition.function
   const managedSchema = definition.schema?.mode === 'schema_2_db' && definition.schema.storageLayout === 'single' && !definition.schema.storageBinding
-  const mappedSchema = definition.schema?.mode === 'db_2_schema' && definition.schema.storageLayout === 'single' && !!definition.schema.storageBinding
+  const mappedSchema = definition.schema?.storageLayout === 'single' && !!definition.schema.storageBinding
   const lifecycleAllowed = lifecycleAvailable && (managedSchema || mappedSchema || record?.definition.kind === 'enum' || !!callable && (!callable.sideEffects || callable.sideEffects === 'none')) && (record?.status === 'active' || suspended)
   const directoryCategoryId = definition.categoryId
   const sourceCategory = categories.find((item) => item.id === categoryId)
@@ -156,7 +159,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
 
   useEffect(() => {
     setSchemaMigrations(undefined); setCapabilityError('')
-    setManagedDeleteAvailable(false)
+    setManagedDeleteAvailable(false); setMappedDeleteAvailable(false)
     setDraftDeleteAvailable(false)
     setDisabledEnumDeleteAvailable(false)
     setLifecycleAvailable(false)
@@ -168,6 +171,7 @@ function LegacyModelEditor({ api, categoryId, categories, entries, currentEntrie
       if (controller.signal.aborted) return
       setDraftDeleteAvailable(capabilities.unpublishedDraftDelete === true)
       setManagedDeleteAvailable(capabilities.disabledManagedStorageDelete === true)
+      setMappedDeleteAvailable(capabilities.disabledMappedSchemaDelete === true)
       setDisabledEnumDeleteAvailable(capabilities.disabledEnumDelete === true)
       setDisabledCallableDeleteAvailable(capabilities.disabledCallableDelete === true)
       setSchemaMigrations(capabilities.schemaMigrations)

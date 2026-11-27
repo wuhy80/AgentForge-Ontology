@@ -60,7 +60,7 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 				if err != nil {
 					return err
 				}
-				storedDefinition = supportsStorageLifecycle(d)
+				storedDefinition = supportsStorageLifecycle(d) || supportsMappedSchemaLifecycle(d)
 				callable := callableBody(d)
 				disabledCallable = callable != nil && (callable.SideEffects == "" || callable.SideEffects == "none") && len(callable.DataWrite) == 0
 			}

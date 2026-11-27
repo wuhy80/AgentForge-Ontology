@@ -324,7 +324,7 @@ func (h *handler) gate(ctx context.Context, tx *sql.Tx, p c.Principal, current c
 	}
 	if current.Definition.Kind == c.KindLink && current.Definition.Link != nil &&
 		current.Definition.Link.StorageBinding != nil && current.Definition.Link.StorageBinding.Mode == "managed" ||
-		current.Definition.Kind == c.KindSchema && current.Definition.Schema != nil && (current.Definition.Schema.StorageBinding == nil || current.Definition.Schema.Mode == "db_2_schema") {
+		current.Definition.Kind == c.KindSchema && current.Definition.Schema != nil {
 		latest, err := h.current(ctx, p.TenantID, current.Definition.ID)
 		if err != nil {
 			return err

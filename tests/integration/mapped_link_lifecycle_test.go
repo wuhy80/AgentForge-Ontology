@@ -122,7 +122,7 @@ func verifyMappedLinkLifecycle(t *testing.T, de *storage.Engine, admin, outsider
 	exec("DELETE FROM "+endpoints+" WHERE tenant=?", tenant)
 	admin.request("POST", path+"/disable", nil, match, 200, nil)
 	admin.request("POST", dataURL+"/data/query", query, nil, 409, nil)
-	admin.request("GET", path+"/delete-preview", nil, match, 409, nil)
+	admin.request("GET", path+"/delete-preview", nil, match, 204, nil)
 	exec("ALTER TABLE " + endpoints + " RENAME COLUMN name TO renamed")
 	admin.request("GET", path+"/restore-preview", nil, match, 409, nil)
 	admin.request("POST", path+"/restore", nil, match, 409, nil)
@@ -134,6 +134,44 @@ func verifyMappedLinkLifecycle(t *testing.T, de *storage.Engine, admin, outsider
 	admin.request("POST", dataURL+"/data/query", query, nil, 200, &result)
 	if len(result.Data) != 1 {
 		t.Fatalf("restored Schema returned %d rows, want 1", len(result.Data))
+	}
+	exec("DELETE FROM "+endpoints+" WHERE tenant=?", tenant)
+	admin.request("POST", path+"/disable", nil, match, 200, nil)
+	admin.request("GET", path+"/delete-preview", nil, match, 204, nil)
+	exec("INSERT INTO "+endpoints+" (tenant,id,name) VALUES (?,3,'late')", tenant)
+	admin.request("DELETE", path, nil, match, 409, &blocked)
+	if blocked.Code != "definition_data_in_use" {
+		t.Fatalf("mapped Schema deletion returned %q for data added after preview", blocked.Code)
+	}
+	exec("DELETE FROM "+endpoints+" WHERE tenant=?", tenant)
+	admin.request("DELETE", path, nil, match, 204, nil)
+	admin.request("POST", path+"/restore", nil, match, 404, nil)
+	if err := de.DB().QueryRow("SELECT COUNT(*) FROM "+endpoints+" WHERE tenant=?", tenant+"-other").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("Schema deletion changed external data: count=%d, err=%v", count, err)
+	}
+
+	forwardTable := "lc_forward_" + suffix
+	t.Cleanup(func() { exec("DROP TABLE IF EXISTS " + forwardTable) })
+	forward := publish(c.Definition{Kind: c.KindSchema, Name: "正向映射生命周期", Schema: &c.Schema{
+		Mode: "schema_2_db", StorageLayout: "single",
+		StorageBinding: &c.StorageBinding{DataSourceID: source.ID, Table: forwardTable, IDColumn: "id", TenantColumn: "tenant_id"},
+		Properties: []c.Property{{Name: "名称", DataType: "string", Required: true,
+			Mapping: &c.PropertyMapping{DataSourceID: source.ID, Column: "name"}}},
+	}})
+	path = definitionURL(forward.Definition.ID)
+	match = map[string]string{"If-Match": `"` + forward.ETag + `"`}
+	query.From.SchemaID = forward.Definition.ID
+	query.Select = []string{forward.Definition.Schema.Properties[0].ID}
+	admin.request("GET", path+"/disable-preview", nil, match, 200, nil)
+	admin.request("POST", path+"/disable", nil, match, 200, nil)
+	admin.request("POST", dataURL+"/data/query", query, nil, 409, nil)
+	admin.request("POST", path+"/restore", nil, match, 200, nil)
+	admin.request("POST", dataURL+"/data/query", query, nil, 200, nil)
+	admin.request("POST", path+"/disable", nil, match, 200, nil)
+	admin.request("GET", path+"/delete-preview", nil, match, 204, nil)
+	admin.request("DELETE", path, nil, match, 204, nil)
+	if err := de.DB().QueryRow("SELECT COUNT(*) FROM " + forwardTable).Scan(&count); err != nil {
+		t.Fatalf("forward Schema logical deletion must retain its table: %v", err)
 	}
 
 }

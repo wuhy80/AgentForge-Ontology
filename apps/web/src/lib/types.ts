@@ -398,6 +398,7 @@ export interface MetadataCapabilities {
   disabledMappedLinkDelete?: boolean
   managedSchemaLifecycle?: boolean
   mappedSchemaLifecycle?: boolean
+  disabledMappedSchemaDelete?: boolean
   actionRecordRead?: boolean
   dependencyImpact?: 'direct-definitions'
   definitions: Kind[]

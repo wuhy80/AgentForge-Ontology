@@ -1,15 +1,16 @@
 import { test, expect } from '@playwright/test'
 import { ontologyFixture } from './fixtures/ontology'
 
-for (const kind of ['enum', 'link', 'junction', 'foreign_key', 'schema', 'mapped_schema'] as const) for (const width of [1440, 390]) test(`${kind} 生命周期在 ${width}px 下可预览、停用和恢复`, async ({ page }) => {
+for (const kind of ['enum', 'link', 'junction', 'foreign_key', 'schema', 'mapped_schema', 'forward_schema'] as const) for (const width of [1440, 390]) test(`${kind} 生命周期在 ${width}px 下可预览、停用和恢复`, async ({ page }) => {
   await page.setViewportSize({ width, height: 844 })
   const fixture = await ontologyFixture(page)
-  const id = kind === 'enum' ? 'status' : kind === 'schema' || kind === 'mapped_schema' ? 'tags' : 'note-tags'
+  const id = kind === 'enum' ? 'status' : kind === 'schema' || kind === 'mapped_schema' || kind === 'forward_schema' ? 'tags' : 'note-tags'
   const mapped = kind === 'junction' || kind === 'foreign_key'
   const record = fixture.current.find((item) => item.definition.id === id)!
-  if (kind === 'mapped_schema') {
+  const mappedSchema = kind === 'mapped_schema' || kind === 'forward_schema'
+  if (mappedSchema) {
     const schema = record.definition.schema!
-    schema.mode = 'db_2_schema'
+    schema.mode = kind === 'mapped_schema' ? 'db_2_schema' : 'schema_2_db'
     schema.storageBinding = { dataSourceId: 'source', table: 'tags', idColumn: 'id' }
     for (const property of schema.properties) property.mapping = { dataSourceId: 'source', column: 'name' }
   }
@@ -20,7 +21,7 @@ for (const kind of ['enum', 'link', 'junction', 'foreign_key', 'schema', 'mapped
       : { mode: 'managed' }
   }
   await page.route('**/api/metadata/capabilities', route => route.fulfill({ json: {
-    definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active', 'disabled'], enumLifecycle: true, managedLinkLifecycle: true, mappedLinkLifecycle: true, disabledMappedLinkDelete: true, managedSchemaLifecycle: true, mappedSchemaLifecycle: true, callableLifecyclePreview: true,
+    definitions: ['schema', 'enum', 'link', 'action', 'function'], lifecycle: ['draft', 'active', 'disabled'], enumLifecycle: true, managedLinkLifecycle: true, mappedLinkLifecycle: true, disabledMappedLinkDelete: true, managedSchemaLifecycle: true, mappedSchemaLifecycle: true, disabledMappedSchemaDelete: true, callableLifecyclePreview: true,
   } }))
   await page.route(`**/api/metadata/definitions/${id}/*`, (route) => {
     const path = new URL(route.request().url()).pathname
@@ -41,6 +42,9 @@ for (const kind of ['enum', 'link', 'junction', 'foreign_key', 'schema', 'mapped
     await page.keyboard.press('Enter')
     await page.getByRole('button', { name: '确认停用', exact: true }).click()
     await expect(page.getByText('定义已停用。')).toBeVisible()
+    if (mappedSchema) {
+      await expect(page.getByRole('button', { name: '删除模型', exact: true })).toBeVisible()
+    }
     if (mapped) {
       await page.getByRole('button', { name: '删除关系', exact: true }).click()
       await expect(page.getByText('确认删除此已停用的关系？删除后无法恢复。')).toBeVisible()
