@@ -357,8 +357,22 @@ func TestMappedLinksExecuteDatabaseJoinsAndPermissions(t *testing.T) {
 			lifecycle(false, false, 204)
 			query.Page.Cursor = ""
 			f.query(query, 409)
+			deleteCheck := func(preview bool, want int) {
+				t.Helper()
+				response := f.request("POST", "/internal/definitions/"+link.ID+"/managed-storage-delete-check",
+					c.ManagedLinkLifecycle{Digest: digest(link), Preview: preview}, true)
+				if response.Code != want {
+					t.Fatalf("mapped relation delete check preview=%v: got %d want %d (%s)", preview, response.Code, want, response.Body)
+				}
+			}
+			deleteCheck(true, 204)
+			f.exec(index, "INSERT INTO "+f.qualified(index, edgeName)+" (tenant,source_id,target_id) VALUES (?,?,?)", f.tenant, 1, 10)
+			deleteCheck(false, 409)
+			f.exec(index, "DELETE FROM "+f.qualified(index, edgeName)+" WHERE tenant=?", f.tenant)
+			deleteCheck(false, 204)
 			lifecycle(true, false, 204)
 			f.query(query, 200)
+			deleteCheck(true, 409)
 			// Tenant-local cleanup does not drop or truncate shared platform tables.
 			t.Cleanup(func() {
 				_, _ = f.engine.DB().ExecContext(context.Background(), "DELETE FROM af_data_outbox WHERE tenant_id=?", f.tenant)

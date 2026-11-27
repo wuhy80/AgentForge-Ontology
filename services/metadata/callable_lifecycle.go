@@ -16,6 +16,22 @@ import (
 
 const disabledDefinition = "disabled"
 
+func supportsStorageLifecycle(d c.Definition) bool {
+	switch d.Kind {
+	case c.KindLink:
+		if d.Link != nil && d.Link.StorageBinding != nil {
+			switch d.Link.StorageBinding.Mode {
+			case "managed", "junction", "foreign_key":
+				return true
+			}
+		}
+	case c.KindSchema:
+		return d.Schema != nil && d.Schema.Mode == "schema_2_db" &&
+			d.Schema.StorageLayout == "single" && d.Schema.StorageBinding == nil
+	}
+	return false
+}
+
 func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 	return func(w http.ResponseWriter, r *http.Request, p c.Principal) error {
 		ctx := r.Context()
@@ -60,10 +76,7 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 			if d.Kind == c.KindFunction {
 				callable = d.Function
 			}
-			storedLink := d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil &&
-				(d.Link.StorageBinding.Mode == "managed" || d.Link.StorageBinding.Mode == "junction" || d.Link.StorageBinding.Mode == "foreign_key")
-			managedSchema := d.Kind == c.KindSchema && d.Schema != nil && d.Schema.Mode == "schema_2_db" && d.Schema.StorageLayout == "single" && d.Schema.StorageBinding == nil
-			storedDefinition := storedLink || managedSchema
+			storedDefinition := supportsStorageLifecycle(d)
 			if !storedDefinition && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
 				return problem(422, "unsupported_lifecycle", "当前支持 Enum、托管单表 Schema、已配置存储的关系及无副作用的 Action 和 Function")
 			}

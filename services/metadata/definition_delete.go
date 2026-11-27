@@ -53,20 +53,18 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 			}
 			draftOnly := row.status == "draft" && !row.current.Valid && row.draft.Valid
 			disabledEnum := row.status == disabledDefinition && row.d.Kind == c.KindEnum && row.current.Valid && !row.draft.Valid
-			var managedStorage bool
+			var storedDefinition bool
 			var disabledCallable bool
 			if row.status == disabledDefinition && row.current.Valid && !row.draft.Valid {
 				d, err := parseDefinition(row.current)
 				if err != nil {
 					return err
 				}
-				managedStorage = d.Kind == c.KindSchema && d.Schema != nil && d.Schema.Mode == "schema_2_db" &&
-					d.Schema.StorageLayout == "single" && d.Schema.StorageBinding == nil ||
-					d.Kind == c.KindLink && d.Link != nil && d.Link.StorageBinding != nil && d.Link.StorageBinding.Mode == "managed"
+				storedDefinition = supportsStorageLifecycle(d)
 				callable := callableBody(d)
 				disabledCallable = callable != nil && (callable.SideEffects == "" || callable.SideEffects == "none") && len(callable.DataWrite) == 0
 			}
-			if !draftOnly && !disabledEnum && !managedStorage && !disabledCallable {
+			if !draftOnly && !disabledEnum && !storedDefinition && !disabledCallable {
 				return problem(409, "unsupported_delete_state", "当前只支持删除从未发布的草稿或受支持的已停用定义")
 			}
 			digest := row.draftDigest
@@ -100,7 +98,7 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 					}
 				}
 			}
-			if managedStorage {
+			if storedDefinition {
 				if err := h.checkManagedStorage(ctx, row.d, "managed-storage-delete-check", c.ManagedLinkLifecycle{Digest: digest, Preview: preview}); err != nil {
 					return err
 				}

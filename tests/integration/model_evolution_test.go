@@ -6,17 +6,21 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
@@ -146,7 +150,27 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 	t.Cleanup(metaServer.Close)
 	checker := &platform.RemoteSessionChecker{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}
 	authorizer := &platform.RemoteAuthorizer{URL: metaServer.URL, ServiceToken: serviceToken, Client: metaServer.Client()}
-	dataServer := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, false, checker, data.NewHandler(data.Config{Engine: de, Authorizer: authorizer, SessionChecker: checker, MetadataURL: metaServer.URL, ServiceToken: serviceToken, CursorSecret: cursorSecret, HTTPClient: metaServer.Client()})))
+	dataConfig := data.Config{Engine: de, Authorizer: authorizer, SessionChecker: checker, MetadataURL: metaServer.URL, ServiceToken: serviceToken, CursorSecret: cursorSecret, HTTPClient: metaServer.Client()}
+	var mappedSource *c.DataSourceInput
+	sourceDSN, err := mysql.ParseDSN(ddsn)
+	if err != nil {
+		t.Fatal("invalid isolated Data DSN")
+	}
+	host, portText, _ := net.SplitHostPort(sourceDSN.Addr)
+	if host == "127.0.0.1" {
+		port, err := strconv.Atoi(portText)
+		if err != nil {
+			t.Fatal("invalid isolated Data port")
+		}
+		dataConfig.SourceNetworkPolicy, err = data.ParseSourceNetworkPolicy(`[{"cidr":"127.0.0.1/32","ports":[` + portText + `],"allowInsecureTLS":true}]`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dataConfig.DataSourceKey = cursorSecret
+		mappedSource = &c.DataSourceInput{Name: "映射关系隔离来源", Driver: "mysql", Host: host, Port: port, Database: sourceDSN.DBName,
+			Username: sourceDSN.User, Password: &sourceDSN.Passwd, TLSMode: "disable", TenantIsolation: "column", Enabled: true}
+	}
+	dataServer := httptest.NewTLSServer(platform.ProtectSessionRoutes(serviceToken, false, checker, data.NewHandler(dataConfig)))
 	t.Cleanup(dataServer.Close)
 	metaMux.Handle("/metadata/auth/", accounts.NewHandler())
 	metaMux.Handle("/metadata/admin/", accounts.NewHandler())
@@ -234,6 +258,11 @@ func TestModelEvolutionSessionsAndOPAEndToEnd(t *testing.T) {
 		admin.request("POST", definitionURL(draft.Definition.ID)+"/publish", nil, map[string]string{"If-Match": headers.Get("ETag")}, 200, nil)
 		admin.request("GET", definitionURL(draft.Definition.ID), nil, nil, 200, &current)
 		return current
+	}
+	if mappedSource != nil {
+		verifyMappedLinkLifecycle(t, de, admin, outsider, dataServer.URL, definitionURL, publish, tenant, *mappedSource)
+	} else {
+		t.Log("mapped Link fixture requires a loopback MySQL Data DSN")
 	}
 	definitionInput := func(d c.Definition) c.Definition {
 		encoded, err := json.Marshal(d)

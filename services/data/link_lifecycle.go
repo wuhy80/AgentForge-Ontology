@@ -55,7 +55,7 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			return err
 		}
 		link := definition.Kind == c.KindLink && definition.Link != nil && definition.Link.StorageBinding != nil && definition.Link.StorageBinding.Mode == "managed"
-		mappedLink := !deletionCheck && definition.Kind == c.KindLink && definition.Link != nil && definition.Link.StorageBinding != nil &&
+		mappedLink := definition.Kind == c.KindLink && definition.Link != nil && definition.Link.StorageBinding != nil &&
 			(definition.Link.StorageBinding.Mode == "junction" || definition.Link.StorageBinding.Mode == "foreign_key")
 		schema := definition.Kind == c.KindSchema && definition.Schema != nil && definition.Schema.Mode == "schema_2_db" &&
 			definition.Schema.StorageLayout == "single" && definition.Schema.StorageBinding == nil

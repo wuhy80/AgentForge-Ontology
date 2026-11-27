@@ -394,6 +394,8 @@ export interface MetadataCapabilities {
   callableLifecyclePreview?: boolean
   enumLifecycle?: boolean
   managedLinkLifecycle?: boolean
+  mappedLinkLifecycle?: boolean
+  disabledMappedLinkDelete?: boolean
   managedSchemaLifecycle?: boolean
   actionRecordRead?: boolean
   dependencyImpact?: 'direct-definitions'

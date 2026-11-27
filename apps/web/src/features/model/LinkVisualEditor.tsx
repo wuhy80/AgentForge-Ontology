@@ -35,7 +35,9 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   const [selectedSchema, setSelectedSchema] = useState<string>()
   const [busy, setBusy] = useState<'save' | 'preview' | 'publish' | 'reload' | 'lifecycle' | 'delete' | ''>('')
   const [lifecycleAvailable, setLifecycleAvailable] = useState(false)
+  const [mappedLifecycleAvailable, setMappedLifecycleAvailable] = useState(false)
   const [managedDeleteAvailable, setManagedDeleteAvailable] = useState(false)
+  const [mappedDeleteAvailable, setMappedDeleteAvailable] = useState(false)
   const [draftDeleteAvailable, setDraftDeleteAvailable] = useState(false)
   const [deleteETag, setDeleteETag] = useState<string>()
   const [confirmLifecycle, setConfirmLifecycle] = useState(false)
@@ -50,12 +52,15 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   const dirty = JSON.stringify(definition) !== JSON.stringify(record?.definition ?? initialDefinition)
   const suspended = record?.status === 'disabled'
   const locked = !!(record?.hasCurrent || record?.status === 'active' || suspended)
-  const canDeleteManaged = managedDeleteAvailable && suspended && record?.definition.link?.storageBinding?.mode === 'managed'
-  const canDeleteDefinition = !!onDeleted && (canDeleteManaged || (draftDeleteAvailable && record?.status === 'draft' && !locked))
+  const storageMode = record?.definition.link?.storageBinding?.mode
+  const mapped = storageMode === 'junction' || storageMode === 'foreign_key'
+  const canDeleteStored = suspended && (storageMode === 'managed' ? managedDeleteAvailable : mapped && mappedDeleteAvailable)
+  const canDeleteDefinition = !!onDeleted && (canDeleteStored || (draftDeleteAvailable && record?.status === 'draft' && !locked))
   const uncertain = !!publication && !['succeeded', 'rejected'].includes(publication.status)
   const disabled = !!busy || uncertain || suspended
-  const managed = record?.definition.link?.storageBinding?.mode === 'managed'
-  const lifecycleAllowed = lifecycleAvailable && managed && (record?.status === 'active' || suspended)
+  const lifecycleSupported = storageMode === 'managed' ? lifecycleAvailable
+    : mapped && mappedLifecycleAvailable
+  const lifecycleAllowed = lifecycleSupported && (record?.status === 'active' || suspended)
   const directoryCategoryId = definition.categoryId
   const sourceCategory = categories.find((item) => item.id === categoryId)
   const category = categories.find((item) => item.id === directoryCategoryId && item.tenantId === sourceCategory?.tenantId)
@@ -83,14 +88,16 @@ export function LinkVisualEditor(props: ModelEditorProps) {
       if (request.signal.aborted) return
       setDraftDeleteAvailable(value.unpublishedDraftDelete === true)
       setManagedDeleteAvailable(value.disabledManagedStorageDelete === true)
+      setMappedDeleteAvailable(value.disabledMappedLinkDelete === true)
       setLifecycleAvailable(value.managedLinkLifecycle === true)
+      setMappedLifecycleAvailable(value.mappedLinkLifecycle === true)
     }).catch(() => {})
     return () => request.abort()
   }, [api, active])
 
   async function deleteDefinition(confirm: boolean) {
     if (!record || !canDeleteDefinition || dirty || busy || uncertain || (confirm && deleteETag !== record.etag)) return
-    setBusy('delete'); setError(''); setMessage(''); setDeleteETag(undefined)
+    setBusy('delete'); setError(''); setMessage(''); setDeleteETag(undefined); setConfirmLifecycle(false)
     try {
       if (confirm) {
         await api.deleteUnpublishedDraft(record.definition.id, record.etag)
@@ -105,7 +112,7 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   async function changeLifecycle(confirm: boolean) {
     if (!record || !lifecycleAllowed || dirty || busy || uncertain) return
     const operation = suspended ? 'restore' : 'disable'
-    setBusy('lifecycle'); setError(''); setMessage('')
+    setBusy('lifecycle'); setError(''); setMessage(''); setDeleteETag(undefined)
     try {
       if (!confirm) {
         const result = await api.previewCallableLifecycle(record.definition.id, operation, record.etag)
@@ -225,11 +232,11 @@ export function LinkVisualEditor(props: ModelEditorProps) {
   return <section className={`model-editor-page link-visual-editor ${embedded ? 'link-editor-embedded' : ''}`} aria-label="模型编辑">
     <div className="model-editor link-editor-body">
       <div className="model-editor-meta">{!embedded && <button type="button" className="button subtle model-back-button" disabled={!!busy} onClick={() => leave(onClose)}><ArrowLeft size={16} />返回模型列表</button>}{!embedded && onGraph && <button type="button" className="button" disabled={!!busy} onClick={() => leave(onGraph)}><GitBranch size={15} />打开分类关系图</button>}{!embedded && definition.name && <strong className="model-editor-name">{definition.name}</strong>}<span className="badge model-kind-link">关系</span><span className="badge">{suspended ? '已停用' : record?.status === 'active' ? '当前生效' : locked ? '待发布变更' : '草稿'}</span><span className="badge">{link.storageBinding ? link.storageBinding.mode === 'managed' ? '平台托管' : '外部只读' : '仅定义'}</span>{dirty && <span className="model-unsaved">有未保存修改</span>}
-        {canDeleteDefinition && deleteETag !== record?.etag && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(false)}>{canDeleteManaged ? '删除关系' : '删除草稿'}</button>}
+        {canDeleteDefinition && deleteETag !== record?.etag && <button type="button" className="button subtle" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(false)}>{canDeleteStored ? '删除关系' : '删除草稿'}</button>}
         {lifecycleAllowed && !confirmLifecycle && <button type="button" className="button subtle" disabled={dirty || !!busy || uncertain} onClick={() => void changeLifecycle(false)}>{suspended ? '恢复定义' : '停用定义'}</button>}
       </div>
       {canDeleteDefinition && deleteETag === record?.etag && <div className="notice notice-error" role="status">
-        <p>{canDeleteManaged ? '确认删除此已停用的关系？删除后无法恢复。' : '确认删除这份未发布的草稿？删除后无法恢复。'}</p>
+        <p>{canDeleteStored ? '确认删除此已停用的关系？删除后无法恢复。' : '确认删除这份未发布的草稿？删除后无法恢复。'}</p>
         <div className="model-inline-actions">
           <button type="button" className="button subtle" autoFocus onClick={() => setDeleteETag(undefined)}>取消</button>
           <button type="button" className="button primary" disabled={!!busy || dirty || uncertain} onClick={() => void deleteDefinition(true)}>确认删除</button>
