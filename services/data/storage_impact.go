@@ -82,17 +82,25 @@ func (h *handler) mappedStorageImpact(ctx context.Context, tenant string, curren
 		if err := h.gate(ctx, tx, c.Principal{TenantID: tenant}, current); err != nil {
 			return err
 		}
-		tables, err := h.mappedTables(ctx, current.Definition, false)
-		if err != nil {
-			return err
-		}
-		defer closeMappedTables(tables)
-		if err := validateCurrentMappedCatalog(ctx, current, tables); err != nil {
-			return err
-		}
-		return mappedImpactExists(ctx, tables[0], tenant, "", &out)
+		return h.checkMappedSchemaStorage(ctx, tenant, current, &out)
 	})
 	return out, err
+}
+
+// A nil impact checks the published structure without requiring an empty source.
+func (h *handler) checkMappedSchemaStorage(ctx context.Context, tenant string, current c.CurrentDefinition, impact *c.StorageDefinitionImpact) error {
+	tables, err := h.mappedTables(ctx, current.Definition, false)
+	if err != nil {
+		return err
+	}
+	defer closeMappedTables(tables)
+	if err := validateCurrentMappedCatalog(ctx, current, tables); err != nil {
+		return err
+	}
+	if impact == nil {
+		return nil
+	}
+	return mappedImpactExists(ctx, tables[0], tenant, "", impact)
 }
 
 func (h *handler) mappedLinkStorageImpact(ctx context.Context, tenant string, current c.CurrentDefinition) (c.StorageDefinitionImpact, error) {

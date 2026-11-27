@@ -16,6 +16,11 @@ import (
 
 const disabledDefinition = "disabled"
 
+func supportsMappedSchemaLifecycle(d c.Definition) bool {
+	return d.Kind == c.KindSchema && d.Schema != nil && d.Schema.Mode == "db_2_schema" &&
+		d.Schema.StorageLayout == "single" && d.Schema.StorageBinding != nil
+}
+
 func supportsStorageLifecycle(d c.Definition) bool {
 	switch d.Kind {
 	case c.KindLink:
@@ -76,9 +81,9 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 			if d.Kind == c.KindFunction {
 				callable = d.Function
 			}
-			storedDefinition := supportsStorageLifecycle(d)
+			storedDefinition := supportsStorageLifecycle(d) || supportsMappedSchemaLifecycle(d)
 			if !storedDefinition && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
-				return problem(422, "unsupported_lifecycle", "当前支持 Enum、托管单表 Schema、已配置存储的关系及无副作用的 Action 和 Function")
+				return problem(422, "unsupported_lifecycle", "当前支持 Enum、托管和反向映射单表 Schema、已配置存储的关系及无副作用的 Action 和 Function")
 			}
 			if row.draft.Valid {
 				return problem(409, "lifecycle_draft_exists", "请先处理已保存的草稿")

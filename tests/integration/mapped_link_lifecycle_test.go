@@ -98,4 +98,42 @@ func verifyMappedLinkLifecycle(t *testing.T, de *storage.Engine, admin, outsider
 	if err := de.DB().QueryRow("SELECT COUNT(*) FROM "+edges+" WHERE tenant=?", tenant+"-other").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("mapped Link deletion affected another tenant's relation: count=%d, err=%v", count, err)
 	}
+	t.Log("mapped Schema lifecycle over public Metadata/Data HTTP")
+	path := definitionURL(endpoint.Definition.ID)
+	match := map[string]string{"If-Match": `"` + endpoint.ETag + `"`}
+	query := c.QuerySpec{
+		From:   c.Source{SchemaID: endpoint.Definition.ID},
+		Select: []string{endpoint.Definition.Schema.Properties[0].ID}, Page: c.Page{Limit: 10},
+	}
+	var blocked c.Error
+	admin.request("GET", path+"/disable-preview", nil, match, 409, &blocked)
+	if blocked.Code != "definition_data_in_use" {
+		t.Fatalf("mapped Schema disable preview returned %q for existing data", blocked.Code)
+	}
+	exec("DELETE FROM "+endpoints+" WHERE tenant=?", tenant)
+	exec("INSERT INTO "+endpoints+" (tenant,id,name) VALUES (?,1,'unrelated')", tenant+"-other")
+	outsider.request("GET", path+"/disable-preview", nil, match, 404, nil)
+	admin.request("GET", path+"/disable-preview", nil, match, 200, nil)
+	exec("INSERT INTO "+endpoints+" (tenant,id,name) VALUES (?,2,'new')", tenant)
+	admin.request("POST", path+"/disable", nil, match, 409, &blocked)
+	if blocked.Code != "definition_data_in_use" {
+		t.Fatalf("mapped Schema disable returned %q for data added after preview", blocked.Code)
+	}
+	exec("DELETE FROM "+endpoints+" WHERE tenant=?", tenant)
+	admin.request("POST", path+"/disable", nil, match, 200, nil)
+	admin.request("POST", dataURL+"/data/query", query, nil, 409, nil)
+	admin.request("GET", path+"/delete-preview", nil, match, 409, nil)
+	exec("ALTER TABLE " + endpoints + " RENAME COLUMN name TO renamed")
+	admin.request("GET", path+"/restore-preview", nil, match, 409, nil)
+	admin.request("POST", path+"/restore", nil, match, 409, nil)
+	exec("ALTER TABLE " + endpoints + " RENAME COLUMN renamed TO name")
+	exec("INSERT INTO "+endpoints+" (tenant,id,name) VALUES (?,2,'restored')", tenant)
+	admin.request("GET", path+"/restore-preview", nil, match, 200, nil)
+	admin.request("POST", path+"/restore", nil, match, 200, nil)
+	var result c.QueryResult
+	admin.request("POST", dataURL+"/data/query", query, nil, 200, &result)
+	if len(result.Data) != 1 {
+		t.Fatalf("restored Schema returned %d rows, want 1", len(result.Data))
+	}
+
 }

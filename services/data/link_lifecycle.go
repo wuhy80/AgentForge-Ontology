@@ -59,7 +59,9 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 			(definition.Link.StorageBinding.Mode == "junction" || definition.Link.StorageBinding.Mode == "foreign_key")
 		schema := definition.Kind == c.KindSchema && definition.Schema != nil && definition.Schema.Mode == "schema_2_db" &&
 			definition.Schema.StorageLayout == "single" && definition.Schema.StorageBinding == nil
-		if definition.ID != id || definition.TenantID != tenant || (!link && !schema && !mappedLink) {
+		mappedSchema := definition.Kind == c.KindSchema && definition.Schema != nil && definition.Schema.Mode == "db_2_schema" &&
+			definition.Schema.StorageLayout == "single" && definition.Schema.StorageBinding != nil
+		if definition.ID != id || definition.TenantID != tenant || (!link && !schema && !mappedLink && !mappedSchema) || deletionCheck && mappedSchema {
 			return problem(422, "unsupported_lifecycle", "定义存储不支持当前生命周期操作")
 		}
 		var hasData bool
@@ -78,6 +80,15 @@ func (h *handler) managedLinkLifecycleHTTP(w http.ResponseWriter, r *http.Reques
 				}
 				hasData = impact.HasData
 			}
+		} else if mappedSchema {
+			var impact *c.StorageDefinitionImpact
+			if !command.Restore {
+				impact = &c.StorageDefinitionImpact{}
+			}
+			if err := h.checkMappedSchemaStorage(ctx, tenant, c.CurrentDefinition{Definition: definition, ETag: digest}, impact); err != nil {
+				return problem(409, "mapping_unavailable", "无法复核映射对象的结构或存量")
+			}
+			hasData = impact != nil && impact.HasData
 		} else {
 			table := tableName(id)
 			verify := func() error { return verifyTable(ctx, tx, definition) }
