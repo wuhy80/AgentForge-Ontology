@@ -387,6 +387,7 @@ export interface QueryFieldInsertionRequest extends OntologySQLRequest { schemaI
 export interface QueryFieldInsertionResult { requestId: string; textHash: string; text: string; from: number; to: number; diagnostics: SQLDiagnostic[] }
 export interface MetadataCapabilities {
   callableLifecycle?: 'pure-only'
+  writeCallableLifecycle?: boolean
   unpublishedDraftDelete?: boolean
   disabledEnumDelete?: boolean
   disabledCallableDelete?: boolean

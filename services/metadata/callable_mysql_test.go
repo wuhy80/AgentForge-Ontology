@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	c "github.com/wuhy80/AgentForge-Ontology/contracts"
 	"github.com/wuhy80/AgentForge-Ontology/libs/platform"
@@ -49,11 +50,11 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 			}
 			switch executionImpact.Load() {
 			case 1:
-				writeJSON(w, 200, map[string]bool{"pending": true})
+				writeJSON(w, 200, map[string]bool{"pending": true, "writeAdmissionFence": true})
 			case 2:
 				writeJSON(w, 200, map[string]bool{})
 			default:
-				writeJSON(w, 200, map[string]bool{"pending": false})
+				writeJSON(w, 200, map[string]bool{"pending": false, "writeAdmissionFence": executionImpact.Load() != 3})
 			}
 			return
 		}
@@ -425,6 +426,72 @@ func TestMySQLPythonPublicationAndActionBinding(t *testing.T) {
 	}
 	request("POST", enumDeletePath+"/restore", deletableEnum.ETag, nil, 404, nil)
 	request("POST", enumDeletePath+"/publish", deletableEnum.ETag, nil, 404, nil)
+	writeTarget := validSchema()
+	writeTarget.Name = "Write lifecycle target"
+	writeSchema := create(writeTarget)
+	publish(writeSchema, 200)
+	for _, definition := range []c.Definition{executableAction(), executableFunction()} {
+		definition.Name = "Write lifecycle " + string(definition.Kind)
+		callable := callableBody(definition)
+		callable.SideEffects = "dataWrite"
+		callable.DataWrite = []c.DataWriteCapability{{SchemaID: writeSchema.Definition.ID, Operations: []string{"create"}}}
+		item := create(definition)
+		publish(item, 200)
+		path := "/metadata/definitions/" + item.Definition.ID
+		request("GET", path+"/disable-preview", item.ETag, nil, 200, nil)
+		executionImpact.Store(1)
+		var blocked c.Error
+		request("POST", path+"/disable", item.ETag, nil, 409, &blocked)
+		if blocked.Code != "definition_execution_in_use" {
+			t.Fatalf("unexpected write execution blocker: %s", blocked.Code)
+		}
+		executionImpact.Store(3)
+		request("POST", path+"/disable", item.ETag, nil, 503, nil)
+		executionImpact.Store(0)
+		request("POST", path+"/disable", item.ETag, nil, 200, nil)
+		request("GET", path+"/delete-preview", item.ETag, nil, 409, nil)
+		request("GET", path+"/restore-preview", item.ETag, nil, 200, nil)
+		request("POST", path+"/restore", item.ETag, nil, 200, nil)
+		t.Run(string(definition.Kind)+" admission waits for lifecycle row", func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			tx, err := engine.DB().BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err := tx.ExecContext(ctx, "UPDATE af_meta_definitions SET status='disabled' WHERE tenant_id=? AND id=?", tenant, item.Definition.ID); err != nil {
+				t.Fatal(err)
+			}
+			response := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				r := httptest.NewRequestWithContext(ctx, "GET", path, nil)
+				r.Header.Set("Authorization", "Bearer "+config.ServiceToken)
+				r.Header.Set("X-Tenant-ID", tenant)
+				r.Header.Set("X-Ontology-Callable-Admission", "1")
+				w := httptest.NewRecorder()
+				api.ServeHTTP(w, r)
+				response <- w
+			}()
+			select {
+			case <-response:
+				t.Fatal("admission did not wait for definition transaction")
+			case <-time.After(100 * time.Millisecond):
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case w := <-response:
+				var observed c.CurrentDefinition
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &observed) != nil || observed.Status != "disabled" {
+					t.Fatalf("admission did not observe the committed disabled state: HTTP %d", w.Code)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		})
+	}
 	enum := create(c.Definition{Kind: c.KindEnum, Name: "验收枚举", Enum: &c.Enum{Values: []c.EnumValue{{Code: "in", Label: "有效"}}}})
 	publish(enum, 200)
 	enumPath := "/metadata/definitions/" + enum.Definition.ID

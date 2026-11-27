@@ -204,7 +204,7 @@ func (h *handler) capabilities(w http.ResponseWriter, r *http.Request, p contrac
 	if err := h.authorize(r.Context(), p, "definition.read", "", ""); err != nil {
 		return err
 	}
-	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active", "disabled"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "unpublishedDraftDelete": h.supportsDraftDeletion(), "disabledEnumDelete": h.supportsDraftDeletion(), "disabledCallableDelete": h.supportsDraftDeletion() && h.cfg.ExecutionURL != "" && len(h.cfg.ServiceToken) >= 32, "disabledManagedStorageDelete": h.supportsDraftDeletion() && h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "disabledMappedSchemaDelete": h.supportsDraftDeletion() && h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "disabledMappedLinkDelete": h.supportsDraftDeletion() && h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "disable": false, "callableLifecycle": "pure-only", "callableLifecyclePreview": true, "enumLifecycle": true, "managedLinkLifecycle": true, "mappedLinkLifecycle": h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "managedSchemaLifecycle": true, "mappedSchemaLifecycle": h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "actionRecordRead": true, "schemaInheritance": false, "dbToSchema": true})
+	writeJSON(w, 200, map[string]any{"definitions": []string{"schema", "enum", "link", "action", "function"}, "lifecycle": []string{"draft", "active", "disabled"}, "definitionUpdates": "display-and-safe-additions", "schemaMigrations": map[string]bool{"addFields": true, "addIndexes": true, "destructive": false}, "enumReferences": true, "dependencyImpact": "direct-definitions", "schemaModes": []string{"schema_2_db", "db_2_schema"}, "storageLayouts": []string{"single"}, "callableRuntimes": []string{"python", "javascript", "go"}, "invocation": false, "delete": false, "unpublishedDraftDelete": h.supportsDraftDeletion(), "disabledEnumDelete": h.supportsDraftDeletion(), "disabledCallableDelete": h.supportsDraftDeletion() && h.cfg.ExecutionURL != "" && len(h.cfg.ServiceToken) >= 32, "disabledManagedStorageDelete": h.supportsDraftDeletion() && h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "disabledMappedSchemaDelete": h.supportsDraftDeletion() && h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "disabledMappedLinkDelete": h.supportsDraftDeletion() && h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "disable": false, "callableLifecycle": "pure-only", "writeCallableLifecycle": h.cfg.ExecutionURL != "" && len(h.cfg.ServiceToken) >= 32, "callableLifecyclePreview": true, "enumLifecycle": true, "managedLinkLifecycle": true, "mappedLinkLifecycle": h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "managedSchemaLifecycle": true, "mappedSchemaLifecycle": h.cfg.DataURL != "" && len(h.cfg.ServiceToken) >= 32, "actionRecordRead": true, "schemaInheritance": false, "dbToSchema": true})
 	return nil
 }
 
@@ -425,7 +425,19 @@ func (h *handler) getDraft(w http.ResponseWriter, r *http.Request, p contracts.P
 	return h.getDefinition(w, r, p, true)
 }
 func (h *handler) getDefinition(w http.ResponseWriter, r *http.Request, p contracts.Principal, draft bool) error {
-	row, err := scanDefinition(h.db.QueryRowContext(r.Context(), "SELECT "+definitionColumns+" FROM af_meta_definitions WHERE tenant_id=? AND id=?", p.TenantID, r.PathValue("id")))
+	statement := "SELECT " + definitionColumns + " FROM af_meta_definitions WHERE tenant_id=? AND id=?"
+	internal, _ := r.Context().Value(internalReaderKey{}).(bool)
+	query := h.db.QueryRowContext
+	if internal && !draft && r.Header.Get("X-Ontology-Callable-Admission") == "1" {
+		tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		query = tx.QueryRowContext
+		statement += " FOR SHARE"
+	}
+	row, err := scanDefinition(query(r.Context(), statement, p.TenantID, r.PathValue("id")))
 	if err != nil {
 		return err
 	}

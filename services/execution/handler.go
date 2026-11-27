@@ -108,7 +108,7 @@ func (h *handler) definitionExecutionImpact(w http.ResponseWriter, r *http.Reque
 	if ok {
 		pending, err := store.hasUnfinishedDefinitionInvocation(r.Context(), tenant, id)
 		if err == nil {
-			writeJSON(w, 200, map[string]bool{"pending": pending})
+			writeJSON(w, 200, map[string]bool{"pending": pending, "writeAdmissionFence": true})
 			return
 		}
 	}
@@ -530,7 +530,11 @@ func (h *handler) invoke(w http.ResponseWriter, r *http.Request, p c.Principal) 
 	w.Header().Set("Location", "/execution/invocations/"+record.Invocation.ID)
 	// A definition or session can change after claiming. Such a record becomes
 	// a failed invocation; it is never silently abandoned or automatically run.
-	if err := h.checkRecord(r.Context(), r, p, record); err != nil {
+	admissionContext := r.Context()
+	if rootCallable.SideEffects == "dataWrite" {
+		admissionContext = context.WithValue(admissionContext, callableAdmissionKey{}, true)
+	}
+	if err := h.checkRecord(admissionContext, r, p, record); err != nil {
 		record.Invocation.Status = "failed"
 		record.Invocation.Error = &c.Error{Code: "authorization_changed", Message: "启动前当前身份、授权或定义已改变"}
 		return h.finish(w, r, p, record, 201)

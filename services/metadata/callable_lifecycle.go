@@ -16,6 +16,10 @@ import (
 
 const disabledDefinition = "disabled"
 
+func supportsCallableWriteLifecycle(callable *c.Callable) bool {
+	return callable != nil && callable.SideEffects == "dataWrite" && len(callable.DataWrite) != 0
+}
+
 func supportsMappedSchemaLifecycle(d c.Definition) bool {
 	return d.Kind == c.KindSchema && d.Schema != nil && (d.Schema.Mode == "db_2_schema" || d.Schema.Mode == "schema_2_db") &&
 		d.Schema.StorageLayout == "single" && d.Schema.StorageBinding != nil
@@ -82,8 +86,9 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 				callable = d.Function
 			}
 			storedDefinition := supportsStorageLifecycle(d) || supportsMappedSchemaLifecycle(d)
-			if !storedDefinition && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
-				return problem(422, "unsupported_lifecycle", "当前支持 Enum、托管和映射单表 Schema、已配置存储的关系及无副作用的 Action 和 Function")
+			writeLifecycle := supportsCallableWriteLifecycle(callable)
+			if !storedDefinition && !writeLifecycle && d.Kind != c.KindEnum && (callable == nil || callable.SideEffects != "" && callable.SideEffects != "none" || len(callable.DataWrite) != 0) {
+				return problem(422, "unsupported_lifecycle", "当前支持 Enum、托管和映射单表 Schema、已配置存储的关系及受支持的 Action 和 Function")
 			}
 			if row.draft.Valid {
 				return problem(409, "lifecycle_draft_exists", "请先处理已保存的草稿")
@@ -135,6 +140,14 @@ func (h *handler) callableLifecycle(restore, preview bool) endpoint {
 			}
 			if storedDefinition {
 				if err := h.checkManagedLinkLifecycle(ctx, tx, d, row.currentDigest, restore, preview); err != nil {
+					return err
+				}
+			}
+			if writeLifecycle && !restore && row.status != next {
+				// A write invocation claims its durable record before a locking
+				// Metadata read. Holding this definition row through the
+				// impact check makes a later claim wait until disable commits.
+				if err := h.checkCallableExecution(ctx, p.TenantID, id, true); err != nil {
 					return err
 				}
 			}

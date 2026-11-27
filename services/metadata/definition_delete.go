@@ -104,7 +104,7 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 				}
 			}
 			if disabledCallable {
-				if err := h.checkCallableDeletionExecution(ctx, p.TenantID, id); err != nil {
+				if err := h.checkCallableExecution(ctx, p.TenantID, id, false); err != nil {
 					return err
 				}
 			}
@@ -152,7 +152,7 @@ func (h *handler) deleteDefinition(preview bool) endpoint {
 	}
 }
 
-func (h *handler) checkCallableDeletionExecution(ctx context.Context, tenant, id string) error {
+func (h *handler) checkCallableExecution(ctx context.Context, tenant, id string, requireWriteFence bool) error {
 	unavailable := problem(503, "execution_impact_unavailable", "无法复核未完成执行")
 	if h.cfg.ExecutionURL == "" || len(h.cfg.ServiceToken) < 32 {
 		return unavailable
@@ -173,8 +173,11 @@ func (h *handler) checkCallableDeletionExecution(ctx context.Context, tenant, id
 		return unavailable
 	}
 	defer response.Body.Close()
-	var impact struct{ Pending *bool }
-	if response.StatusCode != 200 || json.NewDecoder(http.MaxBytesReader(nil, response.Body, 1024)).Decode(&impact) != nil || impact.Pending == nil {
+	var impact struct {
+		Pending             *bool
+		WriteAdmissionFence bool
+	}
+	if response.StatusCode != 200 || json.NewDecoder(http.MaxBytesReader(nil, response.Body, 1024)).Decode(&impact) != nil || impact.Pending == nil || requireWriteFence && !impact.WriteAdmissionFence {
 		return unavailable
 	}
 	if *impact.Pending {

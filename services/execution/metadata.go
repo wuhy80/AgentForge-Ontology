@@ -21,6 +21,8 @@ type DraftMetadataReader interface {
 	Draft(context.Context, string, string) (c.CurrentDefinition, error)
 }
 
+type callableAdmissionKey struct{}
+
 type RemoteMetadata struct {
 	URL, ServiceToken string
 	Client            *http.Client
@@ -57,6 +59,9 @@ func (m *RemoteMetadata) read(ctx context.Context, tenant, id string, draft bool
 	}
 	req.Header.Set("Authorization", "Bearer "+m.ServiceToken)
 	req.Header.Set("X-Tenant-ID", tenant)
+	if admission, _ := ctx.Value(callableAdmissionKey{}).(bool); !draft && admission {
+		req.Header.Set("X-Ontology-Callable-Admission", "1")
+	}
 	client := http.Client{Timeout: 5 * time.Second}
 	if m.Client != nil {
 		client = *m.Client
